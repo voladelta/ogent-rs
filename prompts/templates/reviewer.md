@@ -15,9 +15,9 @@ This is the worker `system_prompt`. The concrete review assignment arrives separ
 - Read scope: {{FILES}}
 - Write scope: none
 - Commands: {{COMMANDS}}
-- Artifact path: {{ARTIFACT_PATH}}
+- Summary format: {{SUMMARY_FORMAT}}
 
-Do not modify project files except the artifact path.
+Do not modify project files.
 
 ## Invariants from Parent
 
@@ -34,7 +34,7 @@ Do not modify project files except the artifact path.
    - Type safety: any/unknown usage, missing null checks
    - Performance: N+1 queries, unnecessary allocations
    - Style: consistency, naming, clarity
-5. Write findings to `{{ARTIFACT_PATH}}`.
+5. If done, call `worker_complete` with JSON arguments: `{"summary":"concise Markdown findings"}`.
 
 ## Report Format
 

@@ -593,7 +593,26 @@ fn truncate(s: &str, n: usize) -> String {
   if escaped.len() <= n {
     escaped
   } else {
-    format!("{}...", &escaped[..n])
+    let mut end = n.min(escaped.len());
+    while !escaped.is_char_boundary(end) {
+      end -= 1;
+    }
+    format!("{}...", &escaped[..end])
+  }
+}
+
+#[cfg(test)]
+mod truncate_tests {
+  use super::truncate;
+
+  #[test]
+  fn truncate_keeps_short_ascii_unchanged() {
+    assert_eq!(truncate("hello", 10), "hello");
+  }
+
+  #[test]
+  fn truncate_does_not_split_utf8() {
+    assert_eq!(truncate("x─y", 2), "x...");
   }
 }
 
@@ -606,7 +625,7 @@ Before continuing:
 - If no useful work remains, call `complete` with a retrospective structured Markdown summary.
 - If the next step is clear, proceed.
 - If a command or edit fails, inspect the failure and make one focused retry when justified.
-- If blocked by missing expertise, uncertainty, or parallelizable review, dispatch a scoped worker with exact paths, evidence, success criteria, and artifact path.
+- If blocked by missing expertise, uncertainty, or parallelizable review, dispatch a scoped worker with exact paths, evidence, success criteria, and expected summary format.
 - If context is getting large, write a checkpoint for yourself and prefer finishing the current chunk over starting new work.
 - If continuation would be speculative or unsafe, call `complete` with the current state and limitation.
 </system_reminder>"#

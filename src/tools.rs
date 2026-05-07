@@ -61,13 +61,13 @@ pub fn configured_coder_tools(_steer: bool) -> Vec<Tool> {
     ),
     schema(
       "dispatch_worker",
-      "Hire a specialist coworker subprocess and return its report.",
-      json!({"type":"object","properties":{"system_prompt":{"type":"string"},"task":{"type":"string"},"artifact_path":{"type":"string"},"max_turns":{"type":"integer"}},"required":["system_prompt","task","artifact_path"],"additionalProperties":false}),
+      "Hire a specialist coworker. system_prompt shapes worker behavior/scope; task states the concrete assignment. The worker runs as a separate process and returns a Markdown summary.",
+      json!({"type":"object","properties":{"system_prompt":{"type":"string","description":"Complete behavior-shaping system prompt for the worker: role, permissions, read/write scope, constraints, commands, and summary format"},"task":{"type":"string","description":"Concrete task-shaping user prompt for the worker: exact assignment, expected output, success criteria, and immediate next step"},"max_turns":{"type":"integer","description":"Optional max turns for the worker (-1=unlimited). If omitted, worker has no turn limit."}},"required":["system_prompt","task"],"additionalProperties":false}),
     ),
     schema(
       "start_workers",
-      "Start a batch of specialist coworkers asynchronously.",
-      json!({"type":"object","properties":{"coworkers":{"type":"array","minItems":1,"items":{"type":"object","properties":{"name":{"type":"string"},"system_prompt":{"type":"string"},"task_prompt":{"type":"string"},"artifact_path":{"type":"string"},"max_turns":{"type":"integer"}},"required":["system_prompt","task_prompt"],"additionalProperties":false}}},"required":["coworkers"],"additionalProperties":false}),
+      "Start a batch of specialist coworkers asynchronously and return immediately with worker IDs.",
+      json!({"type":"object","properties":{"coworkers":{"type":"array","minItems":1,"items":{"type":"object","properties":{"name":{"type":"string","description":"Optional short unique label for status"},"system_prompt":{"type":"string","description":"Behavior-shaping system prompt: role, permissions, read/write scope, constraints, commands, and summary format"},"task_prompt":{"type":"string","description":"Concrete task prompt: assignment, expected output, success criteria, and immediate next step"},"max_turns":{"type":"integer","description":"Optional max turns for this worker. If omitted or <=0, worker has no turn limit."}},"required":["system_prompt","task_prompt"],"additionalProperties":false}}},"required":["coworkers"],"additionalProperties":false}),
     ),
     schema(
       "check_workers",
@@ -106,6 +106,7 @@ pub fn configured_worker_tools() -> Vec<Tool> {
     )
   });
   tools.push(schema("worker_question", "Ask the parent coder agent a question when blocked.", json!({"type":"object","properties":{"question":{"type":"string"}},"required":["question"],"additionalProperties":false})));
+  tools.push(schema("worker_complete", "Finish this worker subprocess and return a concise Markdown summary to the parent coder.", json!({"type":"object","properties":{"summary":{"type":"string","description":"Concise Markdown summary for the parent coder"}},"required":["summary"],"additionalProperties":false})));
   tools
 }
 

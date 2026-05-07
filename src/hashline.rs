@@ -58,6 +58,7 @@ fn fnv1a64(bytes: &[u8]) -> u64 {
 #[derive(Clone, Deserialize)]
 pub struct EditOp {
   pub anchor: String,
+  #[serde(default)]
   pub end_anchor: String,
   pub action: String,
   pub new_string: String,
@@ -212,5 +213,15 @@ mod tests {
   #[test]
   fn hashline_matches_go_fnv_prefix() {
     assert_eq!(render_hashlines("hello\n", 1, None, None), "1:a430|hello\n");
+  }
+
+  #[test]
+  fn edit_op_allows_missing_end_anchor_for_inserts() {
+    let op: EditOp = serde_json::from_str(
+      r#"{"anchor":"1:a430","action":"after","new_string":"world"}"#,
+    )
+    .expect("missing end_anchor should default to empty");
+
+    assert!(op.end_anchor.is_empty());
   }
 }

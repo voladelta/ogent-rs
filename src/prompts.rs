@@ -4,23 +4,7 @@ use std::path::PathBuf;
 
 pub const TENX_CODER_SYSTEM_PROMPT: &str = include_str!("../prompts/10x-coder.md");
 
-pub const WORKER_SUMMARY_PROMPT: &str = r#"
-
-## Worker Report Protocol
-
-Before returning, write a concise task summary to the artifact path. This is read by the parent agent.
-
-Include:
-- Summary: what you accomplished
-- Evidence: files inspected, commands run, results
-- Decisions: choices made
-- Blockers: anything needing parent input; omit if none
-- Files modified: list of files changed
-
-Rules:
-- Concise fragments are preferred.
-- If blocked, use worker_question tool instead of stopping silently.
-- Write your final report to the artifact path specified by the parent."#;
+pub const WORKER_SUMMARY_PROMPT: &str = "\n\n## Worker Report Protocol\n\nBefore returning, call `worker_complete` with JSON arguments:\n\n```json\n{\"summary\":\"concise Markdown summary for the parent coder\"}\n```\n\nInclude:\n- Summary: what you accomplished\n- Evidence: files inspected, commands run, results\n- Decisions: choices made\n- Blockers: anything needing parent input; omit if none\n- Files modified: list of files changed\n\nRules:\n- Concise fragments are preferred.\n- If blocked, use worker_question tool instead of stopping silently.\n- Return the report through `worker_complete({\"summary\":\"...\"})`.";
 
 pub fn skill_roots() -> Vec<PathBuf> {
   let mut dirs = vec![PathBuf::from(".ogent/skills"), PathBuf::from(".skills")];

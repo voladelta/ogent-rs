@@ -28,6 +28,7 @@ pub async fn execute_tool(mut ctx: ToolContext<'_>, name: &str, args: &str) -> R
     "check_workers" => check_workers(ctx.agent.as_deref_mut(), args).await,
     "question" => bail!("interactive mode required"),
     "worker_question" => worker_question(args),
+    "worker_complete" => worker_complete(ctx.agent.as_deref_mut(), args),
     "complete" => complete(ctx.agent.as_deref_mut(), args),
     _ => bail!("unknown tool: {name}"),
   }
@@ -408,7 +409,6 @@ fn load_skill(args: &str) -> Result<String> {
 struct DispatchWorkerArgs {
   system_prompt: String,
   task: String,
-  artifact_path: String,
   #[serde(default)]
   max_turns: i32,
 }
@@ -417,13 +417,9 @@ async fn dispatch_worker(args: &str) -> Result<String> {
   let args: DispatchWorkerArgs = parse_args(args)?;
   require_nonempty(&args.system_prompt, "system_prompt")?;
   require_nonempty(&args.task, "task")?;
-  require_nonempty(&args.artifact_path, "artifact_path")?;
-  crate::workers::validate_worker_artifact_path(&args.artifact_path)
-    .map_err(|e| anyhow::anyhow!("artifact_path: {e}"))?;
   let result = crate::workers::run_worker_process(crate::workers::WorkerProcessArgs {
     system_prompt: args.system_prompt,
     task_prompt: args.task,
-    artifact_path: args.artifact_path,
     max_turns: args.max_turns,
     stream_stderr: true,
   })
@@ -470,4 +466,14 @@ fn complete(agent: Option<&mut crate::agent::Agent>, args: &str) -> Result<Strin
   };
   agent.completion_summary = Some(args.summary.trim().to_string());
   Ok("Task marked complete.".to_string())
+}
+
+fn worker_complete(agent: Option<&mut crate::agent::Agent>, args: &str) -> Result<String> {
+  let args: CompleteArgs = parse_args(args)?;
+  require_nonempty(&args.summary, "summary")?;
+  let Some(agent) = agent else {
+    bail!("worker_complete requires an active agent");
+  };
+  agent.completion_summary = Some(args.summary.trim().to_string());
+  Ok("Worker marked complete.".to_string())
 }

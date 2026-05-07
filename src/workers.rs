@@ -1,7 +1,6 @@
 use anyhow::{Result, bail};
 use serde::Deserialize;
 use std::collections::HashSet;
-use std::path::Path;
 use std::sync::Arc;
 
 use tokio::process::Command;
@@ -13,7 +12,6 @@ use crate::prompts::WORKER_SUMMARY_PROMPT;
 pub struct WorkerProcessArgs {
   pub system_prompt: String,
   pub task_prompt: String,
-  pub artifact_path: String,
   pub max_turns: i32,
   pub stream_stderr: bool,
 }
@@ -31,8 +29,6 @@ pub struct AsyncCoworkerArgs {
   pub name: String,
   pub system_prompt: String,
   pub task_prompt: String,
-  #[serde(default)]
-  pub artifact_path: String,
   #[serde(default)]
   pub max_turns: i32,
 }
@@ -57,7 +53,6 @@ struct Worker {
   id: String,
   batch_id: String,
   name: String,
-  artifact_path: String,
   order: usize,
   done: tokio::task::JoinHandle<WorkerProcessResult>,
 }
@@ -93,15 +88,9 @@ impl WorkerManager {
       } else {
         coworker.name.trim().to_string()
       };
-      let artifact_path = if coworker.artifact_path.is_empty() {
-        format!(".ogent/workers/{batch_id}-{id}.md")
-      } else {
-        coworker.artifact_path.clone()
-      };
       let run_args = WorkerProcessArgs {
         system_prompt: coworker.system_prompt,
         task_prompt: coworker.task_prompt,
-        artifact_path: artifact_path.clone(),
         max_turns: coworker.max_turns,
         stream_stderr: false,
       };
@@ -111,18 +100,17 @@ impl WorkerManager {
         id: id.clone(),
         batch_id: batch_id.clone(),
         name: name.clone(),
-        artifact_path: artifact_path.clone(),
         order,
         done,
       });
-      started.push((id, name, artifact_path));
+      started.push((id, name));
     }
     let mut out = format!(
       "Started {} async coworker(s) in {batch_id}:\n",
       started.len()
     );
-    for (id, name, artifact) in started {
-      out.push_str(&format!("- {id} ({name}): report={artifact}\n"));
+    for (id, name) in started {
+      out.push_str(&format!("- {id} ({name})\n"));
     }
     Ok(out)
   }
@@ -139,15 +127,15 @@ impl WorkerManager {
     };
     let mut sorted = workers;
     sorted.sort_by_key(|w| w.order);
-    let mut out = format!("Async coworker reports ({}):\n", sorted.len());
+    let mut out = format!("Async coworker summaries ({})\n", sorted.len());
     for worker in sorted {
       let result = worker.done.await.unwrap_or_else(|e| WorkerProcessResult {
         err: Some(e.to_string()),
         ..Default::default()
       });
       out.push_str(&format!(
-        "\n## {} ({})\n- Batch: {}\n- Artifact: {}\n",
-        worker.id, worker.name, worker.batch_id, worker.artifact_path
+        "\n## {} ({})\n- Batch: {}\n",
+        worker.id, worker.name, worker.batch_id
       ));
       if let Some(err) = result.err {
         out.push_str(&format!("- Status: failed: {err}\n"));
@@ -156,11 +144,11 @@ impl WorkerManager {
         }
       } else if !result.report.is_empty() {
         out.push_str(&format!(
-          "- Status: completed\n\nReport:\n{}\n",
+          "- Status: completed\n\nSummary:\n{}\n",
           result.report
         ));
       } else {
-        out.push_str("- Status: completed without report file\n");
+        out.push_str("- Status: completed without summary\n");
         if !result.output.is_empty() {
           out.push_str(&format!("\nOutput:\n{}\n", result.output));
         }
@@ -173,7 +161,6 @@ impl WorkerManager {
   async fn insert_finished_for_test(
     &self,
     name: &str,
-    artifact_path: &str,
     result: WorkerProcessResult,
   ) {
     let mut inner = self.inner.lock().await;
@@ -187,7 +174,6 @@ impl WorkerManager {
       id,
       batch_id,
       name: name.to_string(),
-      artifact_path: artifact_path.to_string(),
       order,
       done,
     });
@@ -216,10 +202,7 @@ pub async fn run_worker_process(args: WorkerProcessArgs) -> WorkerProcessResult 
   if args.max_turns > 0 {
     cmd.arg(format!("--max-turns={}", args.max_turns));
   }
-  cmd.arg(task_prompt_with_artifact(
-    &args.task_prompt,
-    &args.artifact_path,
-  ));
+  cmd.arg(&args.task_prompt);
   cmd.current_dir(crate::workspace::workspace_root());
   cmd.stdin(std::process::Stdio::piped());
   cmd.stdout(std::process::Stdio::piped());
@@ -268,7 +251,10 @@ pub async fn run_worker_process(args: WorkerProcessArgs) -> WorkerProcessResult 
   let status = match child.wait().await {
     Ok(s) => s,
     Err(e) => {
+      let out = stdout_task.await.unwrap_or_default();
+      let err = stderr_task.await.unwrap_or_default();
       return WorkerProcessResult {
+        output: format!("{out}{err}").trim().to_string(),
         err: Some(e.to_string()),
         ..Default::default()
       };
@@ -277,34 +263,20 @@ pub async fn run_worker_process(args: WorkerProcessArgs) -> WorkerProcessResult 
 
   let out = stdout_task.await.unwrap_or_default();
   let err = stderr_task.await.unwrap_or_default();
-  let combined = format!("{out}{err}");
 
   if !status.success() {
+    let combined = format!("{out}{err}");
     return WorkerProcessResult {
-      output: combined,
+      output: combined.trim().to_string(),
       err: Some(status.to_string()),
       ..Default::default()
     };
   }
-  match tokio::fs::read_to_string(&args.artifact_path).await {
-    Ok(report) => WorkerProcessResult {
-      report,
-      output: combined,
-      err: None,
-    },
-    Err(e) => WorkerProcessResult {
-      output: combined,
-      err: Some(format!(
-        "worker completed but report not found at {}: {e}",
-        args.artifact_path
-      )),
-      report: String::new(),
-    },
+  WorkerProcessResult {
+    report: out.trim().to_string(),
+    output: err.trim().to_string(),
+    err: None,
   }
-}
-
-pub fn task_prompt_with_artifact(task_prompt: &str, artifact_path: &str) -> String {
-  format!("{}\n\nArtifact path: {artifact_path}", task_prompt.trim())
 }
 
 pub fn format_dispatch_worker_result(result: WorkerProcessResult) -> Result<String> {
@@ -316,11 +288,11 @@ pub fn format_dispatch_worker_result(result: WorkerProcessResult) -> Result<Stri
   }
   if result.report.is_empty() {
     return Ok(format!(
-      "Worker completed (no report file) but produced output:\n\n{}",
+      "Worker completed without summary. Output:\n\n{}",
       result.output
     ));
   }
-  Ok(format!("Worker completed. Report:\n\n{}", result.report))
+  Ok(format!("Worker completed. Summary:\n\n{}", result.report))
 }
 
 pub fn validate_start_workers_args(args: &StartWorkersArgs) -> Result<()> {
@@ -339,28 +311,6 @@ pub fn validate_start_workers_args(args: &StartWorkersArgs) -> Result<()> {
     if !name.is_empty() && !seen.insert(name.to_string()) {
       bail!("duplicate coworker name: {name}");
     }
-    if !c.artifact_path.is_empty() {
-      validate_worker_artifact_path(&c.artifact_path)
-        .map_err(|e| anyhow::anyhow!("coworkers[{i}].artifact_path: {e}"))?;
-    }
-  }
-  Ok(())
-}
-
-pub fn validate_worker_artifact_path(path: &str) -> Result<()> {
-  let p = Path::new(path);
-  if p.is_absolute() {
-    bail!("absolute paths are not allowed");
-  }
-  if p
-    .components()
-    .any(|c| matches!(c, std::path::Component::ParentDir))
-  {
-    bail!("path traversal is not allowed");
-  }
-  let clean = p.components().collect::<std::path::PathBuf>();
-  if clean.as_os_str().is_empty() || clean == Path::new(".") {
-    bail!("path traversal is not allowed");
   }
   Ok(())
 }
@@ -368,17 +318,6 @@ pub fn validate_worker_artifact_path(path: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
   use super::*;
-
-  #[test]
-  fn validate_worker_artifact_path_rejects_absolute_paths() {
-    assert!(validate_worker_artifact_path("/tmp/report.md").is_err());
-  }
-
-  #[test]
-  fn validate_worker_artifact_path_rejects_traversal() {
-    assert!(validate_worker_artifact_path("../report.md").is_err());
-    assert!(validate_worker_artifact_path("a/../report.md").is_err());
-  }
 
   #[test]
   fn start_workers_rejects_empty_coworker_list() {
@@ -393,14 +332,12 @@ mod tests {
           name: "a".into(),
           system_prompt: "s".into(),
           task_prompt: "t".into(),
-          artifact_path: String::new(),
           max_turns: 0,
         },
         AsyncCoworkerArgs {
           name: "a".into(),
           system_prompt: "s".into(),
           task_prompt: "t".into(),
-          artifact_path: String::new(),
           max_turns: 0,
         },
       ],
@@ -414,7 +351,6 @@ mod tests {
     manager
       .insert_finished_for_test(
         "alpha",
-        ".ogent/workers/alpha.md",
         WorkerProcessResult {
           report: "report body".into(),
           ..Default::default()

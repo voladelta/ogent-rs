@@ -44,7 +44,7 @@ User prompt
 Need specialist? -> dispatch_worker / start_workers
     |
     v
-Worker subprocess -> report artifact
+Worker subprocess -> worker_complete({summary})
     |
     v
 10x Coder reads report -> integrate -> continue or finalize
@@ -54,10 +54,127 @@ The 10x coder is the default mode. It reads files, writes code, runs tests, debu
 
 Workers run as child `ogent --worker` processes with a custom system prompt and task supplied by the parent agent.
 
+## 10x Coder
+
+The 10x coder works in **phases**, writing short in-session checkpoints and hiring specialist coworkers when needed.
+
+### Checkpoints
+
+At meaningful in-session boundaries, the agent may write a short `<checkpoint>` note for its own context management:
+
+```xml
+<checkpoint>
+- Evidence: ...
+- State: ...
+- Decisions: ...
+- Risks: ...
+- Next: ...
+</checkpoint>
+```
+
+Checkpoints help preserve working state across phase changes, delegation, compaction, and handoff. They are model-facing context notes only: runtime code does not parse them, save them as durable memory, or load them on future runs.
+
+### Skills
+
+Skills are loaded from:
+
+- `.ogent/skills/<name>/SKILL.md`
+- `.skills/<name>/SKILL.md`
+- `~/.ogent/skills/<name>/SKILL.md`
+
+At startup, available skills are discovered and listed in the user message. The agent can call `load_skill` to inject a skill body into the next turn.
+
+The `colgrep` and `codectx` skills are preloaded: if their `SKILL.md` files exist in a skill root, ogent auto-injects their full body into the initial user message after the skills list. This gives the 10x coder semantic code search and repo context instructions without spending a turn on `load_skill`.
+
+Install the search CLIs you want the agent to use for efficient codebase discovery:
+
+```bash
+# macOS
+brew install ripgrep ast-grep
+
+# Install colgrep separately if you use semantic repo search.
+brew install lightonai/tap/colgrep
+
+# Then add its skill file:
+mkdir -p ~/.ogent/skills/colgrep
+$EDITOR ~/.ogent/skills/colgrep/SKILL.md
+```
+
+Recommended search behavior:
+- `colgrep` for intent-based code search, system exploration, and symbol discovery.
+- `rg` for exact text and regex matching.
+- `ast-grep` for syntax-aware structural search.
+
+### Hiring coworkers
+
+The 10x coder uses `dispatch_worker` when:
+- The task has parallel independent work streams
+- A specialist perspective is needed (security review, docs, tests)
+- The task is large enough that splitting context helps
+
+**Golden rule:** Give the worker JUST ENOUGH context — but it must be the RIGHT context. A worker without file paths or commands will fail silently.
+
+**Worker prompt templates** in `prompts/templates/` (`generic`, `tester`, `reviewer`) are starting points for the worker `system_prompt`. The 10x coder customizes one of them for the worker's role, scope, constraints, and summary format, then puts the concrete assignment in the separate `task` argument. All `{{PLACEHOLDERS}}` must be filled before dispatch.
+
+**Dispatch checklist:**
+- [ ] You actually need a worker (prefer direct action for <3 turns of work)
+- [ ] `system_prompt` defines role, allowed tools/actions, read/write scope, constraints, commands, and summary format
+- [ ] `task` states the exact assignment, expected output, success criteria, and immediate next step
+- [ ] All file paths are exact relative paths
+- [ ] Commands are exact and copied into the worker scope
+- [ ] Invariants/constraints from the current checkpoint or task context are included
+
+The worker runs in isolation with your prompt. When done, it calls `worker_complete` with a structured Markdown summary. That summary is returned to the parent coder. You decide what to do next.
+
+### Question tool (turn 1 only)
+
+The `question` tool is available **only on the first turn** of the 10x coder for initial requirement clarification. After turn 1, the agent makes decisions autonomously. Workers cannot ask the human directly; they use `worker_question` to ask the parent coder when blocked.
+
+## Creating skills
+
+Skills are **domain knowledge packages** stored as `.ogent/skills/<name>/SKILL.md`:
+
+```
+.ogent/skills/
+├── rust-refactor/
+│   └── SKILL.md          # Rust refactoring procedures
+├── string-utils/
+│   └── SKILL.md          # Rust string utility patterns
+└── ...                   # User-created skills
+```
+
+Each `SKILL.md` has YAML frontmatter (`name`, `description`) and Markdown instructions. The description helps the agent decide when to apply the skill. The full body is loaded only when triggered (progressive disclosure).
+
+```bash
+mkdir -p .ogent/skills/my-skill
+cat > .ogent/skills/my-skill/SKILL.md << 'EOF'
+---
+name: my-skill
+description: What this skill does and when to use it.
+---
+
+## Brief
+Compressed procedure.
+
+## Context
+What to assume.
+
+## Constraints
+Hard limits.
+
+## Procedure
+1. Step one
+2. Step two
+
+## Verification
+How to confirm success.
+EOF
+```
+
 ## Profiles
 
 | Profile | Backend | Model | Key env | Context | Max output | Thinking |
-|---|---|---|---|---:|---:|---|
+|---|---|---|---|---|---|---|
 | `ds-flash` | DeepSeek | `deepseek-v4-flash` | `DEEPSEEK_API_KEY` | 1M | 393216 | `thinking:{type:enabled}` + `reasoning_effort=high` |
 | `ds-flash-max` | DeepSeek | `deepseek-v4-flash` | `DEEPSEEK_API_KEY` | 1M | 393216 | `thinking:{type:enabled}` + `reasoning_effort=max` |
 | `ds-pro` *(default)* | DeepSeek | `deepseek-v4-pro` | `DEEPSEEK_API_KEY` | 1M | 393216 | `thinking:{type:enabled}` + `reasoning_effort=high` |
@@ -92,6 +209,113 @@ Common options:
 | `--worker` | Internal worker mode. Reads system prompt from stdin |
 
 Non-steer mode requires a prompt unless `--continue` is used.
+
+## Tools
+
+| Tool | Description |
+|---|---|
+| `read_file` | Read a workspace file or allowed config file such as `~/.ogent` (1 MB max). Optional `start`/`end` line range (0-indexed, inclusive/exclusive) |
+| `write_file` | Write a new file; creates parent directories. Existing files require `overwrite_existing=true`; prefer `edit_hash_anchors` for normal edits |
+| `read_hash_anchors` | Read workspace files with `line:hash\|content` prefixes for anchored editing. Optional `start`/`end` line range (0-indexed, inclusive/exclusive) |
+| `edit_hash_anchors` | Anchored edits via an `ops` array. Batch multiple edits to the same file in one call so anchors are resolved against one snapshot |
+| `bash` | Run a shell command in the workspace; returns combined stdout/stderr. Default timeout: 120s; max timeout: 600s |
+| `repo_map` | Display a tree map of the workspace or allowed config roots such as `~/.ogent`. Use instead of `bash` with `ls`/`eza` |
+| `question` | Ask the user for clarification. **Only available on turn 1 of the 10x coder.** Workers use `worker_question` to ask the parent coder |
+| `web_search` | Search the web via Exa; returns titles, URLs, and highlights |
+| `web_read` | Read page content from URLs via Exa; returns full text as markdown |
+| `code_web_context` | Semantic code search across the web (GitHub, docs, Stack Overflow) |
+| `load_skill` | Load a skill from `.ogent/skills/`, `.skills/`, or `~/.ogent/skills/` and inject its content |
+| `dispatch_worker` | Hire a specialist coworker. system_prompt shapes worker behavior/scope; task states the concrete assignment. The worker runs as a separate process and returns a Markdown summary |
+| `start_workers` | Start a batch of specialist coworkers asynchronously and return worker IDs immediately |
+| `check_workers` | Wait for active async coworkers, collect their summaries/errors, and clear the batch |
+| `handoff` | Write a session handoff brief under `.ogent/handoffs/` |
+| `complete` | Finish the run with a structured Markdown session summary |
+
+Web tools require `EXA_API_KEY`.
+
+Workers use the same toolset except `dispatch_worker`, `start_workers`, `check_workers`, `handoff`, `complete`, and `question`. Instead, workers have `worker_question` to ask the parent 10x coder when blocked and `worker_complete` to return their final Markdown summary.
+
+Tool calls are evaluated in order. Contiguous read-only calls (`read_file`, `read_hash_anchors`, `repo_map`, web tools, `load_skill`) may run in parallel. Mutating or blocking calls (`write_file`, `edit_hash_anchors`, `bash`, workers, `handoff`, questions) act as barriers and run serially.
+
+## Hashline Editing
+
+Read a file to get stable anchors, then edit by line reference:
+
+```text
+read_hash_anchors({"path":"src/main.rs"})
+```
+
+Output format:
+
+```text
+1:5502|fn main() {
+2:cbf2|  println!("hello");
+3:9a8b|}
+```
+
+Then edit using an `ops` array of `line:hash` anchors. Prefer one `edit_hash_anchors` call per file with all intended edits. This is safer and cheaper: anchors are validated against the same file snapshot, then edits are applied bottom-to-top in one write so earlier edits do not shift later anchors.
+
+After any write or edit to a file, all previous anchors for that file are stale. Re-read `read_hash_anchors` before making another edit call to the same file.
+
+Each op supports:
+
+- `action="replace"` with `anchor` for one line
+- `action="replace"` with `anchor` and `end_anchor` for a range
+- `action="before"` with `anchor` to insert before a line
+- `action="after"` with `anchor` to insert after a line
+
+Example:
+
+```text
+edit_hash_anchors(
+  path="src/main.rs",
+  ops=[
+    {"anchor":"10:abc1","action":"before","new_string":"// header"},
+    {"anchor":"20:def2","action":"replace","new_string":"updated"},
+    {"anchor":"30:9a8b","end_anchor":"34:cc02","action":"replace","new_string":"replacement block"}
+  ]
+)
+```
+
+Hash is FNV-1a 64-bit truncated to 4 hex chars.
+
+## Retry Behavior
+
+`--retry=5` is the default. Transient API errors retry with linear backoff (`1s, 2s, 3s...`).
+
+HTTP `429 Rate Limit` is terminal and is not retried.
+
+## Session Persistence
+
+After each run, the full conversation is written to `.ogent/sessions/*.jsonl`.
+
+Worker sessions include `worker` in the filename.
+
+When the coder calls `complete`, its structured Markdown summary is appended to `.ogent/journal.md`. Journal entries are retrospective experience notes, not instructions loaded into future runs.
+
+Handoffs are written to `.ogent/handoffs/*.md`. Continue from the newest handoff:
+
+```bash
+cargo run -- --continue
+```
+
+## Turn Limits
+
+```bash
+cargo run -- --max-turns 20 "Add auth middleware"
+```
+
+`--max-turns=-1` is unlimited.
+
+Worker limits can be set by the parent agent through the `max_turns` field in `dispatch_worker` or async worker specs.
+
+## Token Reporting
+
+After each run, prompt/completion/total tokens are reported:
+
+```
+tokens: prompt=4057 completion=625 total=4682
+```
 
 ## Steer Mode
 
@@ -132,131 +356,6 @@ cargo run -- --steer
 ```
 
 When a steering message arrives during an LLM stream, the agent cancels the in-flight request, preserves any partial assistant content/tool calls already accumulated, appends your message, and starts the next turn.
-
-## Checkpoints
-
-At meaningful in-session boundaries, the agent may write a short `<checkpoint>` note for its own context management:
-
-```xml
-<checkpoint>
-- Evidence: ...
-- State: ...
-- Decisions: ...
-- Risks: ...
-- Next: ...
-</checkpoint>
-```
-
-Checkpoints help preserve working state across phase changes, delegation, compaction, and handoff. They are model-facing context notes only: runtime code does not parse them, save them as durable memory, or load them on future runs.
-
-## Skills
-
-Skills are loaded from:
-
-- `.ogent/skills/<name>/SKILL.md`
-- `.skills/<name>/SKILL.md`
-- `~/.ogent/skills/<name>/SKILL.md`
-
-At startup, available skills are discovered and listed in the user message. The agent can call `load_skill` to inject a skill body into the next turn.
-
-The `colgrep` skill is special-cased: if found, its full body is auto-injected into the initial user message so the agent has semantic code search instructions immediately.
-
-Recommended search tools for agent workflows:
-
-```bash
-brew install ripgrep ast-grep
-brew install lightonai/tap/colgrep
-```
-
-## Tools
-
-| Tool | Description |
-|---|---|
-| `read_file` | Read a workspace file or allowed config file, with optional line range |
-| `write_file` | Write a new file; existing files require explicit overwrite |
-| `read_hash_anchors` | Read lines as `line:hash|content` anchors |
-| `edit_hash_anchors` | Apply anchored edits after validating hashes |
-| `bash` | Run a shell command in the workspace |
-| `repo_map` | Show a repository tree map |
-| `web_search` | Search the web through Exa. Requires `EXA_API_KEY` |
-| `web_read` | Read web pages through Exa. Requires `EXA_API_KEY` |
-| `code_web_context` | Retrieve code-oriented web context through Exa. Requires `EXA_API_KEY` |
-| `load_skill` | Load a skill body from a skill root |
-| `dispatch_worker` | Run one specialist worker subprocess and return its report |
-| `start_workers` | Start a batch of async workers |
-| `check_workers` | Wait for active async workers and collect reports |
-| `handoff` | Write a session handoff under `.ogent/handoffs/` |
-| `complete` | Finish the run with a structured Markdown session summary |
-| `question` | First-turn clarification signal; the current loop exits cleanly when it is called |
-
-Workers receive a reduced toolset: no worker dispatch, async worker management, handoff, or question tool. They receive `worker_question` for reporting blockers to the parent.
-
-Read-only tool calls can be processed in parallel. Mutating, blocking, or worker-related calls are serialized.
-
-## Hashline Editing
-
-Read anchors:
-
-```text
-read_hash_anchors({"path":"src/main.rs"})
-```
-
-Output format:
-
-```text
-1:5502|fn main() {
-2:cbf2|  println!("hello");
-3:9a8b|}
-```
-
-Edit with anchors:
-
-```text
-edit_hash_anchors({
-  "path": "src/main.rs",
-  "ops": [
-    {
-      "anchor": "2:cbf2",
-      "action": "replace",
-      "new_string": "  println!(\"hello, agent\");"
-    }
-  ]
-})
-```
-
-The hash is FNV-1a 64-bit truncated to 4 hex characters. `edit_hash_anchors` recomputes hashes against the current file snapshot. If any anchor is stale, the whole batch is rejected.
-
-After a successful edit, old anchors for that file are stale. Re-read before editing the same file again.
-
-## Retry Behavior
-
-`--retry=5` is the default. Transient API errors retry with linear backoff.
-
-HTTP `429 Rate Limit` is terminal and is not retried.
-
-## Session Persistence
-
-After each run, the full conversation is written to `.ogent/sessions/*.jsonl`.
-
-Worker sessions include `worker` in the filename.
-
-When the coder calls `complete`, its structured Markdown summary is appended to `.ogent/journal.md`. Journal entries are retrospective experience notes, not instructions loaded into future runs.
-
-Handoffs are written to `.ogent/handoffs/*.md`. Continue from the newest handoff:
-
-```bash
-cargo run -- --continue
-```
-
-## Turn Limits
-
-```bash
-cargo run -- --max-turns 20 "Add auth middleware"
-```
-
-`--max-turns=-1` is unlimited.
-
-Worker limits can be set by the parent agent through the `max_turns` field in `dispatch_worker` or async worker specs.
 
 ## Architecture
 

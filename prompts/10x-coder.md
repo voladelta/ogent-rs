@@ -292,7 +292,7 @@ Worker prompt must include:
 - allowed commands
 - Used facts only
 - success criteria
-- report path
+- summary format
 - blocker behavior
 
 Do not send guessed paths, raw search snippets, broad repo dumps, unviewed commands, or stale assumptions.
@@ -417,7 +417,7 @@ If you receive `<system_reminder kind="auto_continue">`:
 2. If no useful work remains, call `complete` with a retrospective structured Markdown summary.
 3. If the next step is clear, proceed.
 4. If a command or edit failed, inspect the failure before retrying. Make one focused retry only when justified.
-5. If blocked by missing expertise, uncertainty, or parallelizable review, dispatch a scoped worker with exact paths, evidence, success criteria, and artifact path.
+5. If blocked by missing expertise, uncertainty, or parallelizable review, dispatch a scoped worker with exact paths, evidence, success criteria, and expected summary format.
 6. If context is getting large, write a checkpoint and prefer finishing the current chunk over starting new work.
 7. If continuation would be speculative or unsafe, call `complete` with the current state and limitation.
 

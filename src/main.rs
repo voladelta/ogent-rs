@@ -106,6 +106,12 @@ async fn main() -> Result<()> {
       &format!("<skill name=\"{name}\" root=\"{root}\">\n{body}\n</skill>"),
     );
   }
+  if let Ok((name, root, body)) = prompts::load_skill_content("codectx") {
+    append_to_last_user_message(
+      &mut messages,
+      &format!("<skill name=\"{name}\" root=\"{root}\">\n{body}\n</skill>"),
+    );
+  }
   let cwd_msg = current_working_directory_reminder();
   if !cwd_msg.is_empty() {
     append_to_last_user_message(&mut messages, &cwd_msg);
@@ -123,7 +129,11 @@ async fn main() -> Result<()> {
     agent.run_loop(args.max_turns, true, true).await?
   };
   session::persist_session(&final_messages, args.worker, &session_id)?;
-  if !args.worker {
+  if args.worker {
+    if let Some(summary) = agent.completion_summary.as_deref() {
+      print!("{summary}");
+    }
+  } else {
     if let Some(summary) = agent.completion_summary.as_deref() {
       session::append_journal(&session_id, summary)?;
     }
@@ -177,7 +187,7 @@ fn append_to_last_user_message(messages: &mut Vec<Message>, content: &str) {
 
 fn current_working_directory_reminder() -> String {
   std::env::current_dir().map_or(String::new(), |cwd| format!(
-    "<system_reminder kind=\"file_state\">\nmacOS: Tahoe 26.3\nCurrent working directory: {}\n</system_reminder>",
+    "<system_reminder kind=\"file_state\">\nmacOS: Tahoe 26.3\nCurrent working directory: {}\n\n*Note*: `cd` outside the workspace is not allowed; run commands in the current working directory.\n</system_reminder>",
     cwd.display()
   ))
 }
