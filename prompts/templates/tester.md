@@ -47,9 +47,6 @@ Do not modify production files. Only create or edit test files clearly required 
 ### Suggestions
 <improvements>
 
-<memento>
-- State: <what you tested>
-- Decisions: <what you checked>
-- Blockers: <none or list>
-</memento>
+### Work Summary
+<what you tested, what you checked, blockers if any>
 ```

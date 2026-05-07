@@ -4,21 +4,21 @@ use std::path::PathBuf;
 
 pub const TENX_CODER_SYSTEM_PROMPT: &str = include_str!("../prompts/10x-coder.md");
 
-pub const WORKER_MEMENTO_PROMPT: &str = r#"
+pub const WORKER_SUMMARY_PROMPT: &str = r#"
 
-## Checkpoint Protocol
+## Worker Report Protocol
 
-Before returning, emit a <memento> block summarizing your work. This is read by the parent agent.
+Before returning, write a concise task summary to the artifact path. This is read by the parent agent.
 
-<memento>
-- State: (what you accomplished)
-- Decisions: (choices made)
-- Blockers: (anything that needs parent input — omit if none)
-- Files modified: (list of files changed)
-</memento>
+Include:
+- Summary: what you accomplished
+- Evidence: files inspected, commands run, results
+- Decisions: choices made
+- Blockers: anything needing parent input; omit if none
+- Files modified: list of files changed
 
 Rules:
-- Caveman style. No prose. Fragments only.
+- Concise fragments are preferred.
 - If blocked, use worker_question tool instead of stopping silently.
 - Write your final report to the artifact path specified by the parent."#;
 

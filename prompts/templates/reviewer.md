@@ -49,9 +49,6 @@ Do not modify project files except the artifact path.
 |----------|------|------|-------|------------|
 | ...      | ...  | ...  | ...   | ...        |
 
-<memento>
-- State: <what you reviewed>
-- Decisions: <key findings>
-- Blockers: <none or list>
-</memento>
+### Work Summary
+<what you reviewed, key findings, blockers if any>
 ```

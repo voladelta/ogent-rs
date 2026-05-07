@@ -41,9 +41,6 @@ User prompt
 10x Coder (read -> plan -> act -> checkpoint)
     |
     v
-Memento emitted? -> auto-continue next phase
-    |
-    v
 Need specialist? -> dispatch_worker / start_workers
     |
     v
@@ -135,20 +132,21 @@ cargo run -- --steer
 
 When a steering message arrives during an LLM stream, the agent cancels the in-flight request, preserves any partial assistant content/tool calls already accumulated, appends your message, and starts the next turn.
 
-## Memento Protocol
+## Checkpoints
 
-At meaningful boundaries, the agent may emit a `<memento>` block:
+At meaningful in-session boundaries, the agent may write a short `<checkpoint>` note for its own context management:
 
 ```xml
-<memento>
-- Invariants: ...
+<checkpoint>
+- Evidence: ...
 - State: ...
 - Decisions: ...
+- Risks: ...
 - Next: ...
-</memento>
+</checkpoint>
 ```
 
-Mementos are saved under `.ogent/mementos/` and loaded on future runs. If a memento has a `Next` step that is not done, the parent loop can auto-continue.
+Checkpoints help preserve working state across phase changes, delegation, compaction, and handoff. They are model-facing context notes only: runtime code does not parse them, save them as durable memory, or load them on future runs.
 
 ## Skills
 
@@ -272,7 +270,7 @@ Worker limits can be set by the parent agent through the `max_turns` field in `d
 | File | Purpose |
 |---|---|
 | `src/main.rs` | CLI entry point, profile selection, session setup, loop selection |
-| `src/agent.rs` | Standard loop, steer loop, turn handling, mementos, compaction |
+| `src/agent.rs` | Standard loop, steer loop, turn handling, compaction |
 | `src/client.rs` | HTTP streaming client and retry behavior |
 | `src/providers.rs` | DeepSeek, Kimi, and Z/GLM request builders |
 | `src/profiles.rs` | Named model profiles |
@@ -283,7 +281,7 @@ Worker limits can be set by the parent agent through the `max_turns` field in `d
 | `src/workers.rs` | Worker subprocess execution and async worker manager |
 | `src/hashline.rs` | Hash anchors and validated anchored edits |
 | `src/prompts.rs` | Embedded prompts, skill discovery, skill loading |
-| `src/session.rs` | Sessions, mementos, handoffs, timestamps |
+| `src/session.rs` | Sessions, handoffs, timestamps |
 | `src/tui.rs` | Ratatui/Crossterm steering UI |
 | `src/workspace.rs` | Workspace path validation and readable path rules |
 
@@ -304,12 +302,12 @@ agent.rs
     |
     +--> workers.rs -> child ogent --worker
     |
-    +--> session.rs -> .ogent/sessions, .ogent/mementos, .ogent/handoffs
+    +--> session.rs -> .ogent/sessions, .ogent/handoffs
 ```
 
 ### Agent Loops
 
-`run_loop` is the standard non-steer loop used by the parent coder and workers. It processes assistant responses, executes tools, handles memento auto-continuation, checks workers, and repeats until the model returns a final response or the turn limit is reached.
+`run_loop` is the standard non-steer loop used by the parent coder and workers. It processes assistant responses, executes tools, checks workers, handles handoffs/compaction, and repeats until the model returns a final response or the turn limit is reached.
 
 `steer_loop` is the interactive loop used by `--steer`. It starts `tui::start`, receives `SteerEvent`s from the UI, cancels in-flight requests when needed, preserves partial responses, and applies user steering messages as new turns.
 

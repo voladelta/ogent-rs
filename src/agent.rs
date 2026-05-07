@@ -95,7 +95,7 @@ impl Agent {
         self.total_prompt + self.total_completion
       );
       let resp = self.client.chat(&self.messages, &self.tools, None).await?;
-      let mut has_more = match self.handle_turn_response(resp, auto_continue).await {
+      let mut has_more = match self.handle_turn_response(resp).await {
         Ok(hm) => hm,
         Err(e) if e.is::<InteractiveRequiredError>() => return Ok(self.messages.clone()),
         Err(e) => return Err(e),
@@ -249,7 +249,7 @@ impl Agent {
       };
 
       let mut has_more = self
-        .handle_turn_response_with_log(resp, auto_continue, Some(&tui.log))
+        .handle_turn_response_with_log(resp, Some(&tui.log))
         .await?;
       if self
         .finish_turn(&mut has_more, auto_continue, Some(&tui.log))
@@ -300,7 +300,7 @@ impl Agent {
       if auto_continue && !self.compact.compacting {
         self.messages.push(Message {
           role: "user".into(),
-          content: "Please continue.".into(),
+          content: auto_continue_reminder(),
           ..Default::default()
         });
       }
@@ -341,20 +341,13 @@ impl Agent {
     Ok(false)
   }
 
-  async fn handle_turn_response(
-    &mut self,
-    resp: ChatResponse,
-    auto_continue: bool,
-  ) -> Result<bool> {
-    self
-      .handle_turn_response_with_log(resp, auto_continue, None)
-      .await
+  async fn handle_turn_response(&mut self, resp: ChatResponse) -> Result<bool> {
+    self.handle_turn_response_with_log(resp, None).await
   }
 
   async fn handle_turn_response_with_log(
     &mut self,
     resp: ChatResponse,
-    auto_continue: bool,
     ui_log: Option<&crate::tui::UiLog>,
   ) -> Result<bool> {
     self.total_prompt += resp.usage.prompt_tokens;
@@ -378,22 +371,12 @@ impl Agent {
     }
 
     if resp.tool_calls.is_empty() {
-      let memento = extract_memento(&resp.content);
-      if !memento.is_empty() {
-        crate::session::save_memento_to_file(&memento);
-      }
       self.messages.push(Message {
         role: "assistant".into(),
         content: resp.content.clone(),
         reasoning_content: resp.reasoning_content,
         ..Default::default()
       });
-      if auto_continue && should_auto_continue(&resp.content) && !self.compact.compacting {
-        if ui_log.is_none() {
-          eprintln!("[memento] next: {}", memento_next(&memento));
-        }
-        return Ok(true);
-      }
       if ui_log.is_none() {
         print!("{}", resp.content);
         self.report_tokens();
@@ -410,10 +393,6 @@ impl Agent {
         eprintln!("tool: {}({})", r.name, truncate(&r.args, 120));
         eprintln!("  => {}", truncate(&r.output, 200));
       }
-    }
-    let memento = extract_memento(&resp.content);
-    if !memento.is_empty() {
-      crate::session::save_memento_to_file(&memento);
     }
     Ok(true)
   }
@@ -520,13 +499,13 @@ impl Agent {
     let pct = total * 100 / self.compact.context_limit;
     let body = match self.compact.urgency {
       1 => format!(
-        "Context budget at {pct}%.\nComplete your current chunk, but do NOT start new work.\nIf you are between tasks, call `handoff` now."
+        "Context budget at {pct}%.\nFinish the current chunk. Do not start unrelated work.\nIf useful state may be lost, write a checkpoint before continuing.\nIf between chunks, call `handoff`."
       ),
       2 => format!(
-        "Context budget at {pct}%.\nYou are approaching the limit.\nHand off as soon as possible: finish what you must, then call `handoff`."
+        "Context budget at {pct}%.\nApproaching the limit. Finish only critical in-progress work.\nWrite a checkpoint if it will preserve important state, then call `handoff` as soon as possible."
       ),
       _ => format!(
-        "Context budget at {pct}%.\nEXHAUSTED.\nYou may NOT write any more files or start new work.\nCall `handoff` IMMEDIATELY with completed files, current state, and next steps."
+        "Context budget at {pct}%.\nEXHAUSTED.\nDo not write more files or start new work.\nCall `handoff` IMMEDIATELY with completed files, current state, verification state, blockers, and next steps."
       ),
     };
     self.messages.push(Message {
@@ -594,32 +573,17 @@ fn truncate(s: &str, n: usize) -> String {
   }
 }
 
-fn extract_memento(content: &str) -> String {
-  let Some(start) = content.find("<memento>") else {
-    return String::new();
-  };
-  let Some(end) = content[start..].find("</memento>") else {
-    return String::new();
-  };
-  content[start + "<memento>".len()..start + end]
-    .trim()
+fn auto_continue_reminder() -> String {
+  r#"<system_reminder kind="auto_continue">
+Auto mode is enabled. Continue only if useful work remains.
+
+Before continuing:
+- Re-check the current goal, latest tool results, worker status, and context budget.
+- If the next step is clear, proceed.
+- If a command or edit fails, inspect the failure and make one focused retry when justified.
+- If blocked by missing expertise, uncertainty, or parallelizable review, dispatch a scoped worker with exact paths, evidence, success criteria, and artifact path.
+- If context is getting large, write a checkpoint for yourself and prefer finishing the current chunk over starting new work.
+- If continuation would be speculative or unsafe, stop and report the current state.
+</system_reminder>"#
     .to_string()
-}
-
-fn memento_next(memento: &str) -> String {
-  for line in memento.lines().map(str::trim) {
-    if let Some(rest) = line
-      .strip_prefix("- Next:")
-      .or_else(|| line.strip_prefix("Next:"))
-    {
-      return rest.trim().to_string();
-    }
-  }
-  String::new()
-}
-
-fn should_auto_continue(content: &str) -> bool {
-  let m = extract_memento(content);
-  let next = memento_next(&m);
-  !next.is_empty() && !next.eq_ignore_ascii_case("done")
 }

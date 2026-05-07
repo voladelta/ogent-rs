@@ -7,7 +7,7 @@ use std::sync::Arc;
 use tokio::process::Command;
 use tokio::sync::Mutex;
 
-use crate::prompts::WORKER_MEMENTO_PROMPT;
+use crate::prompts::WORKER_SUMMARY_PROMPT;
 
 #[derive(Debug, Clone)]
 pub struct WorkerProcessArgs {
@@ -234,7 +234,7 @@ pub async fn run_worker_process(args: WorkerProcessArgs) -> WorkerProcessResult 
     }
   };
   if let Some(mut stdin) = child.stdin.take() {
-    let prompt = args.system_prompt + WORKER_MEMENTO_PROMPT;
+    let prompt = args.system_prompt + WORKER_SUMMARY_PROMPT;
     tokio::spawn(async move {
       use tokio::io::AsyncWriteExt;
       let _ = stdin.write_all(prompt.as_bytes()).await;

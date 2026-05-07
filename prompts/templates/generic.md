@@ -25,5 +25,5 @@ Do not modify files outside write scope. If write scope is `none`, do not write 
 2. If a command needs to run, use the exact command provided in `Commands`.
 3. **Directory listings: use `repo_map` instead of `bash` with `ls` or `eza`.**
 4. Use `worker_question` if blocked. Do not guess.
-5. Before finishing, emit exactly one `<memento>` block with your findings.
+5. Before finishing, write a concise task summary to `{{ARTIFACT_PATH}}`.
 6. Write your report to `{{ARTIFACT_PATH}}`.

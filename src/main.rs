@@ -81,13 +81,8 @@ async fn main() -> Result<()> {
       .ok_or_else(|| anyhow::anyhow!("no handoff found"))?;
     eprintln!("[continue] resuming from {path}");
     let data = tokio::fs::read_to_string(&path).await.unwrap_or_default();
-    let mut content = format!("## Previous Session Handoff\n\n{data}");
-    let mementos = session::load_mementos();
-    if !mementos.is_empty() {
-      content.push_str("\n\n");
-      content.push_str(&mementos);
-    }
-    content.push_str("\n\nPlease continue from this handoff and these mementos.");
+    let content =
+      format!("## Previous Session Handoff\n\n{data}\n\nPlease continue from this handoff.");
     let mut messages = build_10x_coder_messages("");
     messages.push(Message {
       role: "user".into(),
@@ -100,11 +95,7 @@ async fn main() -> Result<()> {
       bail!("usage: ogent [--profile ...] [--steer] <prompt>");
     }
     let prompt = args.prompt.join(" ");
-    let mut messages = build_10x_coder_messages(&prompt);
-    let mementos = session::load_mementos();
-    if !mementos.is_empty() {
-      messages.push(Message { role: "user".into(), content: format!("{mementos}\n\nPlease proceed with the task above, using these previous mementos for context."), ..Default::default() });
-    }
+    let messages = build_10x_coder_messages(&prompt);
     (messages, tools::configured_coder_tools(args.steer))
   };
 
