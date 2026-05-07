@@ -85,6 +85,11 @@ pub fn configured_coder_tools(_steer: bool) -> Vec<Tool> {
       json!({"type":"object","properties":{"name":{"type":"string"}},"required":["name"],"additionalProperties":false}),
     ),
     schema(
+      "complete",
+      "Mark the current task complete and provide a retrospective structured Markdown session summary.",
+      json!({"type":"object","properties":{"summary":{"type":"string"}},"required":["summary"],"additionalProperties":false}),
+    ),
+    schema(
       "question",
       "Ask the user a question. Only available on the first turn.",
       json!({"type":"object","properties":{"question":{"type":"string"}},"required":["question"],"additionalProperties":false}),
@@ -97,7 +102,7 @@ pub fn configured_worker_tools() -> Vec<Tool> {
   tools.retain(|t| {
     !matches!(
       t.function.name.as_str(),
-      "dispatch_worker" | "start_workers" | "check_workers" | "handoff" | "question"
+      "dispatch_worker" | "start_workers" | "check_workers" | "handoff" | "complete" | "question"
     )
   });
   tools.push(schema("worker_question", "Ask the parent coder agent a question when blocked.", json!({"type":"object","properties":{"question":{"type":"string"}},"required":["question"],"additionalProperties":false})));

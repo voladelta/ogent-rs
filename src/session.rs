@@ -1,5 +1,6 @@
 use anyhow::Result;
-use std::fs;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
 
 use crate::types::Message;
 
@@ -19,6 +20,28 @@ pub fn persist_session(messages: &[Message], worker: bool, session_id: &str) -> 
     out.push('\n');
   }
   fs::write(path, out)?;
+  Ok(())
+}
+
+pub fn append_journal(session_id: &str, summary: &str) -> Result<()> {
+  if summary.trim().is_empty() {
+    return Ok(());
+  }
+  fs::create_dir_all(".ogent")?;
+  let timestamp = timestamp();
+  let mut file = OpenOptions::new()
+    .create(true)
+    .append(true)
+    .open(".ogent/journal.md")?;
+  writeln!(file, "## Session {timestamp}")?;
+  writeln!(file)?;
+  writeln!(file, "- Timestamp: {timestamp}")?;
+  writeln!(file, "- Session: {session_id}")?;
+  writeln!(file)?;
+  writeln!(file, "{}", summary.trim())?;
+  writeln!(file)?;
+  writeln!(file, "---")?;
+  writeln!(file)?;
   Ok(())
 }
 

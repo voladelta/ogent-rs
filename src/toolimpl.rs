@@ -28,6 +28,7 @@ pub async fn execute_tool(mut ctx: ToolContext<'_>, name: &str, args: &str) -> R
     "check_workers" => check_workers(ctx.agent.as_deref_mut(), args).await,
     "question" => bail!("interactive mode required"),
     "worker_question" => worker_question(args),
+    "complete" => complete(ctx.agent.as_deref_mut(), args),
     _ => bail!("unknown tool: {name}"),
   }
 }
@@ -454,4 +455,19 @@ struct QuestionArgs {
 fn worker_question(args: &str) -> Result<String> {
   let args: QuestionArgs = parse_args(args)?;
   Ok(format!("[BLOCKER] Worker asks: {}", args.question))
+}
+
+#[derive(Deserialize)]
+struct CompleteArgs {
+  summary: String,
+}
+
+fn complete(agent: Option<&mut crate::agent::Agent>, args: &str) -> Result<String> {
+  let args: CompleteArgs = parse_args(args)?;
+  require_nonempty(&args.summary, "summary")?;
+  let Some(agent) = agent else {
+    bail!("complete requires an active agent");
+  };
+  agent.completion_summary = Some(args.summary.trim().to_string());
+  Ok("Task marked complete.".to_string())
 }

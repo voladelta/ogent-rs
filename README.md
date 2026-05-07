@@ -113,6 +113,7 @@ Supported commands:
 |---|---|
 | `/auto` | Enable auto-continuation |
 | `/stop` | Disable auto-continuation after the current turn |
+| `/complete` | Ask the agent to summarize the session, call `complete`, save the journal entry, and exit |
 | `/cancel` | Cancel the in-flight model request |
 | `/q`, `/quit`, `quit`, `exit`, `Esc`, `Ctrl-C` | Exit steer mode |
 | any other text | Abort the in-flight model request, append the text as a new user message, and re-prompt |
@@ -185,6 +186,7 @@ brew install lightonai/tap/colgrep
 | `start_workers` | Start a batch of async workers |
 | `check_workers` | Wait for active async workers and collect reports |
 | `handoff` | Write a session handoff under `.ogent/handoffs/` |
+| `complete` | Finish the run with a structured Markdown session summary |
 | `question` | First-turn clarification signal; the current loop exits cleanly when it is called |
 
 Workers receive a reduced toolset: no worker dispatch, async worker management, handoff, or question tool. They receive `worker_question` for reporting blockers to the parent.
@@ -237,6 +239,8 @@ HTTP `429 Rate Limit` is terminal and is not retried.
 After each run, the full conversation is written to `.ogent/sessions/*.jsonl`.
 
 Worker sessions include `worker` in the filename.
+
+When the coder calls `complete`, its structured Markdown summary is appended to `.ogent/journal.md`. Journal entries are retrospective experience notes, not instructions loaded into future runs.
 
 Handoffs are written to `.ogent/handoffs/*.md`. Continue from the newest handoff:
 

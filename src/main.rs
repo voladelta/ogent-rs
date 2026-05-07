@@ -123,6 +123,11 @@ async fn main() -> Result<()> {
     agent.run_loop(args.max_turns, true, true).await?
   };
   session::persist_session(&final_messages, args.worker, &session_id)?;
+  if !args.worker {
+    if let Some(summary) = agent.completion_summary.as_deref() {
+      session::append_journal(&session_id, summary)?;
+    }
+  }
   Ok(())
 }
 

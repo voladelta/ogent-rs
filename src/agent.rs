@@ -52,6 +52,7 @@ pub struct Agent {
   pub total_prompt: i32,
   pub total_completion: i32,
   pub compact: CompactState,
+  pub completion_summary: Option<String>,
 }
 
 pub struct ToolResult {
@@ -75,6 +76,7 @@ impl Agent {
       total_prompt: 0,
       total_completion: 0,
       compact,
+      completion_summary: None,
     }
   }
 
@@ -120,7 +122,9 @@ impl Agent {
     mut tui: TuiHandle,
     mut wait_for_input: bool,
   ) -> Result<Vec<Message>> {
-    tui.log.push("[steer] commands: /auto /stop /cancel /q");
+    tui
+      .log
+      .push("[steer] commands: /auto /stop /complete /cancel /q");
     if wait_for_input {
       tui.log.push("[steer] waiting for your first message");
     }
@@ -192,6 +196,10 @@ impl Agent {
               SteerEvent::Message(content) => {
                 cancel.cancel();
                 steer_msg = Some(content);
+              }
+              SteerEvent::Complete => {
+                cancel.cancel();
+                steer_msg = Some(manual_complete_reminder());
               }
               SteerEvent::Exit => {
                 cancel.cancel();
@@ -279,6 +287,9 @@ impl Agent {
       }
       *has_more = true;
     }
+    if self.completion_summary.is_some() {
+      return Ok(true);
+    }
     if let Some(msg) = self.worker_manager.status_message().await {
       if let Some(log) = ui_log {
         self.messages.push(Message {
@@ -335,6 +346,15 @@ impl Agent {
       }
       SteerEvent::Cancel => {
         tui.log.push("[steer] no in-flight request to cancel");
+      }
+      SteerEvent::Complete => {
+        let content = manual_complete_reminder();
+        self.messages.push(Message {
+          role: "user".into(),
+          content: content.clone(),
+          ..Default::default()
+        });
+        tui.log.push("[steer] complete requested");
       }
       SteerEvent::Exit => return Ok(true),
     }
@@ -413,6 +433,7 @@ impl Agent {
       if !is_read_only_tool(&resp.tool_calls[i].function.name) {
         let output = self.run_tool_call(&resp.tool_calls[i]).await;
         let is_interactive = output == "ERROR: interactive mode required";
+        let completed = self.completion_summary.is_some();
         results.push(ToolResult {
           name: resp.tool_calls[i].function.name.clone(),
           args: resp.tool_calls[i].function.arguments.clone(),
@@ -420,6 +441,9 @@ impl Agent {
         });
         if is_interactive {
           return Err(InteractiveRequiredError.into());
+        }
+        if completed {
+          break;
         }
         i += 1;
         continue;
@@ -579,11 +603,26 @@ Auto mode is enabled. Continue only if useful work remains.
 
 Before continuing:
 - Re-check the current goal, latest tool results, worker status, and context budget.
+- If no useful work remains, call `complete` with a retrospective structured Markdown summary.
 - If the next step is clear, proceed.
 - If a command or edit fails, inspect the failure and make one focused retry when justified.
 - If blocked by missing expertise, uncertainty, or parallelizable review, dispatch a scoped worker with exact paths, evidence, success criteria, and artifact path.
 - If context is getting large, write a checkpoint for yourself and prefer finishing the current chunk over starting new work.
-- If continuation would be speculative or unsafe, stop and report the current state.
+- If continuation would be speculative or unsafe, call `complete` with the current state and limitation.
+</system_reminder>"#
+    .to_string()
+}
+
+fn manual_complete_reminder() -> String {
+  r#"<system_reminder kind="manual_complete">
+The user requested completion from steer mode.
+
+Summarize the current session retrospectively and call `complete` with structured Markdown:
+- task summary
+- what changed / what you did
+- what you learned
+- what to do better next time
+- optional evidence: files touched, tests run, git head
 </system_reminder>"#
     .to_string()
 }
