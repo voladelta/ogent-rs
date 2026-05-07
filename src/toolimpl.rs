@@ -131,7 +131,7 @@ async fn bash(args: &str) -> Result<String> {
         String::from_utf8_lossy(&out.stderr)
       );
       if !out.status.success() {
-        bail!("exit err: {}", out.status);
+        bail!("exit err: {}\n{}", out.status, combined);
       }
       Ok(combined)
     }
@@ -150,6 +150,23 @@ fn validate_bash_command(command: &str) -> Result<()> {
     }
   }
   Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[tokio::test]
+  async fn bash_error_includes_stdout_and_stderr() {
+    let err = bash(r#"{"command":"printf stdout; printf stderr >&2; exit 7"}"#)
+      .await
+      .expect_err("command should fail");
+    let msg = err.to_string();
+
+    assert!(msg.contains("exit status: 7"));
+    assert!(msg.contains("stdout"));
+    assert!(msg.contains("stderr"));
+  }
 }
 
 #[derive(Deserialize)]
@@ -438,5 +455,3 @@ fn worker_question(args: &str) -> Result<String> {
   let args: QuestionArgs = parse_args(args)?;
   Ok(format!("[BLOCKER] Worker asks: {}", args.question))
 }
-
-

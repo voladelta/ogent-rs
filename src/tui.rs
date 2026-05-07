@@ -42,7 +42,11 @@ pub struct UiLog {
 
 impl UiLog {
   pub fn push(&self, line: impl Into<String>) {
-    self.lines.lock().expect("ui log poisoned").push(line.into());
+    self
+      .lines
+      .lock()
+      .expect("ui log poisoned")
+      .push(line.into());
   }
 
   pub fn push_assistant_markdown(&self, content: &str) {
@@ -371,7 +375,11 @@ fn draw(
 }
 
 fn max_scroll(log: &UiLog, log_width: u16, log_height: u16) -> usize {
-  let lines: Vec<Line> = log.snapshot().iter().map(|line| render_log_line(line)).collect();
+  let lines: Vec<Line> = log
+    .snapshot()
+    .iter()
+    .map(|line| render_log_line(line))
+    .collect();
   let paragraph = Paragraph::new(lines).wrap(Wrap { trim: true });
   let total_wrapped = paragraph.line_count(log_width.max(1));
   total_wrapped.saturating_sub(log_height as usize)

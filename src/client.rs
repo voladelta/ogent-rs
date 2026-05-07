@@ -58,7 +58,12 @@ impl Client {
     cancel: Option<&tokio_util::sync::CancellationToken>,
   ) -> Result<ChatResponse> {
     if cancel.map(|c| c.is_cancelled()).unwrap_or(false) {
-      return Err(crate::types::ChatAbortedError { resp: ChatResponse::default() }.into());
+      return Err(
+        crate::types::ChatAbortedError {
+          resp: ChatResponse::default(),
+        }
+        .into(),
+      );
     }
     let resp = self
       .http

@@ -174,9 +174,8 @@ impl Agent {
       let messages = self.messages.clone();
       let tools = self.tools.clone();
       let chat_cancel = cancel.clone();
-      let mut chat = tokio::spawn(async move {
-        client.chat(&messages, &tools, Some(&chat_cancel)).await
-      });
+      let mut chat =
+        tokio::spawn(async move { client.chat(&messages, &tools, Some(&chat_cancel)).await });
       let mut cancelled_turn = false;
       let mut steer_msg: Option<String> = None;
 
@@ -214,7 +213,10 @@ impl Agent {
         Ok(Err(e)) => {
           if let Some(aborted) = e.downcast_ref::<crate::types::ChatAbortedError>() {
             let resp = aborted.resp.clone();
-            if !resp.content.is_empty() || !resp.reasoning_content.is_empty() || !resp.tool_calls.is_empty() {
+            if !resp.content.is_empty()
+              || !resp.reasoning_content.is_empty()
+              || !resp.tool_calls.is_empty()
+            {
               self.total_prompt += resp.usage.prompt_tokens;
               self.total_completion += resp.usage.completion_tokens;
               self.messages.push(Message {
@@ -230,7 +232,11 @@ impl Agent {
               continue;
             }
             if let Some(msg) = steer_msg {
-              self.messages.push(Message { role: "user".into(), content: msg.clone(), ..Default::default() });
+              self.messages.push(Message {
+                role: "user".into(),
+                content: msg.clone(),
+                ..Default::default()
+              });
               tui.log.push(format!("[steer] {}", truncate(&msg, 200)));
               turn += 1;
               continue;
@@ -245,7 +251,10 @@ impl Agent {
       let mut has_more = self
         .handle_turn_response_with_log(resp, auto_continue, Some(&tui.log))
         .await?;
-      if self.finish_turn(&mut has_more, auto_continue, Some(&tui.log)).await? {
+      if self
+        .finish_turn(&mut has_more, auto_continue, Some(&tui.log))
+        .await?
+      {
         return Ok(self.messages.clone());
       }
       if !has_more && !auto_continue {
@@ -337,7 +346,9 @@ impl Agent {
     resp: ChatResponse,
     auto_continue: bool,
   ) -> Result<bool> {
-    self.handle_turn_response_with_log(resp, auto_continue, None).await
+    self
+      .handle_turn_response_with_log(resp, auto_continue, None)
+      .await
   }
 
   async fn handle_turn_response_with_log(
@@ -445,13 +456,7 @@ impl Agent {
         let name = tc.function.name.clone();
         let args = tc.function.arguments.clone();
         async move {
-          let output = match execute_tool(
-            ToolContext { agent: None },
-            &name,
-            &args,
-          )
-          .await
-          {
+          let output = match execute_tool(ToolContext { agent: None }, &name, &args).await {
             Ok(out) => out,
             Err(e) if e.to_string() == "interactive mode required" => {
               "ERROR: interactive mode required".to_string()
