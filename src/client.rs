@@ -1,4 +1,3 @@
-use anyhow::{Context, Result, bail};
 use serde_json::Value;
 use std::sync::Arc;
 use tokio::time::{Duration, sleep};
@@ -9,8 +8,18 @@ use crate::types::{ChatResponse, Message, Tool};
 pub type BuildReq = Arc<dyn Fn(&[Message], &[Tool]) -> Value + Send + Sync>;
 
 #[derive(Debug, thiserror::Error)]
-#[error("rate limited (429): {body}")]
-struct RateLimited { body: String }
+pub enum ClientError {
+  #[error("chat aborted by context cancellation")]
+  Aborted { resp: ChatResponse },
+  #[error("rate limited (429): {body}")]
+  RateLimited { body: String },
+  #[error("api error {status}: {body}")]
+  ApiError { status: u16, body: String },
+  #[error("http request failed")]
+  Http(#[source] reqwest::Error),
+  #[error("sse error")]
+  Sse(#[from] crate::sse::SseError),
+}
 
 #[derive(Clone)]
 pub struct Client {
@@ -40,7 +49,7 @@ impl Client {
     messages: &[Message],
     tools: &[Tool],
     cancel: Option<&tokio_util::sync::CancellationToken>,
-  ) -> Result<ChatResponse> {
+  ) -> Result<ChatResponse, ClientError> {
     let req_body = (self.build_req)(messages, tools);
     let mut last_err = None;
     for attempt in 0..=self.max_retries {
@@ -49,7 +58,7 @@ impl Client {
       }
       match self.chat_once(&req_body, cancel).await {
         Ok(resp) => return Ok(resp),
-        Err(err) if err.downcast_ref::<RateLimited>().is_some() => return Err(err),
+        Err(err @ ClientError::RateLimited { .. }) => return Err(err),
         Err(err) => last_err = Some(err),
       }
     }
@@ -60,14 +69,11 @@ impl Client {
     &self,
     req_body: &Value,
     cancel: Option<&tokio_util::sync::CancellationToken>,
-  ) -> Result<ChatResponse> {
+  ) -> Result<ChatResponse, ClientError> {
     if cancel.is_some_and(tokio_util::sync::CancellationToken::is_cancelled) {
-      return Err(
-        crate::types::ChatAbortedError {
-          resp: ChatResponse::default(),
-        }
-        .into(),
-      );
+      return Err(ClientError::Aborted {
+        resp: ChatResponse::default(),
+      });
     }
     let resp = self
       .http
@@ -76,15 +82,20 @@ impl Client {
       .json(req_body)
       .send()
       .await
-      .context("http")?;
+      .map_err(ClientError::Http)?;
     if !resp.status().is_success() {
       let status = resp.status();
       let body = resp.text().await.unwrap_or_default();
       if status.as_u16() == 429 {
-        return Err(RateLimited { body: body.trim().to_string() }.into());
+        return Err(ClientError::RateLimited {
+          body: body.trim().to_string(),
+        });
       }
-      bail!("api {}: {}", status.as_u16(), body.trim());
+      return Err(ClientError::ApiError {
+        status: status.as_u16(),
+        body: body.trim().to_string(),
+      });
     }
-    parse_sse_response(resp, cancel).await
+    parse_sse_response(resp, cancel).await.map_err(Into::into)
   }
 }

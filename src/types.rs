@@ -62,15 +62,4 @@ pub struct ChatResponse {
   pub usage: Usage,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct ChatAbortedError {
-  pub resp: ChatResponse,
-}
 
-impl std::fmt::Display for ChatAbortedError {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    write!(f, "chat aborted by context cancellation")
-  }
-}
-
-impl std::error::Error for ChatAbortedError {}

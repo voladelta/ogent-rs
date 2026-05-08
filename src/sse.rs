@@ -1,4 +1,3 @@
-use anyhow::{Context, Result};
 use futures_util::StreamExt;
 use serde::Deserialize;
 
@@ -45,6 +44,14 @@ struct DeltaFunctionCall {
   arguments: String,
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum SseError {
+  #[error("chat aborted by context cancellation")]
+  Aborted { resp: ChatResponse },
+  #[error("sse stream read failed")]
+  Read(#[source] reqwest::Error),
+}
+
 #[derive(Default)]
 struct AccToolCall {
   id: String,
@@ -77,7 +84,7 @@ fn flush_tool_calls(acc: &mut Vec<AccToolCall>, result: &mut ChatResponse) {
 pub async fn parse_sse_response(
   resp: reqwest::Response,
   cancel: Option<&tokio_util::sync::CancellationToken>,
-) -> Result<ChatResponse> {
+) -> Result<ChatResponse, SseError> {
   let mut result = ChatResponse::default();
   let mut acc: Vec<AccToolCall> = Vec::new();
   let mut stream = resp.bytes_stream();
@@ -87,9 +94,9 @@ pub async fn parse_sse_response(
   while let Some(item) = stream.next().await {
     if cancel.is_some_and(tokio_util::sync::CancellationToken::is_cancelled) {
       flush_tool_calls(&mut acc, &mut result);
-      return Err(crate::types::ChatAbortedError { resp: result }.into());
+      return Err(SseError::Aborted { resp: result });
     }
-    let bytes = item.context("read sse")?;
+    let bytes = item.map_err(SseError::Read)?;
     buf.push_str(&String::from_utf8_lossy(&bytes));
     while let Some(pos) = buf[consumed..].find('\n') {
       let abs_pos = consumed + pos;

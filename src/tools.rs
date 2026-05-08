@@ -1,4 +1,4 @@
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use std::sync::OnceLock;
 use serde_json::{Value, json};
 
@@ -176,7 +176,7 @@ pub fn is_read_only_tool(name: &str) -> bool {
 }
 
 pub fn parse_args<T: serde::de::DeserializeOwned>(args: &str) -> Result<T> {
-  serde_json::from_str(args).map_err(|e| anyhow::anyhow!("bad args: {e}"))
+  serde_json::from_str(args).context("bad args")
 }
 
 pub fn require_nonempty(value: &str, name: &str) -> Result<()> {

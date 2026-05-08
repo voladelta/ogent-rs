@@ -1,4 +1,4 @@
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 use std::fmt::Write;
 
@@ -69,7 +69,7 @@ pub fn apply_anchor_edits(source: &str, ops: &[EditOp]) -> Result<String> {
   let lines = source_lines(source);
   let mut edits = Vec::with_capacity(ops.len());
   for (i, op) in ops.iter().enumerate() {
-    edits.push(resolve_edit(&lines, op).map_err(|e| anyhow::anyhow!("op[{i}]: {e}"))?);
+    edits.push(resolve_edit(&lines, op).with_context(|| format!("op[{i}]"))?);
   }
   let result = apply_resolved(lines, edits)?;
   let mut out = result.join("\n");
@@ -130,10 +130,10 @@ fn resolve_edit(lines: &[String], op: &EditOp) -> Result<ResolvedEdit> {
 fn parse_anchor(value: &str) -> Result<Anchor<'_>> {
   let (line, hash) = value
     .split_once(':')
-    .ok_or_else(|| anyhow::anyhow!("invalid anchor, expected line:hash: {value}"))?;
+    .with_context(|| format!("invalid anchor, expected line:hash: {value}"))?;
   let line: usize = line
     .parse()
-    .map_err(|_| anyhow::anyhow!("invalid anchor line number: {value}"))?;
+    .with_context(|| format!("invalid anchor line number: {value}"))?;
   if line == 0 || hash.len() != 4 {
     bail!("invalid anchor: {value}");
   }

@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -78,7 +78,7 @@ pub fn load_session(path: &str) -> Result<Vec<Message>> {
     .filter(|l| !l.trim().is_empty())
     .map(|line| {
       serde_json::from_str(line)
-        .map_err(|e| anyhow::anyhow!("parse error in session file: {e}"))
+        .context("parse error in session file")
     })
     .collect()
 }

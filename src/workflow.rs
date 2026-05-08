@@ -19,6 +19,20 @@ pub struct PhaseDef {
   pub max_visits: Option<u32>,
 }
 
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum WorkflowError {
+  #[error("current phase '{0}' not in workflow graph")]
+  UnknownCurrentPhase(String),
+  #[error("Invalid transition: '{from}' -> '{to}'. Allowed next from '{from}': {allowed:?}")]
+  InvalidTransition {
+    from: String,
+    to: String,
+    allowed: Vec<String>,
+  },
+  #[error("phase '{phase}' would exceed max_visits ({visits}/{max})")]
+  MaxVisitsExceeded { phase: String, visits: u32, max: u32 },
+}
+
 #[derive(Debug, Clone)]
 pub struct WorkflowState {
   pub definition: Workflow,
@@ -35,16 +49,17 @@ impl WorkflowState {
     }
   }
 
-  pub fn transition_to(&mut self, phase: &str) -> Result<(), String> {
+  pub fn transition_to(&mut self, phase: &str) -> Result<(), WorkflowError> {
     // Validate transition from current phase
     if let Some(ref current) = self.current_phase {
       let def = self.definition.phases.get(current)
-        .ok_or_else(|| format!("Current phase '{}' not in workflow graph", current))?;
+        .ok_or_else(|| WorkflowError::UnknownCurrentPhase(current.clone()))?;
       if !def.next.is_empty() && !def.next.contains(&phase.to_string()) {
-        return Err(format!(
-          "Invalid transition: '{}' -> '{}'. Allowed next from '{}': {:?}",
-          current, phase, current, def.next
-        ));
+        return Err(WorkflowError::InvalidTransition {
+          from: current.clone(),
+          to: phase.to_string(),
+          allowed: def.next.clone(),
+        });
       }
     }
 
@@ -53,10 +68,11 @@ impl WorkflowState {
       && let Some(max) = def.max_visits {
         let visits = self.visits.get(phase).unwrap_or(&0) + 1;
         if visits > max {
-          return Err(format!(
-            "Phase '{}' would exceed max_visits ({}/{}). Choose a different phase.",
-            phase, visits, max
-          ));
+          return Err(WorkflowError::MaxVisitsExceeded {
+            phase: phase.to_string(),
+            visits,
+            max,
+          });
         }
       }
 
@@ -117,10 +133,10 @@ mod tests {
     let mut ws = WorkflowState::new(test_workflow());
     ws.transition_to("plan").unwrap();
     let err = ws.transition_to("done").unwrap_err();
-    assert!(err.contains("Invalid transition"));
-    assert!(err.contains("plan"));
-    assert!(err.contains("done"));
-    assert!(err.contains("implement"));
+    assert!(err.to_string().contains("Invalid transition"));
+    assert!(err.to_string().contains("plan"));
+    assert!(err.to_string().contains("done"));
+    assert!(err.to_string().contains("implement"));
   }
 
   #[test]
@@ -131,8 +147,8 @@ mod tests {
     ws.transition_to("loop").unwrap(); // visit 2
     ws.transition_to("verify").unwrap();
     let err = ws.transition_to("loop").unwrap_err();
-    assert!(err.contains("max_visits"));
-    assert!(err.contains("3/2"));
+    assert!(err.to_string().contains("max_visits"));
+    assert!(err.to_string().contains("3/2"));
   }
 
   #[test]

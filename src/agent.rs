@@ -1,6 +1,4 @@
-use anyhow::Result;
-
-use crate::client::Client;
+use crate::client::{Client, ClientError};
 use crate::task_tracker::{TaskTracker, is_tracking_tool_name};
 use crate::tools::{ToolContext, execute_tool, is_read_only_tool, remove_question};
 use crate::tui::{SteerEvent, TuiHandle};
@@ -8,8 +6,14 @@ use crate::types::{ChatResponse, Message, Tool, ToolCall};
 use crate::workers::WorkerManager;
 
 #[derive(Debug, thiserror::Error)]
-#[error("interactive mode required")]
-struct InteractiveRequiredError;
+pub enum AgentError {
+  #[error("interactive mode required")]
+  InteractiveRequired,
+  #[error("client error")]
+  Client(#[from] ClientError),
+  #[error(transparent)]
+  Other(#[from] anyhow::Error),
+}
 
 #[derive(Debug, Clone)]
 pub struct CompactState {
@@ -110,7 +114,7 @@ impl Agent {
     max_turns: i32,
     question_available_on_first_turn: bool,
     auto_continue: bool,
-  ) -> Result<Vec<Message>> {
+  ) -> Result<Vec<Message>, AgentError> {
     let mut turn = 1;
     loop {
       if max_turns > 0 && turn > max_turns {
@@ -127,7 +131,7 @@ impl Agent {
       let resp = self.client.chat(&self.messages, &self.tools, None).await?;
       let mut has_more = match self.handle_turn_response(resp).await {
         Ok(hm) => hm,
-        Err(e) if e.is::<InteractiveRequiredError>() => return Ok(self.messages.clone()),
+        Err(AgentError::InteractiveRequired) => return Ok(self.messages.clone()),
         Err(e) => return Err(e),
       };
       if self
@@ -152,7 +156,7 @@ impl Agent {
     mut auto_continue: bool,
     mut tui: TuiHandle,
     mut wait_for_input: bool,
-  ) -> Result<Vec<Message>> {
+  ) -> Result<Vec<Message>, AgentError> {
     tui
       .log
       .push("[steer] commands: /auto /stop /complete /cancel /q");
@@ -251,42 +255,39 @@ impl Agent {
 
       let resp = match chat_result {
         Ok(Ok(resp)) => resp,
-        Ok(Err(e)) => {
-          if let Some(aborted) = e.downcast_ref::<crate::types::ChatAbortedError>() {
-            let resp = aborted.resp.clone();
-            if !resp.content.is_empty()
-              || !resp.reasoning_content.is_empty()
-              || !resp.tool_calls.is_empty()
-            {
-              self.total_prompt += resp.usage.prompt_tokens;
-              self.total_completion += resp.usage.completion_tokens;
-              self.messages.push(Message {
-                role: "assistant".into(),
-                content: resp.content.clone(),
-                reasoning_content: resp.reasoning_content.clone(),
-                tool_calls: resp.tool_calls.clone(),
-                ..Default::default()
-              });
-            }
-            if cancelled_turn {
-              wait_for_input = true;
-              continue;
-            }
-            if let Some(msg) = steer_msg {
-              self.messages.push(Message {
-                role: "user".into(),
-                content: msg.clone(),
-                ..Default::default()
-              });
-              tui.log.push(format!("[steer] {}", truncate(&msg, 200)));
-              turn += 1;
-              continue;
-            }
-            return Ok(self.messages.clone());
+        Ok(Err(ClientError::Aborted { resp })) => {
+          if !resp.content.is_empty()
+            || !resp.reasoning_content.is_empty()
+            || !resp.tool_calls.is_empty()
+          {
+            self.total_prompt += resp.usage.prompt_tokens;
+            self.total_completion += resp.usage.completion_tokens;
+            self.messages.push(Message {
+              role: "assistant".into(),
+              content: resp.content.clone(),
+              reasoning_content: resp.reasoning_content.clone(),
+              tool_calls: resp.tool_calls.clone(),
+              ..Default::default()
+            });
           }
-          return Err(e);
+          if cancelled_turn {
+            wait_for_input = true;
+            continue;
+          }
+          if let Some(msg) = steer_msg {
+            self.messages.push(Message {
+              role: "user".into(),
+              content: msg.clone(),
+              ..Default::default()
+            });
+            tui.log.push(format!("[steer] {}", truncate(&msg, 200)));
+            turn += 1;
+            continue;
+          }
+          return Ok(self.messages.clone());
         }
-        Err(join_err) => return Err(join_err.into()),
+        Ok(Err(e)) => return Err(AgentError::Client(e)),
+        Err(join_err) => return Err(AgentError::Other(join_err.into())),
       };
 
       let mut has_more = self
@@ -321,7 +322,7 @@ impl Agent {
     ui_log: Option<&crate::tui::UiLog>,
     max_turns: i32,
     turn: i32,
-  ) -> Result<bool> {
+  ) -> Result<bool, AgentError> {
     if !self.compact.last_handoff_path.is_empty() {
       if self.handle_handoff().await? {
         return Ok(true);
@@ -370,7 +371,7 @@ impl Agent {
     event: SteerEvent,
     auto_continue: &mut bool,
     tui: &TuiHandle,
-  ) -> Result<bool> {
+  ) -> Result<bool, AgentError> {
     match event {
       SteerEvent::Message(content) => {
         self.messages.push(Message {
@@ -407,7 +408,7 @@ impl Agent {
     Ok(false)
   }
 
-  async fn handle_turn_response(&mut self, resp: ChatResponse) -> Result<bool> {
+  async fn handle_turn_response(&mut self, resp: ChatResponse) -> Result<bool, AgentError> {
     self.handle_turn_response_with_log(resp, None).await
   }
 
@@ -415,7 +416,7 @@ impl Agent {
     &mut self,
     resp: ChatResponse,
     ui_log: Option<&crate::tui::UiLog>,
-  ) -> Result<bool> {
+  ) -> Result<bool, AgentError> {
     self.total_prompt += resp.usage.prompt_tokens;
     self.total_completion += resp.usage.completion_tokens;
     if !resp.reasoning_content.is_empty() {
@@ -463,7 +464,7 @@ impl Agent {
     Ok(true)
   }
 
-  async fn process_tool_calls(&mut self, resp: &ChatResponse) -> Result<Vec<ToolResult>> {
+  async fn process_tool_calls(&mut self, resp: &ChatResponse) -> Result<Vec<ToolResult>, AgentError> {
     self.messages.push(Message {
       role: "assistant".into(),
       content: resp.content.clone(),
@@ -492,7 +493,7 @@ impl Agent {
         output,
       });
       if is_interactive {
-        return Err(InteractiveRequiredError.into());
+        return Err(AgentError::InteractiveRequired);
       }
       if self.completion_summary.is_some() {
         break;
@@ -565,7 +566,7 @@ impl Agent {
     });
   }
 
-  async fn handle_handoff(&mut self) -> Result<bool> {
+  async fn handle_handoff(&mut self) -> Result<bool, AgentError> {
     let path = std::mem::take(&mut self.compact.last_handoff_path);
     if self.compact.exit_after {
       eprintln!("\nHandoff written to {path}");
@@ -664,7 +665,7 @@ impl Agent {
 
 const INTERACTIVE_ERR: &str = "ERROR: interactive mode required";
 
-fn format_tool_result(result: Result<String>) -> (String, bool) {
+fn format_tool_result(result: anyhow::Result<String>) -> (String, bool) {
   match result {
     Ok(out) => (out, false),
     Err(e) if e.to_string() == "interactive mode required" => {
@@ -674,7 +675,7 @@ fn format_tool_result(result: Result<String>) -> (String, bool) {
   }
 }
 
-async fn run_read_only_batch(batch: &[&ToolCall]) -> anyhow::Result<Vec<ToolResult>> {
+async fn run_read_only_batch(batch: &[&ToolCall]) -> Result<Vec<ToolResult>, AgentError> {
   let futs = batch.iter().map(|tc| async {
     let (output, _) = format_tool_result(
       execute_tool(ToolContext { agent: None }, &tc.function.name, &tc.function.arguments).await,
@@ -687,7 +688,7 @@ async fn run_read_only_batch(batch: &[&ToolCall]) -> anyhow::Result<Vec<ToolResu
   });
   let results = futures_util::future::join_all(futs).await;
   if results.iter().any(|r| r.output == INTERACTIVE_ERR) {
-    return Err(InteractiveRequiredError.into());
+    return Err(AgentError::InteractiveRequired);
   }
   Ok(results)
 }

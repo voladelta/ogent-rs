@@ -15,7 +15,7 @@ mod workers;
 mod workflow;
 mod workspace;
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use clap::Parser;
 
 use agent::{Agent, CompactState};
@@ -56,8 +56,8 @@ async fn main() -> Result<()> {
   tracing_subscriber::fmt::try_init().ok();
   let args = Args::parse();
   let profile = profiles::get_profile(&args.profile)
-    .ok_or_else(|| anyhow::anyhow!("unknown profile: {}", args.profile))?;
-  let client = providers::new_client(&profile, args.retry)?;
+    .with_context(|| format!("unknown profile: {}", args.profile))?;
+  let client = providers::new_client(profile, args.retry)?;
   let compact = if args.autocompact >= 0 {
     CompactState::new(
       args.autocompact as f64 / 100.0,
@@ -86,7 +86,7 @@ async fn main() -> Result<()> {
     )
   } else if args.continue_flag {
     let path = session::find_latest_handoff(".ogent/handoffs")
-      .ok_or_else(|| anyhow::anyhow!("no handoff found"))?;
+      .context("no handoff found")?;
     eprintln!("[continue] resuming from {path}");
     let data = tokio::fs::read_to_string(&path).await.unwrap_or_default();
     let mut task_tracker = crate::task_tracker::TaskTracker::from_handoff_text(&data);
@@ -112,7 +112,7 @@ async fn main() -> Result<()> {
       format!(".ogent/sessions/{}.jsonl", name)
     } else {
       session::find_latest_session(".ogent/sessions")
-        .ok_or_else(|| anyhow::anyhow!("no session found"))?
+        .context("no session found")?
     };
     eprintln!("[resume] loading {path}");
     let mut loaded = session::load_session(&path)?;
@@ -186,7 +186,7 @@ async fn main() -> Result<()> {
     Ok(msgs) => msgs,
     Err(e) => {
       session::persist_session(&agent.messages, args.worker, &session_id)?;
-      return Err(e);
+      return Err(e.into());
     }
   };
   session::persist_session(&final_messages, args.worker, &session_id)?;

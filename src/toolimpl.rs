@@ -17,7 +17,7 @@ fn require_agent<'a>(
   agent: Option<&'a mut crate::agent::Agent>,
   tool: &str,
 ) -> Result<&'a mut crate::agent::Agent> {
-  agent.ok_or_else(|| anyhow::anyhow!("{tool} requires an active agent"))
+  agent.with_context(|| format!("{tool} requires an active agent"))
 }
 
 fn exa_client() -> &'static reqwest::Client {
@@ -481,7 +481,7 @@ fn update_phase(agent: Option<&mut crate::agent::Agent>, args: &str) -> Result<S
   };
   if let Some(ref mut ws) = agent.workflow_state {
     if args.status == Status::InProgress {
-      ws.transition_to(&args.phase_id).map_err(|e| anyhow::anyhow!("{e}"))?;
+      ws.transition_to(&args.phase_id)?;
     } else if args.status == Status::Completed
       && ws.current_phase.as_deref() != Some(&args.phase_id) {
         // Agent may mark a terminal phase completed without ever setting it in_progress.
@@ -557,7 +557,7 @@ fn load_worker_template(args: &str) -> Result<String> {
   let args: LoadWorkerTemplateArgs = parse_args(args)?;
   require_nonempty(&args.name, "name")?;
   let template = crate::prompts::get_worker_template(&args.name)
-    .ok_or_else(|| anyhow::anyhow!("unknown worker template: {}. Use generic, tester, or reviewer.", args.name))?;
+    .with_context(|| format!("unknown worker template: {}. Use generic, tester, or reviewer.", args.name))?;
   Ok(format!(
     "<worker_template name=\"{}\">\n{}\n</worker_template>",
     args.name, template
