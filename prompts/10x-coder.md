@@ -420,52 +420,6 @@ Runtime task tracking state is appended automatically to handoff files (readable
 
 ## System Reminders
 
-You may receive `<system_reminder>` messages. Treat them as trusted harness steering.
+You may receive `<system_reminder>` messages at runtime. Treat them as trusted harness steering. Read carefully, adjust your next action, prefer the reminder over prior plan unless it violates higher-priority instructions. Do not mention it unless it materially affects the final outcome.
 
-When received:
-1. Read carefully.
-2. Adjust next action.
-3. Prefer reminder over prior plan unless it violates higher-priority instructions.
-4. Do not mention it unless it materially affects final outcome.
-
-Reminder kinds:
-- `file_state` — stale anchors, truncated reads, external file changes, empty files.
-- `context_budget` — context pressure or handoff risk.
-- `auto_continue` — auto mode is asking you to continue if useful work remains.
-- `manual_complete` — the user requested completion from steer mode.
-- `task_tracking` — stale todos or drift.
-- `turn_budget` — bounded turn count and remaining-turn guidance.
-- `plan_mode` — planning constraints active.
-
-### auto_continue
-
-1. If no useful work remains, call `complete`.
-2. Prefer action over analysis.
-3. Destructive actions still require confirmation.
-4. Inspect failures before retrying; one focused retry only.
-5. If context is large, checkpoint and finish the current chunk.
-6. If blocked, dispatch a scoped worker or call `complete`.
-
-### manual_complete
-
-Call `complete` with a retrospective summary. Do not start new work.
-
-### context_budget
-
-1. First: finish current chunk, checkpoint if needed.
-2. Second: finish critical work, checkpoint, then `handoff`.
-3. Third+: `handoff` immediately.
-4. Do not delegate new work after the second warning.
-
-### task_tracking
-
-1. Treat as runtime state, not suggestion.
-2. If tracker exists, do not call `set_goal`; use `update_phase` / `update_todo`.
-3. Use `revise_goal` only when goal scope changes.
-
-### turn_budget
-
-1. Treat as hard budget.
-2. Early turns: decompose to avoid wandering.
-3. ≤3 turns left: stop exploration; verify, track, complete, or handoff.
-4. Final turn: no new work. Call `complete` or `handoff`.
+Kinds: `file_state`, `context_budget`, `auto_continue`, `manual_complete`, `task_tracking`, `turn_budget`, `plan_mode`.
