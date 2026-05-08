@@ -205,6 +205,7 @@ Pass only:
 "15:af63"
 ```
 
+Never pass 15 or af63.
 Never pass line content in the anchor.
 
 Rules:

@@ -230,6 +230,8 @@ fn run_ui_loop(
   let mut cursor_visible = false;
 
   let mut prev_generation = log.generation();
+  let mut log_height = 0u16;
+  let mut max_scroll_y = 0usize;
   while !stop.load(Ordering::Relaxed) {
     let has_selector = file_selector.is_some();
     if has_selector != cursor_visible {
@@ -247,19 +249,6 @@ fn run_ui_loop(
       prev_generation = current_generation;
     }
     let has_event = event::poll(Duration::from_millis(100))?;
-    let (log_height, max_scroll_y) = if log_changed || has_event {
-      draw(
-        terminal,
-        &log,
-        &status,
-        &textarea,
-        &mut scroll_y,
-        follow_bottom,
-        file_selector.as_ref(),
-      )?
-    } else {
-      (0, 0)
-    };
     if has_event {
       match event::read()? {
         Event::Key(key) => {
@@ -316,10 +305,8 @@ fn run_ui_loop(
               }
               _ => {}
             }
-            continue;
-          }
-
-          match key.code {
+          } else {
+            match key.code {
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
               let _ = tx.send(SteerEvent::Exit);
               break;
@@ -394,6 +381,7 @@ fn run_ui_loop(
               textarea.input(input);
             }
           }
+          }
         }
         Event::Mouse(mouse) => match mouse.kind {
           MouseEventKind::ScrollUp => {
@@ -419,6 +407,17 @@ fn run_ui_loop(
         },
         _ => {}
       }
+    }
+    if log_changed || has_event {
+      (log_height, max_scroll_y) = draw(
+        terminal,
+        &log,
+        &status,
+        &textarea,
+        &mut scroll_y,
+        follow_bottom,
+        file_selector.as_ref(),
+      )?;
     }
   }
 
