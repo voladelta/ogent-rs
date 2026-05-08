@@ -22,7 +22,7 @@ use ratatui_textarea::{CursorMove, TextArea};
 use std::io;
 use std::sync::{
   Arc, Mutex,
-  atomic::{AtomicBool, Ordering},
+  atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
 };
 use std::thread::JoinHandle;
 use std::time::Duration;
@@ -40,9 +40,21 @@ pub enum SteerEvent {
   Exit,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct UiLog {
   lines: Arc<Mutex<Vec<String>>>,
+  len: Arc<AtomicUsize>,
+  generation: Arc<AtomicU64>,
+}
+
+impl Default for UiLog {
+  fn default() -> Self {
+    Self {
+      lines: Arc::new(Mutex::new(Vec::new())),
+      len: Arc::new(AtomicUsize::new(0)),
+      generation: Arc::new(AtomicU64::new(0)),
+    }
+  }
 }
 
 impl UiLog {
@@ -52,6 +64,8 @@ impl UiLog {
       .lock()
       .expect("ui log poisoned")
       .push(line.into());
+    self.len.fetch_add(1, Ordering::Relaxed);
+    self.generation.fetch_add(1, Ordering::Relaxed);
   }
 
   pub fn push_assistant_markdown(&self, content: &str) {
@@ -65,13 +79,22 @@ impl UiLog {
 
   pub fn clear(&self) {
     self.lines.lock().expect("ui log poisoned").clear();
+    self.len.store(0, Ordering::Relaxed);
+    self.generation.fetch_add(1, Ordering::Relaxed);
   }
 
   fn snapshot(&self) -> Vec<String> {
     self.lines.lock().expect("ui log poisoned").clone()
   }
-}
 
+  pub fn len(&self) -> usize {
+    self.len.load(Ordering::Relaxed)
+  }
+
+  pub(crate) fn generation(&self) -> u64 {
+    self.generation.load(Ordering::Relaxed)
+  }
+}
 #[derive(Clone)]
 pub struct UiStatus {
   inner: Arc<Mutex<StatusInner>>,
@@ -210,6 +233,7 @@ fn run_ui_loop(
   let mut all_files: Option<Vec<String>> = None;
   let mut cursor_visible = false;
 
+  let mut prev_generation = log.generation();
   while !stop.load(Ordering::Relaxed) {
     let has_selector = file_selector.is_some();
     if has_selector != cursor_visible {
@@ -221,16 +245,26 @@ fn run_ui_loop(
       cursor_visible = has_selector;
     }
 
-    let (log_height, max_scroll_y) = draw(
-      terminal,
-      &log,
-      &status,
-      &textarea,
-      &mut scroll_y,
-      follow_bottom,
-      file_selector.as_ref(),
-    )?;
-    if event::poll(Duration::from_millis(100))? {
+    let current_generation = log.generation();
+    let log_changed = current_generation != prev_generation;
+    if log_changed {
+      prev_generation = current_generation;
+    }
+    let has_event = event::poll(Duration::from_millis(100))?;
+    let (log_height, max_scroll_y) = if log_changed || has_event {
+      draw(
+        terminal,
+        &log,
+        &status,
+        &textarea,
+        &mut scroll_y,
+        follow_bottom,
+        file_selector.as_ref(),
+      )?
+    } else {
+      (0, 0)
+    };
+    if has_event {
       match event::read()? {
         Event::Key(key) => {
           if key.kind != KeyEventKind::Press {
