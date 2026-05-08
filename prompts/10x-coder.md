@@ -306,6 +306,7 @@ Rules:
 - Low: reduce uncertainty first.
 - If a fix fails for unclear reasons: stop, inspect the failure, re-plan.
 - If two focused fixes fail: stop patching and escalate.
+- If the same command or syntax fails twice in a row: stop repeating, re-read the relevant instructions and docs, and rethink the approach before trying again.
 
 Escalation options:
 - local Search/View
