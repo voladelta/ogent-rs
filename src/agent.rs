@@ -1,6 +1,7 @@
 use anyhow::{Result, bail};
 
 use crate::client::Client;
+use crate::task_tracker::{TaskTracker, is_tracking_tool_name};
 use crate::tools::{ToolContext, execute_tool, is_read_only_tool, remove_question};
 use crate::tui::{SteerEvent, TuiHandle};
 use crate::types::{ChatResponse, Message, Tool, ToolCall};
@@ -53,6 +54,8 @@ pub struct Agent {
   pub total_completion: i32,
   pub compact: CompactState,
   pub completion_summary: Option<String>,
+  pub task_tracker: Option<TaskTracker>,
+  pub complete_open_work_warned: bool,
 }
 
 pub struct ToolResult {
@@ -67,6 +70,7 @@ impl Agent {
     messages: Vec<Message>,
     tools: Vec<Tool>,
     compact: CompactState,
+    task_tracker: Option<TaskTracker>,
   ) -> Self {
     Self {
       client,
@@ -77,6 +81,8 @@ impl Agent {
       total_completion: 0,
       compact,
       completion_summary: None,
+      task_tracker,
+      complete_open_work_warned: false,
     }
   }
 
@@ -290,6 +296,7 @@ impl Agent {
     if self.completion_summary.is_some() {
       return Ok(true);
     }
+    let mut pushed_worker_status = false;
     if let Some(msg) = self.worker_manager.status_message().await {
       if let Some(log) = ui_log {
         self.messages.push(Message {
@@ -305,10 +312,13 @@ impl Agent {
           ..Default::default()
         });
       }
+      pushed_worker_status = true;
       *has_more = true;
-    } else if *has_more {
+    }
+    if *has_more {
       self.check_compact();
-      if auto_continue && !self.compact.compacting {
+      self.push_task_tracking_reminder();
+      if auto_continue && !self.compact.compacting && !pushed_worker_status {
         self.messages.push(Message {
           role: "user".into(),
           content: auto_continue_reminder(),
@@ -486,6 +496,7 @@ impl Agent {
         ..Default::default()
       });
     }
+    self.record_task_tracking_turn(&results);
     Ok(results)
   }
 
@@ -551,6 +562,11 @@ impl Agent {
     let data = tokio::fs::read_to_string(&path)
       .await
       .unwrap_or_else(|_| "(handoff read error)".into());
+    if let Some(mut tracker) = TaskTracker::from_handoff_text(&data) {
+      tracker.mark_restored();
+      self.task_tracker = Some(tracker);
+    }
+    let stripped = TaskTracker::strip_handoff_state_block(&data);
     let system = self
       .messages
       .first()
@@ -566,11 +582,12 @@ impl Agent {
       Message {
         role: "user".into(),
         content: format!(
-          "## Previous Session Handoff\n\n{data}\n\nPlease process this handoff brief and continue the work."
+          "## Previous Session Handoff\n\n{stripped}\n\nPlease process this handoff brief and continue the work."
         ),
         ..Default::default()
       },
     ];
+    self.push_task_tracking_reminder();
     self.compact.compacting = false;
     self.compact.urgency = 0;
     self.total_prompt = 0;
@@ -585,6 +602,37 @@ impl Agent {
       self.total_completion,
       self.total_prompt + self.total_completion
     );
+  }
+
+  fn record_task_tracking_turn(&mut self, results: &[ToolResult]) {
+    let Some(tracker) = self.task_tracker.as_mut() else {
+      return;
+    };
+    let mut saw_tracking_update = false;
+    let mut saw_meaningful_non_tracking = false;
+    for result in results {
+      if result.output.starts_with("ERROR:") {
+        continue;
+      }
+      if is_tracking_tool_name(&result.name) {
+        saw_tracking_update = true;
+      } else if !matches!(result.name.as_str(), "question" | "worker_question") {
+        saw_meaningful_non_tracking = true;
+      }
+    }
+    tracker.note_tool_turn(saw_tracking_update, saw_meaningful_non_tracking);
+  }
+
+  fn push_task_tracking_reminder(&mut self) {
+    if let Some(tracker) = self.task_tracker.as_mut() {
+      if let Some(reminder) = tracker.take_reminder() {
+        self.messages.push(Message {
+          role: "user".into(),
+          content: reminder,
+          ..Default::default()
+        });
+      }
+    }
   }
 }
 

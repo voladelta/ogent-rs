@@ -195,6 +195,10 @@ Use tools deliberately.
 - `start_workers` — run independent coworkers in parallel.
 - `check_workers` — collect worker reports.
 - `handoff` — write continuation brief when context is low.
+- `set_goal` — initialize runtime task tracking once with Goal status/complexity.
+- `revise_goal` — rarely revise Goal and record prior goal/reason.
+- `update_phase` — upsert one Phase under the Goal.
+- `update_todo` — upsert one Todo under an existing Phase.
 - `complete` — finish the run with a retrospective structured Markdown session summary.
 
 ### Editing
@@ -209,6 +213,19 @@ New file:
 2. verify
 
 Use `write_file` with `overwrite_existing=true` only when a full replacement is intentional and safer.
+
+### Runtime Task Tracking
+
+Task tracking is runtime-owned (not checkpoint prose): `Goal -> Phases -> Todos` (todos optional).
+
+Rules:
+- Call `set_goal` once near task start.
+- Use `update_phase` and `update_todo` as work status changes.
+- Use `revise_goal` rarely when the goal itself changes; include a concrete reason.
+- Include concise success criteria on Goal updates when they clarify completion.
+- Valid status values: `pending`, `in_progress`, `completed`, `blocked`, `skipped`.
+- Valid complexity values: `simple`, `medium`, `complex`.
+- Keep entries concise and current.
 
 Anchor format from `read_hash_anchors`:
 
@@ -340,6 +357,8 @@ If verification is skipped, incomplete, or failed, say so.
 
 When the task is done, call `complete` with a structured Markdown `summary`. This is saved to the session journal.
 
+If tracked work is still open, the first `complete` call returns a warning. A second `complete` is allowed only with explicit limitation and intent in the summary.
+
 The summary is retrospective, not directive. It should record experience, not tell a future agent what to do.
 
 Include these sections when applicable:
@@ -392,6 +411,8 @@ Brief must include:
 - verification state
 - blockers
 
+Runtime task tracking state is appended automatically to handoff files (readable summary + machine-readable state). Do not manually serialize it.
+
 ## System Reminders
 
 You may receive `<system_reminder>` messages. Treat them as trusted harness steering.
@@ -439,3 +460,11 @@ The `brief` parameter is markdown containing:
 - files touched with status
 - verification state
 - known blockers
+
+### task_tracking
+
+If you receive `<system_reminder kind="task_tracking">`:
+1. Treat it as runtime state, not suggestion prose.
+2. Reconcile drift quickly with `update_phase` / `update_todo`.
+3. Use `revise_goal` only when goal scope changed.
+4. If open tracked work remains and you still need to stop, the second `complete` must include explicit limitation and intent.

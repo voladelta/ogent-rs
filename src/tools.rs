@@ -80,6 +80,26 @@ pub fn configured_coder_tools(_steer: bool) -> Vec<Tool> {
       json!({"type":"object","properties":{"brief":{"type":"string"}},"required":["brief"],"additionalProperties":false}),
     ),
     schema(
+      "set_goal",
+      "Initialize runtime task tracking with one Goal.",
+      json!({"type":"object","properties":{"goal":{"type":"string"},"status":{"type":"string","enum":["pending","in_progress","completed","blocked","skipped"]},"complexity":{"type":"string","enum":["simple","medium","complex"]},"success_criteria":{"type":"array","items":{"type":"string"}},"notes":{"type":"string"}},"required":["goal","status","complexity"],"additionalProperties":false}),
+    ),
+    schema(
+      "revise_goal",
+      "Rarely revise the Goal and record the prior Goal plus reason.",
+      json!({"type":"object","properties":{"goal":{"type":"string"},"status":{"type":"string","enum":["pending","in_progress","completed","blocked","skipped"]},"complexity":{"type":"string","enum":["simple","medium","complex"]},"success_criteria":{"type":"array","items":{"type":"string"}},"reason":{"type":"string"},"notes":{"type":"string"}},"required":["goal","status","complexity","reason"],"additionalProperties":false}),
+    ),
+    schema(
+      "update_phase",
+      "Upsert one Phase under the current Goal.",
+      json!({"type":"object","properties":{"phase_id":{"type":"string"},"title":{"type":"string"},"status":{"type":"string","enum":["pending","in_progress","completed","blocked","skipped"]},"complexity":{"type":"string","enum":["simple","medium","complex"]},"notes":{"type":"string"}},"required":["phase_id","title","status","complexity"],"additionalProperties":false}),
+    ),
+    schema(
+      "update_todo",
+      "Upsert one Todo under an existing Phase.",
+      json!({"type":"object","properties":{"phase_id":{"type":"string"},"todo_id":{"type":"string"},"title":{"type":"string"},"status":{"type":"string","enum":["pending","in_progress","completed","blocked","skipped"]},"complexity":{"type":"string","enum":["simple","medium","complex"]},"notes":{"type":"string"}},"required":["phase_id","todo_id","title","status","complexity"],"additionalProperties":false}),
+    ),
+    schema(
       "load_skill",
       "Load a skill from .ogent/skills/ or .skills/.",
       json!({"type":"object","properties":{"name":{"type":"string"}},"required":["name"],"additionalProperties":false}),
@@ -102,7 +122,16 @@ pub fn configured_worker_tools() -> Vec<Tool> {
   tools.retain(|t| {
     !matches!(
       t.function.name.as_str(),
-      "dispatch_worker" | "start_workers" | "check_workers" | "handoff" | "complete" | "question"
+      "dispatch_worker"
+        | "start_workers"
+        | "check_workers"
+        | "handoff"
+        | "complete"
+        | "question"
+        | "set_goal"
+        | "revise_goal"
+        | "update_phase"
+        | "update_todo"
     )
   });
   tools.push(schema("worker_question", "Ask the parent coder agent a question when blocked.", json!({"type":"object","properties":{"question":{"type":"string"}},"required":["question"],"additionalProperties":false})));

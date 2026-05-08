@@ -74,6 +74,25 @@ At meaningful in-session boundaries, the agent may write a short `<checkpoint>` 
 
 Checkpoints help preserve working state across phase changes, delegation, compaction, and handoff. They are model-facing context notes only: runtime code does not parse them, save them as durable memory, or load them on future runs.
 
+### Runtime task tracking
+
+`ogent` now supports runtime-owned task tracking with a strict hierarchy:
+
+```text
+Goal -> Phases -> Todos
+```
+
+Todos are optional per phase.
+
+Tracking is maintained through tools, not free-form prose:
+- call `set_goal` once
+- use `update_phase` and `update_todo` as upserts
+- use `revise_goal` rarely; it records the prior goal and reason
+- include concise success criteria on `set_goal` / `revise_goal` when they clarify completion
+
+Status values: `pending`, `in_progress`, `completed`, `blocked`, `skipped`
+Complexity values: `simple`, `medium`, `complex`
+
 ### Skills
 
 Skills are loaded from:
@@ -229,11 +248,15 @@ Non-steer mode requires a prompt unless `--continue` is used.
 | `start_workers` | Start a batch of specialist coworkers asynchronously and return worker IDs immediately |
 | `check_workers` | Wait for active async coworkers, collect their summaries/errors, and clear the batch |
 | `handoff` | Write a session handoff brief under `.ogent/handoffs/` |
+| `set_goal` | Initialize runtime task tracking with one Goal (single-use) |
+| `revise_goal` | Revise the Goal and record prior goal + reason |
+| `update_phase` | Upsert one Phase under the current Goal |
+| `update_todo` | Upsert one Todo under an existing Phase |
 | `complete` | Finish the run with a structured Markdown session summary |
 
 Web tools require `EXA_API_KEY`.
 
-Workers use the same toolset except `dispatch_worker`, `start_workers`, `check_workers`, `handoff`, `complete`, and `question`. Instead, workers have `worker_question` to ask the parent 10x coder when blocked and `worker_complete` to return their final Markdown summary.
+Workers use the same toolset except `dispatch_worker`, `start_workers`, `check_workers`, `handoff`, `set_goal`, `revise_goal`, `update_phase`, `update_todo`, `complete`, and `question`. Instead, workers have `worker_question` to ask the parent 10x coder when blocked and `worker_complete` to return their final Markdown summary.
 
 Tool calls are evaluated in order. Contiguous read-only calls (`read_file`, `read_hash_anchors`, `repo_map`, web tools, `load_skill`) may run in parallel. Mutating or blocking calls (`write_file`, `edit_hash_anchors`, `bash`, workers, `handoff`, questions) act as barriers and run serially.
 
@@ -291,9 +314,9 @@ After each run, the full conversation is written to `.ogent/sessions/*.jsonl`.
 
 Worker sessions include `worker` in the filename.
 
-When the coder calls `complete`, its structured Markdown summary is appended to `.ogent/journal.md`. Journal entries are retrospective experience notes, not instructions loaded into future runs.
+When the coder calls `complete`, its structured Markdown summary is appended to `.ogent/journal.md`. Journal entries are retrospective experience notes, not instructions loaded into future runs. If tracked work is still open, the first `complete` call returns a warning; a second `complete` must include explicit limitation and intent.
 
-Handoffs are written to `.ogent/handoffs/*.md`. Continue from the newest handoff:
+Handoffs are written to `.ogent/handoffs/*.md`. When a task tracker exists, handoffs automatically include readable tracker summary plus machine-readable tracker state. `--continue` restores that state when possible. Continue from the newest handoff:
 
 ```bash
 cargo run -- --continue
@@ -381,6 +404,7 @@ When a steering message arrives during an LLM stream, the agent cancels the in-f
 | `src/sse.rs` | SSE parser and streamed response accumulation |
 | `src/tools.rs` | Tool registry and JSON schemas |
 | `src/toolimpl.rs` | Tool implementations |
+| `src/task_tracker.rs` | Runtime task tracker state, validation, reminders, handoff serialization |
 | `src/workers.rs` | Worker subprocess execution and async worker manager |
 | `src/hashline.rs` | Hash anchors and validated anchored edits |
 | `src/prompts.rs` | Embedded prompts, skill discovery, skill loading |

@@ -6,6 +6,7 @@ mod prompts;
 mod providers;
 mod session;
 mod sse;
+mod task_tracker;
 mod toolimpl;
 mod tools;
 mod tui;
@@ -66,7 +67,7 @@ async fn main() -> Result<()> {
   let wait_for_steer_input =
     args.steer && !args.worker && !args.continue_flag && args.prompt.is_empty();
 
-  let (mut messages, tools) = if args.worker {
+  let (mut messages, tools, mut task_tracker) = if args.worker {
     let system_prompt = read_stdin().await?.trim().to_string();
     if system_prompt.is_empty() {
       bail!("--worker requires system prompt on stdin");
@@ -75,28 +76,38 @@ async fn main() -> Result<()> {
     (
       build_worker_messages(&system_prompt, &prompt, &session_id),
       tools::configured_worker_tools(),
+      None,
     )
   } else if args.continue_flag {
     let path = session::find_latest_handoff(".ogent/handoffs")
       .ok_or_else(|| anyhow::anyhow!("no handoff found"))?;
     eprintln!("[continue] resuming from {path}");
     let data = tokio::fs::read_to_string(&path).await.unwrap_or_default();
+    let mut task_tracker = crate::task_tracker::TaskTracker::from_handoff_text(&data);
+    if let Some(tracker) = task_tracker.as_mut() {
+      tracker.mark_restored();
+    }
+    let stripped = crate::task_tracker::TaskTracker::strip_handoff_state_block(&data);
     let content =
-      format!("## Previous Session Handoff\n\n{data}\n\nPlease continue from this handoff.");
+      format!("## Previous Session Handoff\n\n{stripped}\n\nPlease continue from this handoff.");
     let mut messages = build_10x_coder_messages("");
     messages.push(Message {
       role: "user".into(),
       content,
       ..Default::default()
     });
-    (messages, tools::configured_coder_tools(args.steer))
+    (
+      messages,
+      tools::configured_coder_tools(args.steer),
+      task_tracker,
+    )
   } else {
     if args.prompt.is_empty() && !args.steer {
       bail!("usage: ogent [--profile ...] [--steer] <prompt>");
     }
     let prompt = args.prompt.join(" ");
     let messages = build_10x_coder_messages(&prompt);
-    (messages, tools::configured_coder_tools(args.steer))
+    (messages, tools::configured_coder_tools(args.steer), None)
   };
 
   append_to_last_user_message(&mut messages, &prompts::discover_skills_message());
@@ -116,8 +127,17 @@ async fn main() -> Result<()> {
   if !cwd_msg.is_empty() {
     append_to_last_user_message(&mut messages, &cwd_msg);
   }
+  if let Some(tracker) = task_tracker.as_mut() {
+    if let Some(reminder) = tracker.take_reminder() {
+      messages.push(Message {
+        role: "user".into(),
+        content: reminder,
+        ..Default::default()
+      });
+    }
+  }
 
-  let mut agent = Agent::new(client, messages, tools, compact);
+  let mut agent = Agent::new(client, messages, tools, compact, task_tracker);
   let final_messages = if args.steer {
     let tui = tui::start(args.profile.clone(), profile.model.to_string(), args.auto)?;
     agent

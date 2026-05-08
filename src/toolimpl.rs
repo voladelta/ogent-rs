@@ -8,6 +8,7 @@ use tokio::process::Command;
 use tokio::time::{Duration, timeout};
 
 use crate::hashline::{EditOp, apply_anchor_edits, render_hashlines};
+use crate::task_tracker::{Complexity, GoalState, PhaseUpdate, Status, TaskTracker, TodoUpdate};
 use crate::tools::{ToolContext, parse_args, require_nonempty};
 
 pub async fn execute_tool(mut ctx: ToolContext<'_>, name: &str, args: &str) -> Result<String> {
@@ -22,6 +23,10 @@ pub async fn execute_tool(mut ctx: ToolContext<'_>, name: &str, args: &str) -> R
     "web_read" => web_read(args).await,
     "code_web_context" => code_web_context(args).await,
     "handoff" => handoff(ctx.agent.as_deref_mut(), args),
+    "set_goal" => set_goal(ctx.agent.as_deref_mut(), args),
+    "revise_goal" => revise_goal(ctx.agent.as_deref_mut(), args),
+    "update_phase" => update_phase(ctx.agent.as_deref_mut(), args),
+    "update_todo" => update_todo(ctx.agent.as_deref_mut(), args),
     "load_skill" => load_skill(args),
     "dispatch_worker" => dispatch_worker(args).await,
     "start_workers" => start_workers(ctx.agent.as_deref_mut(), args).await,
@@ -384,11 +389,155 @@ fn handoff(agent: Option<&mut crate::agent::Agent>, args: &str) -> Result<String
   require_nonempty(&args.brief, "brief")?;
   fs::create_dir_all(".ogent/handoffs")?;
   let path = format!(".ogent/handoffs/{}.md", crate::session::timestamp());
-  fs::write(&path, args.brief)?;
+  let mut body = args.brief.trim_end().to_string();
+  if let Some(tracker) = agent.as_ref().and_then(|agent| agent.task_tracker.as_ref()) {
+    let appendix = tracker.render_handoff_appendix();
+    if !appendix.is_empty() {
+      if !body.is_empty() {
+        body.push_str("\n\n");
+      }
+      body.push_str(&appendix);
+    }
+  }
+  fs::write(&path, body)?;
   if let Some(agent) = agent {
     agent.compact.last_handoff_path = path.clone();
   }
   Ok(format!("Handoff written to {path}"))
+}
+
+#[derive(Deserialize)]
+struct SetGoalArgs {
+  goal: String,
+  status: Status,
+  complexity: Complexity,
+  #[serde(default)]
+  success_criteria: Vec<String>,
+  #[serde(default)]
+  notes: String,
+}
+
+fn set_goal(agent: Option<&mut crate::agent::Agent>, args: &str) -> Result<String> {
+  let args: SetGoalArgs = parse_args(args)?;
+  require_nonempty(&args.goal, "goal")?;
+  let Some(agent) = agent else {
+    bail!("set_goal requires an active agent");
+  };
+  if agent.task_tracker.is_some() {
+    bail!("set_goal can only be called once; use revise_goal for goal changes");
+  }
+  agent.task_tracker = Some(TaskTracker::new(GoalState {
+    title: args.goal.trim().to_string(),
+    status: args.status,
+    complexity: args.complexity,
+    success_criteria: clean_strings(args.success_criteria),
+    notes: args.notes.trim().to_string(),
+  }));
+  Ok(
+    agent
+      .task_tracker
+      .as_ref()
+      .map(|tracker| tracker.render_tool_snapshot())
+      .unwrap_or_else(|| "Goal initialized.".to_string()),
+  )
+}
+
+#[derive(Deserialize)]
+struct ReviseGoalArgs {
+  goal: String,
+  status: Status,
+  complexity: Complexity,
+  #[serde(default)]
+  success_criteria: Vec<String>,
+  reason: String,
+  #[serde(default)]
+  notes: String,
+}
+
+fn revise_goal(agent: Option<&mut crate::agent::Agent>, args: &str) -> Result<String> {
+  let args: ReviseGoalArgs = parse_args(args)?;
+  require_nonempty(&args.goal, "goal")?;
+  require_nonempty(&args.reason, "reason")?;
+  let Some(agent) = agent else {
+    bail!("revise_goal requires an active agent");
+  };
+  let Some(tracker) = agent.task_tracker.as_mut() else {
+    bail!("set_goal must be called before revise_goal");
+  };
+  tracker.revise_goal(
+    GoalState {
+      title: args.goal.trim().to_string(),
+      status: args.status,
+      complexity: args.complexity,
+      success_criteria: clean_strings(args.success_criteria),
+      notes: args.notes.trim().to_string(),
+    },
+    args.reason.trim().to_string(),
+  );
+  Ok(tracker.render_tool_snapshot())
+}
+
+#[derive(Deserialize)]
+struct UpdatePhaseArgs {
+  phase_id: String,
+  title: String,
+  status: Status,
+  complexity: Complexity,
+  #[serde(default)]
+  notes: String,
+}
+
+fn update_phase(agent: Option<&mut crate::agent::Agent>, args: &str) -> Result<String> {
+  let args: UpdatePhaseArgs = parse_args(args)?;
+  require_nonempty(&args.phase_id, "phase_id")?;
+  require_nonempty(&args.title, "title")?;
+  let Some(agent) = agent else {
+    bail!("update_phase requires an active agent");
+  };
+  let Some(tracker) = agent.task_tracker.as_mut() else {
+    bail!("set_goal must be called before update_phase");
+  };
+  tracker.update_phase(PhaseUpdate {
+    id: args.phase_id.trim().to_string(),
+    title: args.title.trim().to_string(),
+    status: args.status,
+    complexity: args.complexity,
+    notes: args.notes.trim().to_string(),
+  });
+  Ok(tracker.render_tool_snapshot())
+}
+
+#[derive(Deserialize)]
+struct UpdateTodoArgs {
+  phase_id: String,
+  todo_id: String,
+  title: String,
+  status: Status,
+  complexity: Complexity,
+  #[serde(default)]
+  notes: String,
+}
+
+fn update_todo(agent: Option<&mut crate::agent::Agent>, args: &str) -> Result<String> {
+  let args: UpdateTodoArgs = parse_args(args)?;
+  require_nonempty(&args.phase_id, "phase_id")?;
+  require_nonempty(&args.todo_id, "todo_id")?;
+  require_nonempty(&args.title, "title")?;
+  let Some(agent) = agent else {
+    bail!("update_todo requires an active agent");
+  };
+  let Some(tracker) = agent.task_tracker.as_mut() else {
+    bail!("set_goal must be called before update_todo");
+  };
+  tracker.update_todo(TodoUpdate {
+    phase_id: args.phase_id.trim().to_string(),
+    id: args.todo_id.trim().to_string(),
+    title: args.title.trim().to_string(),
+    status: args.status,
+    complexity: args.complexity,
+    notes: args.notes.trim().to_string(),
+  })?;
+  Ok(tracker.render_tool_snapshot())
 }
 
 #[derive(Deserialize)]
@@ -464,6 +613,21 @@ fn complete(agent: Option<&mut crate::agent::Agent>, args: &str) -> Result<Strin
   let Some(agent) = agent else {
     bail!("complete requires an active agent");
   };
+  if agent
+    .task_tracker
+    .as_ref()
+    .is_some_and(|tracker| tracker.open_phase_or_todo_exists())
+  {
+    if !agent.complete_open_work_warned {
+      agent.complete_open_work_warned = true;
+      return Ok("WARNING: tracked work is still open. Call complete again only if you intend to stop now, and include explicit \"Limitation\" and \"Intent\" text in summary.".to_string());
+    }
+    if !summary_has_limitation_and_intent(&args.summary) {
+      bail!(
+        "tracked work is still open; second complete requires explicit Limitation and Intent in summary"
+      );
+    }
+  }
   agent.completion_summary = Some(args.summary.trim().to_string());
   Ok("Task marked complete.".to_string())
 }
@@ -476,4 +640,31 @@ fn worker_complete(agent: Option<&mut crate::agent::Agent>, args: &str) -> Resul
   };
   agent.completion_summary = Some(args.summary.trim().to_string());
   Ok("Worker marked complete.".to_string())
+}
+
+fn summary_has_limitation_and_intent(summary: &str) -> bool {
+  let s = summary.to_lowercase();
+  s.contains("limitation") && s.contains("intent")
+}
+
+fn clean_strings(values: Vec<String>) -> Vec<String> {
+  values
+    .into_iter()
+    .map(|value| value.trim().to_string())
+    .filter(|value| !value.is_empty())
+    .collect()
+}
+
+#[cfg(test)]
+mod complete_tests {
+  use super::summary_has_limitation_and_intent;
+
+  #[test]
+  fn summary_requires_limitation_and_intent() {
+    assert!(summary_has_limitation_and_intent(
+      "## Limitation\nx\n## Intent\ny"
+    ));
+    assert!(!summary_has_limitation_and_intent("## Limitation\nx"));
+    assert!(!summary_has_limitation_and_intent("## Intent\ny"));
+  }
 }
