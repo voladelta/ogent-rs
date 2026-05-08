@@ -117,6 +117,7 @@ Search output is candidates, not evidence.
 
 Use the right search surface:
 - repo shape: `repo_map`
+- repo-context understanding: `bash` with `codectx`
 - local semantic code search: `bash` with `colgrep`
 - exact local search: `bash` with `rg`
 - structural local search: `bash` with `ast-grep`
@@ -219,7 +220,7 @@ Rules:
 Use `bash` for bounded commands only:
 - build/test/check/lint/format
 - git status/diff
-- `colgrep`, `rg`, `ast-grep`
+- `codectx`, `colgrep`, `rg`, `ast-grep`
 - one-shot scripts
 
 Do not start background processes or long-running servers.

@@ -3,7 +3,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use std::fmt::Write;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::OnceLock;
 use tokio::process::Command;
@@ -312,9 +312,54 @@ struct BashArgs {
   timeout_seconds: u64,
 }
 
+fn check_bash_cds(command: &str) -> Result<()> {
+  let mut cmd = command.to_string();
+  for sep in ["&&", "||", "|", ";", "\n", "\r"] {
+    cmd = cmd.replace(sep, "\n");
+  }
+  let base = crate::workspace::workspace_root();
+  for line in cmd.split('\n') {
+    let mut words = line.trim().split_whitespace();
+    if words.next() == Some("cd") {
+      let path = words.next().unwrap_or("");
+      if path.is_empty() {
+        bail!("cd without argument is not allowed (would go to $HOME). Use a relative path within the workspace (e.g., ./foo) or /tmp.");
+      }
+      let target = if path == "~" {
+        if let Some(home) = std::env::var_os("HOME") {
+          PathBuf::from(home)
+        } else {
+          bail!("cd to ~ is not allowed. Use a relative path within the workspace (e.g., ./foo) or /tmp.");
+        }
+      } else if let Some(rest) = path.strip_prefix("~/") {
+        if let Some(home) = std::env::var_os("HOME") {
+          PathBuf::from(home).join(rest)
+        } else {
+          bail!("cd to ~/... is not allowed. Use a relative path within the workspace (e.g., ./foo) or /tmp.");
+        }
+      } else if path.starts_with('/') {
+        PathBuf::from(path)
+      } else {
+        base.join(path)
+      };
+      let norm = crate::workspace::normalize(&target);
+      let in_workspace = norm.starts_with(base);
+      let in_tmp = norm.starts_with(Path::new("/tmp"));
+      if !in_workspace && !in_tmp {
+        bail!(
+          "cd to {} is not allowed. You cannot cd outside the workspace or /tmp. Use relative paths within the workspace (e.g., ./foo or foo).",
+          path
+        );
+      }
+    }
+  }
+  Ok(())
+}
+
 async fn bash(args: &str) -> Result<String> {
   let args: BashArgs = parse_args(args)?;
   require_nonempty(&args.command, "command")?;
+  check_bash_cds(&args.command)?;
   let secs = if args.timeout_seconds == 0 {
     120
   } else {

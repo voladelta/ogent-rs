@@ -67,7 +67,7 @@ fn path_in_allowed_root(path: &Path) -> bool {
   path == root || path.starts_with(&root)
 }
 
-fn normalize(path: &Path) -> PathBuf {
+pub fn normalize(path: &Path) -> PathBuf {
   let mut out = PathBuf::new();
   for c in path.components() {
     match c {
