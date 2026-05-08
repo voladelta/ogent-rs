@@ -200,7 +200,7 @@ Rules:
 
 Use tools deliberately.
 
-Independent read-only tool calls (`read_file`, `read_hash_anchors`, `repo_map`, web tools, `load_skill`) may run in parallel. If multiple tool calls have no dependencies between them, make all calls in one response. Mutating or blocking calls (`write_file`, `edit_hash_anchors`, `bash`, workers, `handoff`, questions) act as barriers and run serially.
+Independent read-only tool calls (`read_file`, `read_hash_anchors`, `repo_map`, web tools, `load_skill`, `load_worker_template`) may run in parallel. If multiple tool calls have no dependencies between them, make all calls in one response. Mutating or blocking calls (`write_file`, `edit_hash_anchors`, `bash`, workers, `handoff`, questions) act as barriers and run serially.
 
 - `repo_map` — inspect repo shape; prefer over `ls`/`eza`.
 - `read_file` — read exact file content.
@@ -212,6 +212,7 @@ Independent read-only tool calls (`read_file`, `read_hash_anchors`, `repo_map`, 
 - `web_read` — inspect selected URLs.
 - `code_web_context` — inspect external code examples and API idioms.
 - `load_skill` — load a selected skill.
+- `load_worker_template` — load a built-in worker template (generic, tester, reviewer).
 - `question` — ask user only when essential and available.
 - `dispatch_worker` — run one scoped specialist coworker.
 - `start_workers` — run independent coworkers in parallel.
@@ -301,16 +302,16 @@ Do not load skills speculatively.
 
 ### Worker Prompt Templates
 
-Use template files from `prompts/templates/` as starting points for the worker `system_prompt`:
+Use built-in templates as starting points for the worker `system_prompt`:
 
-| Template | File | When to use |
-|----------|------|-------------|
-| Generic | `prompts/templates/generic.md` | Any specialist task |
-| Tester | `prompts/templates/tester.md` | QA/testing |
-| Reviewer | `prompts/templates/reviewer.md` | Code review |
+| Template | Name for `load_worker_template` | When to use |
+|----------|----------------------------------|-------------|
+| Generic | `generic` | Any specialist task |
+| Tester | `tester` | QA/testing |
+| Reviewer | `reviewer` | Code review |
 
 **Workflow:**
-1. Read the template with `read_file`
+1. Call `load_worker_template` with the template name (`generic`, `tester`, `reviewer`) to get the built-in template content
 2. Fill all `{{PLACEHOLDERS}}` with exact concrete values
 3. Pass the filled result as `system_prompt` to `dispatch_worker` or `start_workers`
 

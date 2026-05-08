@@ -105,6 +105,11 @@ pub fn configured_coder_tools(_steer: bool) -> Vec<Tool> {
       json!({"type":"object","properties":{"name":{"type":"string"}},"required":["name"],"additionalProperties":false}),
     ),
     schema(
+      "load_worker_template",
+      "Load a built-in worker template (generic, tester, reviewer). Returns the template content with placeholders. Fill placeholders before using as system_prompt.",
+      json!({"type":"object","properties":{"name":{"type":"string","enum":["generic","tester","reviewer"],"description":"Built-in worker template name"}},"required":["name"],"additionalProperties":false}),
+    ),
+    schema(
       "complete",
       "Mark the current task complete and provide a retrospective structured Markdown session summary.",
       json!({"type":"object","properties":{"summary":{"type":"string"}},"required":["summary"],"additionalProperties":false}),
@@ -132,6 +137,7 @@ pub fn configured_worker_tools() -> Vec<Tool> {
         | "revise_goal"
         | "update_phase"
         | "update_todo"
+        | "load_worker_template"
     )
   });
   tools.push(schema("worker_question", "Ask the parent coder agent a question when blocked.", json!({"type":"object","properties":{"question":{"type":"string"}},"required":["question"],"additionalProperties":false})));
@@ -155,6 +161,7 @@ pub fn is_read_only_tool(name: &str) -> bool {
       | "web_read"
       | "code_web_context"
       | "load_skill"
+      | "load_worker_template"
   )
 }
 

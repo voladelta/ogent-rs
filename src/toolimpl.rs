@@ -42,6 +42,7 @@ pub async fn execute_tool(mut ctx: ToolContext<'_>, name: &str, args: &str) -> R
     "update_phase" => update_phase(ctx.agent.as_deref_mut(), args),
     "update_todo" => update_todo(ctx.agent.as_deref_mut(), args),
     "load_skill" => load_skill(args),
+    "load_worker_template" => load_worker_template(args),
     "dispatch_worker" => dispatch_worker(args).await,
     "start_workers" => start_workers(ctx.agent.as_deref_mut(), args).await,
     "check_workers" => check_workers(ctx.agent.as_deref_mut(), args).await,
@@ -537,6 +538,22 @@ fn load_skill(args: &str) -> Result<String> {
   let (name, root, body) = crate::prompts::load_skill_content(&args.name)?;
   Ok(format!(
     "<skill name=\"{name}\" root=\"{root}\">\n{body}\n</skill>"
+  ))
+}
+
+#[derive(Deserialize)]
+struct LoadWorkerTemplateArgs {
+  name: String,
+}
+
+fn load_worker_template(args: &str) -> Result<String> {
+  let args: LoadWorkerTemplateArgs = parse_args(args)?;
+  require_nonempty(&args.name, "name")?;
+  let template = crate::prompts::get_worker_template(&args.name)
+    .ok_or_else(|| anyhow::anyhow!("unknown worker template: {}. Use generic, tester, or reviewer.", args.name))?;
+  Ok(format!(
+    "<worker_template name=\"{}\">\n{}\n</worker_template>",
+    args.name, template
   ))
 }
 
