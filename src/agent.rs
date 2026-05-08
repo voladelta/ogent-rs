@@ -1,4 +1,4 @@
-use anyhow::{Result, bail};
+use anyhow::Result;
 
 use crate::client::Client;
 use crate::task_tracker::{TaskTracker, is_tracking_tool_name};
@@ -98,7 +98,8 @@ impl Agent {
     loop {
       if max_turns > 0 && turn > max_turns {
         self.report_tokens();
-        bail!("exceeded max turns ({max_turns})");
+        eprintln!("\nReached max turns ({max_turns}). Session saved. Resume with ogent --resume.");
+        return Ok(self.messages.clone());
       }
       eprintln!(
         "\n--- turn {turn} | tokens: {} ---",
@@ -176,7 +177,7 @@ impl Agent {
 
       if max_turns > 0 && turn > max_turns {
         tui.log.push(format!(
-          "[steer] reached max turns ({max_turns}); exiting cleanly"
+          "[steer] reached max turns ({max_turns}); exiting cleanly. Resume with ogent --resume."
         ));
         return Ok(self.messages.clone());
       }
@@ -729,27 +730,48 @@ fn turn_budget_reminder(max_turns: i32, turn: i32) -> Option<String> {
     return None;
   }
   let remaining = max_turns - turn + 1;
-  if turn != 1 && !matches!(remaining, 5 | 3 | 2 | 1) {
+
+  let tier = if remaining == 1 {
+    1
+  } else if remaining == 2 {
+    2
+  } else if remaining == 3 {
+    3
+  } else if max_turns >= 10 && remaining == max_turns / 2 {
+    4
+  } else if max_turns >= 10 && remaining == max_turns / 4 && max_turns / 4 >= 5 {
+    5
+  } else if turn == 1 {
+    6
+  } else {
     return None;
-  }
+  };
 
   let mut body = format!(
     "<system_reminder kind=\"turn_budget\">\nYou are on turn {turn} of {max_turns}. {remaining} turn{} remain including this one.\n",
     if remaining == 1 { "" } else { "s" }
   );
-  if remaining == 1 {
-    body.push_str(
-      "This is the final allowed turn. Do not start new exploratory work. Complete, handoff, or report the verified partial state.\n",
-    );
-  } else if remaining <= 3 {
-    body.push_str(
-      "Use the remaining turns for verification, tracking updates, completion, or a necessary handoff. Avoid new exploratory delegation unless it directly completes the task.\n",
-    );
-  } else {
-    body.push_str(
-      "Use turns deliberately. If useful work is parallelizable, delegate bounded side work while keeping the critical path local.\n",
-    );
-  }
+  match tier {
+    1 => body.push_str(
+      "This is the FINAL turn. If the task is done, call `complete`. Otherwise call `handoff` for the human to review and resume. Do not call tools that require follow-up verification.\n",
+    ),
+    2 => body.push_str(
+      "Two turns left. Do not start new work. Call `complete` if done, or `handoff` for the human to resume.\n",
+    ),
+    3 => body.push_str(
+      "Three turns left. If done, call `complete`. Otherwise finish the current chunk and prepare to `handoff` for human review and resume.\n",
+    ),
+    4 => body.push_str(
+      "Half the turn budget is used. If useful work is parallelizable and delegatable, delegate coworkers now. Keep the critical path local.\n",
+    ),
+    5 => body.push_str(
+      "Three-quarters of the turn budget is used. Focus on verification, tracking updates, completion, or a necessary handoff. Avoid new exploratory delegation.\n",
+    ),
+    6 => body.push_str(
+      "Use turns deliberately. If useful work is parallelizable and delegatable, delegate coworkers now while keeping the critical path local.\n",
+    ),
+    _ => {}
+  };
   body.push_str("</system_reminder>");
   Some(body)
 }
@@ -760,15 +782,33 @@ mod turn_budget_tests {
 
   #[test]
   fn turn_budget_emits_first_turn() {
-    let reminder = turn_budget_reminder(20, 1).expect("first turn should be shown");
-    assert!(reminder.contains("turn 1 of 20"));
-    assert!(reminder.contains("delegate bounded side work"));
+    let r = turn_budget_reminder(20, 1).expect("first turn should be shown");
+    assert!(r.contains("turn 1 of 20"));
+    assert!(r.contains("Use turns deliberately"));
   }
 
   #[test]
-  fn turn_budget_emits_thresholds_only_after_first_turn() {
+  fn turn_budget_fires_50_percent() {
+    let r = turn_budget_reminder(20, 11).expect("50% should fire");
+    assert!(r.contains("Half the turn budget"));
+    assert!(r.contains("delegate coworkers now"));
+  }
+
+  #[test]
+  fn turn_budget_fires_25_percent() {
+    let r = turn_budget_reminder(20, 16).expect("25% should fire");
+    assert!(r.contains("Three-quarters of the turn budget"));
+  }
+
+  #[test]
+  fn turn_budget_skips_mid_turns() {
     assert!(turn_budget_reminder(20, 10).is_none());
-    assert!(turn_budget_reminder(20, 16).is_some());
+    assert!(turn_budget_reminder(20, 12).is_none());
+    assert!(turn_budget_reminder(20, 14).is_none());
+  }
+
+  #[test]
+  fn turn_budget_fires_3_2_1() {
     assert!(turn_budget_reminder(20, 18).is_some());
     assert!(turn_budget_reminder(20, 19).is_some());
     assert!(turn_budget_reminder(20, 20).is_some());
@@ -776,14 +816,28 @@ mod turn_budget_tests {
 
   #[test]
   fn turn_budget_final_turn_is_explicit() {
-    let reminder = turn_budget_reminder(3, 3).expect("final turn should be shown");
-    assert!(reminder.contains("final allowed turn"));
-    assert!(reminder.contains("Complete, handoff, or report"));
+    let r = turn_budget_reminder(3, 3).expect("final turn should be shown");
+    assert!(r.contains("FINAL turn"));
+    assert!(r.contains("handoff"));
+  }
+
+  #[test]
+  fn turn_budget_two_left() {
+    let r = turn_budget_reminder(5, 4).expect("two-left should fire");
+    assert!(r.contains("Two turns left"));
+    assert!(r.contains("handoff"));
   }
 
   #[test]
   fn turn_budget_ignores_unbounded_runs() {
     assert!(turn_budget_reminder(-1, 1).is_none());
     assert!(turn_budget_reminder(0, 1).is_none());
+  }
+
+  #[test]
+  fn turn_budget_small_budget_no_percentages() {
+    assert!(turn_budget_reminder(8, 4).is_none()); // would be 50% at remaining=4
+    assert!(turn_budget_reminder(8, 6).is_some()); // remaining=3
+    assert!(turn_budget_reminder(8, 8).is_some()); // remaining=1
   }
 }

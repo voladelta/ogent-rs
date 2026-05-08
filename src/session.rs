@@ -55,6 +55,39 @@ pub fn find_latest_handoff(dir: &str) -> Option<String> {
   entries.last().map(|e| e.path().display().to_string())
 }
 
+pub fn find_latest_session(dir: &str) -> Option<String> {
+  let mut entries: Vec<_> = fs::read_dir(dir)
+    .ok()?
+    .flatten()
+    .filter(|e| {
+      let path = e.path();
+      let ext_ok = path.extension().is_some_and(|ext| ext == "jsonl");
+      let name_ok = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .map(|name| !name.contains("-worker-"))
+        .unwrap_or(false);
+      ext_ok && name_ok
+    })
+    .collect();
+  entries.sort_by_key(|e| e.file_name());
+  entries.last().map(|e| e.path().display().to_string())
+}
+
+pub fn load_session(path: &str) -> Result<Vec<Message>> {
+  let data = fs::read_to_string(path)?;
+  let mut messages = Vec::new();
+  for line in data.lines() {
+    if line.trim().is_empty() {
+      continue;
+    }
+    let msg: Message = serde_json::from_str(line)
+      .map_err(|e| anyhow::anyhow!("parse error in session file: {e}"))?;
+    messages.push(msg);
+  }
+  Ok(messages)
+}
+
 pub fn timestamp() -> String {
   use std::time::{SystemTime, UNIX_EPOCH};
   SystemTime::now()
