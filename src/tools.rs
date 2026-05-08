@@ -1,4 +1,5 @@
 use anyhow::{Result, bail};
+use std::sync::OnceLock;
 use serde_json::{Value, json};
 
 use crate::agent::Agent;
@@ -12,7 +13,32 @@ pub async fn execute_tool(ctx: ToolContext<'_>, name: &str, args: &str) -> Resul
   crate::toolimpl::execute_tool(ctx, name, args).await
 }
 
+static CODER_TOOLS: OnceLock<Vec<Tool>> = OnceLock::new();
+static WORKER_TOOLS: OnceLock<Vec<Tool>> = OnceLock::new();
+
 pub fn configured_coder_tools(_steer: bool) -> Vec<Tool> {
+  CODER_TOOLS.get_or_init(build_coder_tools).clone()
+}
+
+pub fn configured_worker_tools() -> Vec<Tool> {
+  WORKER_TOOLS.get_or_init(build_worker_tools).clone()
+}
+
+const WORKER_EXCLUDED: &[&str] = &[
+  "dispatch_worker",
+  "start_workers",
+  "check_workers",
+  "handoff",
+  "complete",
+  "question",
+  "set_goal",
+  "revise_goal",
+  "update_phase",
+  "update_todo",
+  "load_worker_template",
+];
+
+fn build_coder_tools() -> Vec<Tool> {
   vec![
     schema(
       "read_file",
@@ -122,33 +148,18 @@ pub fn configured_coder_tools(_steer: bool) -> Vec<Tool> {
   ]
 }
 
-pub fn configured_worker_tools() -> Vec<Tool> {
-  let mut tools = configured_coder_tools(false);
-  tools.retain(|t| {
-    !matches!(
-      t.function.name.as_str(),
-      "dispatch_worker"
-        | "start_workers"
-        | "check_workers"
-        | "handoff"
-        | "complete"
-        | "question"
-        | "set_goal"
-        | "revise_goal"
-        | "update_phase"
-        | "update_todo"
-        | "load_worker_template"
-    )
-  });
+fn build_worker_tools() -> Vec<Tool> {
+  let mut tools: Vec<Tool> = build_coder_tools()
+    .into_iter()
+    .filter(|t| !WORKER_EXCLUDED.contains(&t.function.name.as_str()))
+    .collect();
   tools.push(schema("worker_question", "Ask the parent coder agent a question when blocked.", json!({"type":"object","properties":{"question":{"type":"string"}},"required":["question"],"additionalProperties":false})));
   tools.push(schema("worker_complete", "Finish this worker subprocess and return a concise Markdown summary to the parent coder.", json!({"type":"object","properties":{"summary":{"type":"string","description":"Concise Markdown summary for the parent coder"}},"required":["summary"],"additionalProperties":false})));
   tools
 }
 
 pub fn remove_question(tools: &mut Vec<Tool>) {
-  if tools.last().is_some_and(|t| t.function.name == "question") {
-    tools.pop();
-  }
+  tools.retain(|t| t.function.name != "question");
 }
 
 pub fn is_read_only_tool(name: &str) -> bool {

@@ -5,10 +5,8 @@ use std::sync::OnceLock;
 pub fn workspace_root() -> &'static Path {
   static ROOT: OnceLock<PathBuf> = OnceLock::new();
   ROOT.get_or_init(|| {
-    std::env::current_dir()
-      .unwrap_or_else(|_| PathBuf::from("."))
-      .canonicalize()
-      .unwrap_or_else(|_| PathBuf::from("."))
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    normalize(&cwd)
   })
 }
 
@@ -55,19 +53,18 @@ fn absolute_tool_path(path: &str) -> PathBuf {
 }
 
 fn path_in_workspace(path: &Path) -> bool {
-  path_in_root(path, workspace_root())
+  let path = normalize(path);
+  let root = workspace_root();
+  path == *root || path.starts_with(root)
 }
 
 fn path_in_allowed_root(path: &Path) -> bool {
-  std::env::var_os("HOME")
-    .map(|h| path_in_root(path, &PathBuf::from(h).join(".ogent")))
-    .unwrap_or(false)
-}
-
-fn path_in_root(path: &Path, root: &Path) -> bool {
+  let Some(home) = std::env::var_os("HOME") else {
+    return false;
+  };
   let path = normalize(path);
-  let root = normalize(root);
-  path == root || path.starts_with(root)
+  let root = normalize(&PathBuf::from(home).join(".ogent"));
+  path == root || path.starts_with(&root)
 }
 
 fn normalize(path: &Path) -> PathBuf {

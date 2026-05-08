@@ -194,10 +194,8 @@ async fn main() -> Result<()> {
     if let Some(summary) = agent.completion_summary.as_deref() {
       print!("{summary}");
     }
-  } else {
-    if let Some(summary) = agent.completion_summary.as_deref() {
-      session::append_journal(&session_id, summary)?;
-    }
+  } else if let Some(summary) = agent.completion_summary.as_deref() {
+    session::append_journal(&session_id, summary)?;
   }
   Ok(())
 }

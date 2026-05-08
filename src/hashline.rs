@@ -27,11 +27,12 @@ pub fn render_hashlines(
 }
 
 pub fn source_lines(source: &str) -> Vec<String> {
-  let mut lines: Vec<String> = source.split('\n').map(String::from).collect();
-  if lines.last().is_some_and(|s| s.is_empty()) {
-    lines.pop();
+  let has_trailing = source.ends_with('\n');
+  let s = if has_trailing { &source[..source.len() - 1] } else { source };
+  if s.is_empty() {
+    return Vec::new();
   }
-  lines
+  s.split('\n').map(String::from).collect()
 }
 
 fn line_hash(line: &str) -> String {

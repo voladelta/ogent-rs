@@ -61,7 +61,7 @@ impl Client {
     req_body: &Value,
     cancel: Option<&tokio_util::sync::CancellationToken>,
   ) -> Result<ChatResponse> {
-    if cancel.is_some_and(|c| c.is_cancelled()) {
+    if cancel.is_some_and(tokio_util::sync::CancellationToken::is_cancelled) {
       return Err(
         crate::types::ChatAbortedError {
           resp: ChatResponse::default(),

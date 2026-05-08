@@ -48,27 +48,24 @@ pub fn append_journal(session_id: &str, summary: &str) -> Result<()> {
 }
 
 pub fn find_latest_handoff(dir: &str) -> Option<String> {
-  let mut entries: Vec<_> = fs::read_dir(dir)
-    .ok()?
-    .flatten()
-    .filter(|e| e.path().extension().is_some_and(|ext| ext == "md"))
-    .collect();
-  entries.sort_by_key(|e| e.metadata().and_then(|m| m.modified()).ok());
-  entries.last().map(|e| e.path().display().to_string())
+  find_latest_file(dir, "md", |_| true)
 }
 
 pub fn find_latest_session(dir: &str) -> Option<String> {
+  find_latest_file(dir, "jsonl", |name| !name.contains("-worker-"))
+}
+
+fn find_latest_file(dir: &str, ext: &str, name_filter: fn(&str) -> bool) -> Option<String> {
   let mut entries: Vec<_> = fs::read_dir(dir)
     .ok()?
     .flatten()
     .filter(|e| {
       let path = e.path();
-      let ext_ok = path.extension().is_some_and(|ext| ext == "jsonl");
-      let name_ok = path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .is_some_and(|name| !name.contains("-worker-"));
-      ext_ok && name_ok
+      path.extension().is_some_and(|e| e == ext)
+        && path
+          .file_name()
+          .and_then(|n| n.to_str())
+          .is_some_and(name_filter)
     })
     .collect();
   entries.sort_by_key(|e| e.metadata().and_then(|m| m.modified()).ok());

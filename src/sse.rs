@@ -82,19 +82,28 @@ pub async fn parse_sse_response(
   let mut acc: Vec<AccToolCall> = Vec::new();
   let mut stream = resp.bytes_stream();
   let mut buf = String::new();
+  let mut consumed = 0;
 
   while let Some(item) = stream.next().await {
-    if cancel.is_some_and(|c| c.is_cancelled()) {
+    if cancel.is_some_and(tokio_util::sync::CancellationToken::is_cancelled) {
       flush_tool_calls(&mut acc, &mut result);
       return Err(crate::types::ChatAbortedError { resp: result }.into());
     }
     let bytes = item.context("read sse")?;
     buf.push_str(&String::from_utf8_lossy(&bytes));
-    while let Some(pos) = buf.find('\n') {
-      let line = buf[..pos].trim_end_matches('\r');
+    while let Some(pos) = buf[consumed..].find('\n') {
+      let abs_pos = consumed + pos;
+      let line = buf[consumed..abs_pos].trim_end_matches('\r');
       process_line(line, &mut result, &mut acc);
-      buf.drain(..=pos);
+      consumed = abs_pos + 1;
     }
+    if consumed > 0 {
+      buf.drain(..consumed);
+      consumed = 0;
+    }
+  }
+  if !buf[consumed..].is_empty() {
+    process_line(buf[consumed..].trim_end_matches('\r'), &mut result, &mut acc);
   }
   flush_tool_calls(&mut acc, &mut result);
   Ok(result)

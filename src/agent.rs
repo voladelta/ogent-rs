@@ -100,7 +100,7 @@ impl Agent {
           if let Some(idx) = first.content.find(WORKFLOW_MARKER) {
             first.content.truncate(idx);
           }
-          first.content.push_str(&format!("{WORKFLOW_MARKER}\n{reminder}"));
+          let _ = std::fmt::Write::write_fmt(&mut first.content, format_args!("{WORKFLOW_MARKER}\n{reminder}"));
         }
     }
   }
@@ -232,7 +232,7 @@ impl Agent {
               }
               SteerEvent::Complete => {
                 cancel.cancel();
-                steer_msg = Some(manual_complete_reminder());
+                steer_msg = Some(MANUAL_COMPLETE_REMINDER.to_string());
               }
               SteerEvent::Exit => {
                 cancel.cancel();
@@ -357,7 +357,7 @@ impl Agent {
       if auto_continue && !self.compact.compacting && !pushed_worker_status {
         self.messages.push(Message {
           role: "user".into(),
-          content: auto_continue_reminder(),
+          content: AUTO_CONTINUE_REMINDER.to_string(),
           ..Default::default()
         });
       }
@@ -394,7 +394,7 @@ impl Agent {
         tui.log.push("[steer] no in-flight request to cancel");
       }
       SteerEvent::Complete => {
-        let content = manual_complete_reminder();
+        let content = MANUAL_COMPLETE_REMINDER.to_string();
         self.messages.push(Message {
           role: "user".into(),
           content: content.clone(),
@@ -485,7 +485,7 @@ impl Agent {
         read_only_batch.clear();
       }
       let output = self.run_tool_call(tc).await;
-      let is_interactive = output == "ERROR: interactive mode required";
+      let is_interactive = output == INTERACTIVE_ERR;
       results.push(ToolResult {
         name: tc.function.name.clone(),
         args: tc.function.arguments.clone(),
@@ -516,19 +516,18 @@ impl Agent {
   }
 
   async fn run_tool_call(&mut self, tc: &ToolCall) -> String {
-    match execute_tool(
-      ToolContext { agent: Some(self) },
-      &tc.function.name,
-      &tc.function.arguments,
-    )
-    .await
-    {
-      Ok(out) => out,
-      Err(e) if e.to_string() == "interactive mode required" => {
-        "ERROR: interactive mode required".to_string()
-      }
-      Err(e) => format!("ERROR: {e}"),
+    let (output, is_interactive) = format_tool_result(
+      execute_tool(
+        ToolContext { agent: Some(self) },
+        &tc.function.name,
+        &tc.function.arguments,
+      )
+      .await,
+    );
+    if is_interactive {
+      return INTERACTIVE_ERR.to_string();
     }
+    output
   }
 
   fn check_compact(&mut self) {
@@ -663,15 +662,23 @@ impl Agent {
   }
 }
 
+const INTERACTIVE_ERR: &str = "ERROR: interactive mode required";
+
+fn format_tool_result(result: Result<String>) -> (String, bool) {
+  match result {
+    Ok(out) => (out, false),
+    Err(e) if e.to_string() == "interactive mode required" => {
+      (INTERACTIVE_ERR.to_string(), true)
+    }
+    Err(e) => (format!("ERROR: {e}"), false),
+  }
+}
+
 async fn run_read_only_batch(batch: &[&ToolCall]) -> anyhow::Result<Vec<ToolResult>> {
   let futs = batch.iter().map(|tc| async {
-    let output = match execute_tool(ToolContext { agent: None }, &tc.function.name, &tc.function.arguments).await {
-      Ok(out) => out,
-      Err(e) if e.to_string() == "interactive mode required" => {
-        "ERROR: interactive mode required".to_string()
-      }
-      Err(e) => format!("ERROR: {e}"),
-    };
+    let (output, _) = format_tool_result(
+      execute_tool(ToolContext { agent: None }, &tc.function.name, &tc.function.arguments).await,
+    );
     ToolResult {
       name: tc.function.name.clone(),
       args: tc.function.arguments.clone(),
@@ -679,7 +686,7 @@ async fn run_read_only_batch(batch: &[&ToolCall]) -> anyhow::Result<Vec<ToolResu
     }
   });
   let results = futures_util::future::join_all(futs).await;
-  if results.iter().any(|r| r.output == "ERROR: interactive mode required") {
+  if results.iter().any(|r| r.output == INTERACTIVE_ERR) {
     return Err(InteractiveRequiredError.into());
   }
   Ok(results)
@@ -689,12 +696,21 @@ fn truncate(s: &str, n: usize) -> String {
   if s.len() <= n && !s.contains('\n') {
     return s.to_string();
   }
-  let escaped = s.replace('\n', "\\n");
+  let mut escaped = String::with_capacity(s.len());
+  for c in s.chars() {
+    if c == '\n' {
+      escaped.push_str("\\n");
+    } else {
+      escaped.push(c);
+    }
+  }
   if escaped.len() <= n {
     escaped
   } else {
     let end = escaped.floor_char_boundary(n);
-    format!("{}...", &escaped[..end])
+    escaped.truncate(end);
+    escaped.push_str("...");
+    escaped
   }
 }
 
@@ -713,8 +729,7 @@ mod truncate_tests {
   }
 }
 
-fn auto_continue_reminder() -> String {
-  r#"<system_reminder kind="auto_continue">
+const AUTO_CONTINUE_REMINDER: &str = r#"<system_reminder kind="auto_continue">
 Auto mode is enabled. Prefer action over extended analysis. Continue only if useful work remains.
 
 Before continuing:
@@ -726,12 +741,9 @@ Before continuing:
 - If blocked by missing expertise, uncertainty, or parallelizable review, dispatch a scoped worker with exact paths, evidence, success criteria, and expected summary format.
 - If context is getting large, write a checkpoint for yourself and prefer finishing the current chunk over starting new work.
 - If continuation would be speculative or unsafe, call `complete` with the current state and limitation.
-</system_reminder>"#
-    .to_string()
-}
+</system_reminder>"#;
 
-fn manual_complete_reminder() -> String {
-  r#"<system_reminder kind="manual_complete">
+const MANUAL_COMPLETE_REMINDER: &str = r#"<system_reminder kind="manual_complete">
 The user requested completion from steer mode.
 
 Summarize the current session retrospectively and call `complete` with structured Markdown:
@@ -740,9 +752,7 @@ Summarize the current session retrospectively and call `complete` with structure
 - what you learned
 - what to do better next time
 - optional evidence: files touched, tests run, git head
-</system_reminder>"#
-    .to_string()
-}
+</system_reminder>"#;
 
 fn turn_budget_reminder(max_turns: i32, turn: i32) -> Option<String> {
   if max_turns <= 0 || turn <= 0 || turn > max_turns {

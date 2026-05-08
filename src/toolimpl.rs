@@ -215,7 +215,7 @@ fn repo_map_walk(
   }
   if path.is_dir() && depth < max_depth {
     let mut entries: Vec<_> = fs::read_dir(path)?.flatten().collect();
-    entries.sort_by_key(|e| e.file_name());
+    entries.sort_by_key(std::fs::DirEntry::file_name);
     for entry in entries {
       let name = entry.file_name();
       let name = name.to_string_lossy();
@@ -338,11 +338,17 @@ async fn code_web_context(args: &str) -> Result<String> {
   Ok(v["response"].as_str().unwrap_or("").to_string())
 }
 
-async fn exa_post(url: &str, body: Value) -> Result<Value> {
-  let key = std::env::var("EXA_API_KEY").unwrap_or_default();
+fn exa_api_key() -> Result<&'static str> {
+  static KEY: OnceLock<String> = OnceLock::new();
+  let key = KEY.get_or_init(|| std::env::var("EXA_API_KEY").unwrap_or_default());
   if key.is_empty() {
     bail!("EXA_API_KEY not set");
   }
+  Ok(key)
+}
+
+async fn exa_post(url: &str, body: Value) -> Result<Value> {
+  let key = exa_api_key()?;
   let resp = exa_client()
     .post(url)
     .header("x-api-key", key)
@@ -417,7 +423,7 @@ fn set_goal(agent: Option<&mut crate::agent::Agent>, args: &str) -> Result<Strin
     agent
       .task_tracker
       .as_ref()
-      .map(|tracker| tracker.render_tool_snapshot())
+      .map(crate::task_tracker::TaskTracker::render_tool_snapshot)
       .unwrap_or_else(|| "Goal initialized.".to_string()),
   )
 }
@@ -588,8 +594,7 @@ async fn start_workers(agent: Option<&mut crate::agent::Agent>, args: &str) -> R
   }
 }
 
-async fn check_workers(agent: Option<&mut crate::agent::Agent>, args: &str) -> Result<String> {
-  let _: Value = serde_json::from_str(args).unwrap_or_else(|_| json!({}));
+async fn check_workers(agent: Option<&mut crate::agent::Agent>, _args: &str) -> Result<String> {
   Ok(match agent {
     Some(agent) => agent.worker_manager.check().await,
     None => crate::workers::WorkerManager::new().check().await,
@@ -634,7 +639,7 @@ fn complete(agent: Option<&mut crate::agent::Agent>, args: &str) -> Result<Strin
   if agent
     .task_tracker
     .as_ref()
-    .is_some_and(|tracker| tracker.open_phase_or_todo_exists())
+    .is_some_and(crate::task_tracker::TaskTracker::open_phase_or_todo_exists)
   {
     if !agent.complete_open_work_warned {
       agent.complete_open_work_warned = true;
@@ -666,8 +671,14 @@ fn summary_has_limitation_and_intent(summary: &str) -> bool {
 fn clean_strings(values: Vec<String>) -> Vec<String> {
   values
     .into_iter()
-    .map(|value| value.trim().to_string())
-    .filter(|value| !value.is_empty())
+    .map(|mut s| {
+      let trimmed = s.trim();
+      if trimmed.len() != s.len() {
+        s = trimmed.to_string();
+      }
+      s
+    })
+    .filter(|s| !s.is_empty())
     .collect()
 }
 

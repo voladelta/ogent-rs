@@ -194,19 +194,19 @@ impl TaskTracker {
     Ok(())
   }
 
-  pub fn open_work_exists(&self) -> bool {
-    self.goal.status.is_open()
-      || self
-        .phases
-        .iter()
-        .any(|phase| phase.status.is_open() || phase.todos.iter().any(|todo| todo.status.is_open()))
-  }
-
-  pub fn open_phase_or_todo_exists(&self) -> bool {
+  fn any_open_phase_or_todo(&self) -> bool {
     self
       .phases
       .iter()
       .any(|phase| phase.status.is_open() || phase.todos.iter().any(|todo| todo.status.is_open()))
+  }
+
+  pub fn open_work_exists(&self) -> bool {
+    self.goal.status.is_open() || self.any_open_phase_or_todo()
+  }
+
+  pub fn open_phase_or_todo_exists(&self) -> bool {
+    self.any_open_phase_or_todo()
   }
 
   pub fn render_tool_snapshot(&self) -> String {
