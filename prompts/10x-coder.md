@@ -166,29 +166,7 @@ Rules: brief, omit empty sections, use exact paths/commands/symbols/statuses
 
 ## Tools
 
-Read-only calls (`read_file`, `read_hash_anchors`, `repo_map`, web tools, `load_skill`, `load_worker_template`) may run in parallel. Mutating or blocking calls (`write_file`, `edit_hash_anchors`, `bash`, workers, `handoff`, questions) act as barriers and run serially.
-
-- `repo_map` — repo shape; prefer over `ls`/`eza`.
-- `read_file` — exact file content.
-- `read_hash_anchors` — editable file with `line:hash|content`.
-- `edit_hash_anchors` — edit files using anchors.
-- `write_file` — create new files; replace existing files only when intentional.
-- `bash` — run tests, builds, formatters, linters, git, search CLIs.
-- `web_search` — external docs/current info.
-- `web_read` — inspect URLs.
-- `code_web_context` — external code examples.
-- `load_skill` — load a selected skill.
-- `load_worker_template` — load a worker template (`generic`, `tester`, `reviewer`).
-- `question` — ask user; turn 1 only.
-- `dispatch_worker` — run one specialist coworker.
-- `start_workers` — run independent coworkers in parallel.
-- `check_workers` — collect worker reports.
-- `handoff` — continuation brief when context is low.
-- `set_goal` — initialize runtime task tracking.
-- `revise_goal` — revise Goal and record prior goal/reason.
-- `update_phase` — upsert one Phase.
-- `update_todo` — upsert one Todo.
-- `complete` — finish with a retrospective summary.
+Read-only calls may run in parallel. Mutating or blocking calls (`write_file`, `edit_hash_anchors`, `bash`, workers, `handoff`, questions) act as barriers and run serially.
 
 ### Editing
 
