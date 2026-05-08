@@ -10,7 +10,9 @@ use crossterm::terminal::{
 };
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
-use ratatui::layout::{Constraint, Direction, Layout, Margin};
+use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
+use nucleo_matcher::{Config, Matcher};
+use ratatui::layout::{Constraint, Direction, Layout, Margin, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{
@@ -173,6 +175,7 @@ fn run_ui(
   )?;
   let backend = CrosstermBackend::new(stdout);
   let mut terminal = Terminal::new(backend)?;
+  terminal.show_cursor()?;
   let result = run_ui_loop(&mut terminal, tx, log, status, stop);
 
   let _ = execute!(
@@ -197,9 +200,12 @@ fn run_ui_loop(
   let mut input = String::new();
   let mut scroll_y: usize = 0;
   let mut follow_bottom = true;
+  let mut file_selector: Option<FileSelector> = None;
+  let mut selector_start: usize = 0;
+  let mut all_files: Option<Vec<String>> = None;
 
   while !stop.load(Ordering::Relaxed) {
-    let (log_height, max_scroll_y) = draw(terminal, &log, &status, &mut scroll_y, follow_bottom)?;
+    let (log_height, max_scroll_y) = draw(terminal, &log, &status, &mut scroll_y, follow_bottom, file_selector.as_ref())?;
     if event::poll(Duration::from_millis(100))? {
       match event::read()? {
         Event::Key(key) => {
@@ -212,54 +218,107 @@ fn run_ui_loop(
               break;
             }
             KeyCode::Char(c) => {
-              input.push(c);
-              follow_bottom = true;
-            }
-            KeyCode::Backspace => {
-              input.pop();
-            }
-            KeyCode::Enter => {
-              let line = input.trim().to_string();
-              input.clear();
-              status.set_input(String::new());
-              follow_bottom = true;
-              let event = parse_steer_event(&line);
-              let exit = matches!(event, SteerEvent::Exit);
-              let _ = tx.send(event);
-              if exit {
-                break;
-              }
-            }
-            KeyCode::Esc => {
-              let _ = tx.send(SteerEvent::Exit);
-              break;
-            }
-            KeyCode::Up => {
-              follow_bottom = false;
-              scroll_y = scroll_y.saturating_sub(1);
-            }
-            KeyCode::Down => {
-              scroll_y = scroll_y.saturating_add(1);
-              if scroll_y >= max_scroll_y {
+              if let Some(ref mut selector) = file_selector {
+                selector.update_query(c);
+                input.push(c);
+              } else {
+                if c == '@' {
+                  if all_files.is_none() {
+                    all_files = Some(collect_workspace_files());
+                  }
+                  selector_start = input.len();
+                  file_selector = Some(FileSelector::new(all_files.as_ref().unwrap().clone()));
+                }
+                input.push(c);
                 follow_bottom = true;
               }
             }
-            KeyCode::PageUp => {
+            KeyCode::Backspace => {
+              if let Some(ref mut selector) = file_selector {
+                selector.backspace();
+                input.pop();
+                if input.len() <= selector_start {
+                  file_selector = None;
+                }
+              } else {
+                input.pop();
+              }
+            }
+            KeyCode::Enter => {
+              if let Some(ref mut selector) = file_selector {
+                let filtered = selector.filtered();
+                if let Some(selected) = filtered.get(selector.selected) {
+                  input.truncate(selector_start);
+                  input.push_str(selected);
+                }
+                file_selector = None;
+              } else {
+                let line = input.trim().to_string();
+                input.clear();
+                status.set_input(String::new());
+                follow_bottom = true;
+                let event = parse_steer_event(&line);
+                let exit = matches!(event, SteerEvent::Exit);
+                let _ = tx.send(event);
+                if exit {
+                  break;
+                }
+              }
+            }
+            KeyCode::Esc => {
+              if file_selector.is_some() {
+                file_selector = None;
+              } else {
+                let _ = tx.send(SteerEvent::Exit);
+                break;
+              }
+            }
+            KeyCode::Up => {
+              if let Some(ref mut selector) = file_selector {
+                selector.selected = selector.selected.saturating_sub(1);
+              } else {
+                follow_bottom = false;
+                scroll_y = scroll_y.saturating_sub(1);
+              }
+            }
+            KeyCode::Down => {
+              if let Some(ref mut selector) = file_selector {
+                let filtered_count = selector.filtered().len();
+                if selector.selected + 1 < filtered_count {
+                  selector.selected += 1;
+                }
+              } else {
+                scroll_y = scroll_y.saturating_add(1);
+                if scroll_y >= max_scroll_y {
+                  follow_bottom = true;
+                }
+              }
+            }
+            KeyCode::PageUp if file_selector.is_none() => {
               follow_bottom = false;
               scroll_y = scroll_y.saturating_sub(log_height as usize);
             }
-            KeyCode::PageDown => {
+            KeyCode::PageDown if file_selector.is_none() => {
               scroll_y = scroll_y.saturating_add(log_height as usize);
               if scroll_y >= max_scroll_y {
                 follow_bottom = true;
               }
             }
             KeyCode::Home => {
-              follow_bottom = false;
-              scroll_y = 0;
+              if let Some(ref mut selector) = file_selector {
+                selector.selected = 0;
+              } else {
+                follow_bottom = false;
+                scroll_y = 0;
+              }
             }
             KeyCode::End => {
-              follow_bottom = true;
+              if let Some(ref mut selector) = file_selector {
+                let filtered_count = selector.filtered().len();
+                selector.selected = filtered_count.saturating_sub(1);
+              } else {
+                follow_bottom = true;
+              }
             }
             _ => {}
           }
@@ -267,13 +326,22 @@ fn run_ui_loop(
         }
         Event::Mouse(mouse) => match mouse.kind {
           MouseEventKind::ScrollUp => {
-            follow_bottom = false;
-            scroll_y = scroll_y.saturating_sub(3);
+            if let Some(ref mut selector) = file_selector {
+              selector.selected = selector.selected.saturating_sub(3);
+            } else {
+              follow_bottom = false;
+              scroll_y = scroll_y.saturating_sub(3);
+            }
           }
           MouseEventKind::ScrollDown => {
-            scroll_y = scroll_y.saturating_add(3);
-            if scroll_y >= max_scroll_y {
-              follow_bottom = true;
+            if let Some(ref mut selector) = file_selector {
+              let filtered_count = selector.filtered().len();
+              selector.selected = (selector.selected + 3).min(filtered_count.saturating_sub(1));
+            } else {
+              scroll_y = scroll_y.saturating_add(3);
+              if scroll_y >= max_scroll_y {
+                follow_bottom = true;
+              }
             }
           }
           _ => {}
@@ -297,12 +365,97 @@ pub fn parse_steer_event(line: &str) -> SteerEvent {
   }
 }
 
+struct FileSelector {
+  files: Vec<String>,
+  query: String,
+  selected: usize,
+  filtered_cache: Vec<String>,
+}
+
+impl FileSelector {
+  fn new(files: Vec<String>) -> Self {
+    Self {
+      files,
+      query: String::new(),
+      selected: 0,
+      filtered_cache: Vec::new(),
+    }
+  }
+
+  fn update_query(&mut self, c: char) {
+    self.query.push(c);
+    self.selected = 0;
+    self.recompute();
+  }
+
+  fn backspace(&mut self) {
+    self.query.pop();
+    self.selected = 0;
+    self.recompute();
+  }
+
+  fn recompute(&mut self) {
+    if self.query.is_empty() {
+      self.filtered_cache.clear();
+    } else {
+      let mut matcher = Matcher::new(Config::DEFAULT.match_paths());
+      let pattern = Pattern::parse(&self.query, CaseMatching::Ignore, Normalization::Smart);
+      let matches = pattern.match_list(&self.files, &mut matcher);
+      self.filtered_cache.clear();
+      self.filtered_cache.extend(matches.into_iter().map(|(s, _)| s.to_string()));
+    }
+  }
+
+  fn filtered(&self) -> &[String] {
+    if self.query.is_empty() {
+      &self.files
+    } else {
+      &self.filtered_cache
+    }
+  }
+}
+
+fn collect_workspace_files() -> Vec<String> {
+  let mut files = Vec::new();
+  let root = crate::workspace::workspace_root();
+  collect_files_recursive(root, root, &mut files);
+  files.sort();
+  files
+}
+
+fn collect_files_recursive(root: &std::path::Path, dir: &std::path::Path, files: &mut Vec<String>) {
+  if let Ok(entries) = std::fs::read_dir(dir) {
+    for entry in entries.flatten() {
+      let path = entry.path();
+      let name = entry.file_name();
+      let name_str = name.to_string_lossy();
+      if name_str.starts_with('.') {
+        continue;
+      }
+      if path.is_dir() {
+        match name_str.as_ref() {
+          "target" | "node_modules" | "__pycache__" | "build" | "dist" | "out" => continue,
+          _ => collect_files_recursive(root, &path, files),
+        }
+      } else {
+        if let Ok(rel) = path.strip_prefix(root) {
+          let rel_str = rel.to_string_lossy().replace('\\', "/");
+          if !rel_str.is_empty() {
+            files.push(rel_str);
+          }
+        }
+      }
+    }
+  }
+}
+
 fn draw(
   terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
   log: &UiLog,
   status: &UiStatus,
   scroll_y: &mut usize,
   follow_bottom: bool,
+  file_selector: Option<&FileSelector>,
 ) -> Result<(u16, usize)> {
   let status_snapshot = status.snapshot();
   let log_lines = log.snapshot();
@@ -360,15 +513,60 @@ fn draw(
     );
 
     let input_width = chunks[2].width.saturating_sub(3) as usize;
-    let input = tail_cells(&status_snapshot.input, input_width);
+    let input_text = tail_cells(&status_snapshot.input, input_width);
     frame.render_widget(
-      Paragraph::new(input).block(
+      Paragraph::new(input_text.as_str()).block(
         Block::default()
           .borders(Borders::ALL)
           .title("message or command"),
       ),
       chunks[2],
     );
+
+    if let Some(selector) = file_selector {
+      let filtered = selector.filtered();
+      let popup_width = (area.width * 3 / 5).clamp(40, 80);
+      let content_height = filtered.len().min(15) as u16;
+      let popup_height = content_height + 3;
+      let popup_x = (area.width.saturating_sub(popup_width)) / 2;
+      let popup_y = (area.height.saturating_sub(popup_height)) / 2;
+      let popup_area = Rect::new(popup_x, popup_y, popup_width, popup_height);
+
+      let mut lines = vec![Line::from(vec![
+        Span::raw("> "),
+        Span::raw(&selector.query),
+      ])];
+      let max_display = content_height as usize;
+      for (i, file) in filtered.iter().enumerate().take(max_display) {
+        let style = if i == selector.selected {
+          Style::default().bg(Color::Blue).fg(Color::White)
+        } else {
+          Style::default()
+        };
+        let display = tail_cells(file, popup_width.saturating_sub(2) as usize);
+        lines.push(Line::from(Span::styled(display, style)));
+      }
+      if filtered.is_empty() {
+        lines.push(Line::from(Span::styled(
+          "no matches",
+          Style::default().fg(Color::DarkGray),
+        )));
+      }
+
+      frame.render_widget(Clear, popup_area);
+      frame.render_widget(
+        Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title("file selector")),
+        popup_area,
+      );
+
+      let cursor_x = popup_area.x + 2 + UnicodeWidthStr::width(selector.query.as_str()) as u16;
+      let cursor_y = popup_area.y + 1;
+      frame.set_cursor_position((cursor_x.min(popup_area.x + popup_area.width - 1), cursor_y));
+    } else {
+      let input_display_width = UnicodeWidthStr::width(input_text.as_str()) as u16;
+      let input_area = chunks[2].inner(Margin { vertical: 1, horizontal: 1 });
+      frame.set_cursor_position((input_area.x + input_display_width, input_area.y));
+    }
   })?;
   Ok((log_height, max_scroll))
 }
