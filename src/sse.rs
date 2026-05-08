@@ -92,9 +92,8 @@ pub async fn parse_sse_response(
     buf.push_str(&String::from_utf8_lossy(&bytes));
     while let Some(pos) = buf.find('\n') {
       let line = buf[..pos].trim_end_matches('\r');
-      let rest = buf[pos + 1..].to_string();
       process_line(line, &mut result, &mut acc)?;
-      buf = rest;
+      buf.drain(..pos + 1);
     }
   }
   flush_tool_calls(&mut acc, &mut result);

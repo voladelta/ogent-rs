@@ -199,7 +199,7 @@ fn run_ui_loop(
   let mut follow_bottom = true;
 
   while !stop.load(Ordering::Relaxed) {
-    let (_log_width, log_height, max_scroll_y) = draw(terminal, &log, &status, &mut scroll_y, follow_bottom)?;
+    let (log_height, max_scroll_y) = draw(terminal, &log, &status, &mut scroll_y, follow_bottom)?;
     if event::poll(Duration::from_millis(100))? {
       match event::read()? {
         Event::Key(key) => {
@@ -303,7 +303,7 @@ fn draw(
   status: &UiStatus,
   scroll_y: &mut usize,
   follow_bottom: bool,
-) -> Result<(u16, u16, usize)> {
+) -> Result<(u16, usize)> {
   let status_snapshot = status.snapshot();
   let log_lines = log.snapshot();
   let area = terminal.size()?.into();
@@ -370,7 +370,7 @@ fn draw(
       chunks[2],
     );
   })?;
-  Ok((log_width, log_height, max_scroll))
+  Ok((log_height, max_scroll))
 }
 
 fn truncate_to_width(value: &mut String, width: usize) {

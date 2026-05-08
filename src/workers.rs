@@ -55,12 +55,6 @@ struct Worker {
   done: tokio::task::JoinHandle<WorkerProcessResult>,
 }
 
-impl Default for WorkerManager {
-  fn default() -> Self {
-    Self::new()
-  }
-}
-
 impl WorkerManager {
   pub fn new() -> Self {
     Self {

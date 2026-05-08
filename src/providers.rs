@@ -65,74 +65,68 @@ struct ZThinking {
 pub fn new_client(profile: &Profile, max_retries: usize) -> Result<Client> {
   match profile.backend {
     "kimi" => {
-      let key = env_key("BASETEN_API_KEY")?;
       let model = profile.model;
-      Ok(Client::new(
-        KIMI_URL,
-        key,
-        max_retries,
-        move |messages, tools| {
-          serde_json::to_value(KimiRequest {
-            model,
-            messages,
-            tools,
-            stream: true,
-            max_tokens: 262_144,
-            chat_template_args: KimiThinking {
-              enable_thinking: true,
-            },
-          })
-          .expect("serialize request")
-        },
-      ))
+      make_client(KIMI_URL, "BASETEN_API_KEY", max_retries, move |messages, tools| {
+        serde_json::to_value(KimiRequest {
+          model,
+          messages,
+          tools,
+          stream: true,
+          max_tokens: 262_144,
+          chat_template_args: KimiThinking {
+            enable_thinking: true,
+          },
+        })
+        .expect("serialize request")
+      })
     }
     "z" => {
-      let key = env_key("Z_API_KEY")?;
       let model = profile.model;
-      Ok(Client::new(
-        Z_URL,
-        key,
-        max_retries,
-        move |messages, tools| {
-          serde_json::to_value(ZRequest {
-            model,
-            messages,
-            tools,
-            stream: true,
-            max_tokens: 131_072,
-            thinking: ZThinking {
-              kind: "enabled",
-              clear_thinking: false,
-            },
-          })
-          .expect("serialize request")
-        },
-      ))
+      make_client(Z_URL, "Z_API_KEY", max_retries, move |messages, tools| {
+        serde_json::to_value(ZRequest {
+          model,
+          messages,
+          tools,
+          stream: true,
+          max_tokens: 131_072,
+          thinking: ZThinking {
+            kind: "enabled",
+            clear_thinking: false,
+          },
+        })
+        .expect("serialize request")
+      })
     }
     "deepseek" => {
-      let key = env_key("DEEPSEEK_API_KEY")?;
       let model = profile.model;
       let effort = profile.effort;
-      Ok(Client::new(
-        DEEPSEEK_URL,
-        key,
-        max_retries,
-        move |messages, tools| {
-          serde_json::to_value(DeepSeekRequest {
-            model,
-            messages,
-            tools,
-            stream: true,
-            max_tokens: 393_216,
-            thinking: DeepSeekThinking { kind: "enabled" },
-            reasoning_effort: effort,
-          })
-          .expect("serialize request")
-        },
-      ))
+      make_client(DEEPSEEK_URL, "DEEPSEEK_API_KEY", max_retries, move |messages, tools| {
+        serde_json::to_value(DeepSeekRequest {
+          model,
+          messages,
+          tools,
+          stream: true,
+          max_tokens: 393_216,
+          thinking: DeepSeekThinking { kind: "enabled" },
+          reasoning_effort: effort,
+        })
+        .expect("serialize request")
+      })
     }
     other => bail!("unknown backend: {other}"),
   }
+}
+
+fn make_client<F>(
+  url: &str,
+  key_env: &str,
+  max_retries: usize,
+  build: F,
+) -> Result<Client>
+where
+  F: Fn(&[Message], &[Tool]) -> serde_json::Value + Send + Sync + 'static,
+{
+  Ok(Client::new(url, env_key(key_env)?, max_retries, build))
 }
 
 fn env_key(name: &str) -> Result<String> {
