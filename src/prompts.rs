@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 pub const TENX_CODER_SYSTEM_PROMPT: &str = include_str!("../prompts/10x-coder.md");
 
-pub const WORKER_SUMMARY_PROMPT: &str = "\n\n## Worker Report Protocol\n\nBefore returning, call `worker_complete` with JSON arguments:\n\n```json\n{\"summary\":\"concise Markdown summary for the parent coder\"}\n```\n\nInclude:\n- Summary: what you accomplished\n- Evidence: files inspected, commands run, results\n- Decisions: choices made\n- Blockers: anything needing parent input; omit if none\n- Files modified: list of files changed\n\nRules:\n- Concise fragments are preferred.\n- If blocked, use worker_question tool instead of stopping silently.\n- Return the report through `worker_complete({\"summary\":\"...\"})`.";
+pub const WORKER_SUMMARY_PROMPT: &str = "\n\n## Worker Report Protocol\n\nWhen done, call `worker_complete` with a concise Markdown summary:\n\n```json\n{\"summary\":\"...\"}\n```\n\nInclude in the summary:\n- What you accomplished\n- Files inspected, commands run, results\n- Decisions made\n- Files modified (list)\n- Blockers (omit if none)\n\nRules:\n- Concise fragments are preferred.\n- Never fabricate or embellish results. Report only what you actually observed or did.\n- If blocked or missing information, use `worker_question` instead of stopping silently.\n- Do not write intermediate analysis, planning, or decision documents to the repo.";
 
 pub fn skill_roots() -> Vec<PathBuf> {
   let mut dirs = vec![PathBuf::from(".ogent/skills"), PathBuf::from(".skills")];

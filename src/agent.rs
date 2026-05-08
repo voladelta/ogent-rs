@@ -531,10 +531,10 @@ impl Agent {
         "Context budget at {pct}%.\nFinish the current chunk. Do not start unrelated work.\nIf useful state may be lost, write a checkpoint before continuing.\nIf between chunks, call `handoff`."
       ),
       2 => format!(
-        "Context budget at {pct}%.\nApproaching the limit. Finish only critical in-progress work.\nWrite a checkpoint if it will preserve important state, then call `handoff` as soon as possible."
+        "Context budget at {pct}%.\nApproaching the limit. Finish only critical in-progress work.\nDo not delegate new work.\nWrite a checkpoint if it will preserve important state, then call `handoff` as soon as possible."
       ),
       _ => format!(
-        "Context budget at {pct}%.\nEXHAUSTED.\nDo not write more files or start new work.\nCall `handoff` IMMEDIATELY with completed files, current state, verification state, blockers, and next steps."
+        "Context budget at {pct}%.\nEXHAUSTED.\nDo not write more files, delegate, or start new work.\nCall `handoff` IMMEDIATELY with completed files, current state, verification state, blockers, and next steps."
       ),
     };
     self.messages.push(Message {
@@ -695,12 +695,13 @@ mod truncate_tests {
 
 fn auto_continue_reminder() -> String {
   r#"<system_reminder kind="auto_continue">
-Auto mode is enabled. Continue only if useful work remains.
+Auto mode is enabled. Prefer action over extended analysis. Continue only if useful work remains.
 
 Before continuing:
 - Re-check the current goal, latest tool results, worker status, and context budget.
 - If no useful work remains, call `complete` with a retrospective structured Markdown summary.
-- If the next step is clear, proceed.
+- If the next step is clear, proceed. If unclear on low-risk work, make your best call and proceed.
+- Destructive, irreversible, or shared-system actions (force push, deleting branches, messaging, pushing to shared infra) still require user confirmation. Auto mode is not a license to destroy.
 - If a command or edit fails, inspect the failure and make one focused retry when justified.
 - If blocked by missing expertise, uncertainty, or parallelizable review, dispatch a scoped worker with exact paths, evidence, success criteria, and expected summary format.
 - If context is getting large, write a checkpoint for yourself and prefer finishing the current chunk over starting new work.
