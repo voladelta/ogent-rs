@@ -31,17 +31,20 @@ pub struct Client {
 }
 
 impl Client {
-  pub fn new<F>(url: &str, api_key: String, max_retries: usize, build_req: F) -> Self
+  pub fn new<F>(url: &str, api_key: String, max_retries: usize, build_req: F) -> Result<Self, ClientError>
   where
     F: Fn(&[Message], &[Tool]) -> Value + Send + Sync + 'static,
   {
-    Self {
-      http: reqwest::Client::new(),
+    Ok(Self {
+      http: reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+        .map_err(ClientError::Http)?,
       url: url.to_string(),
       api_key,
       build_req: Arc::new(build_req),
       max_retries,
-    }
+    })
   }
 
   pub async fn chat(

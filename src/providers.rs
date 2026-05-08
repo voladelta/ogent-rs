@@ -131,7 +131,7 @@ fn make_client<F>(url: &str, key_env: &str, max_retries: usize, build: F) -> Res
 where
   F: Fn(&[Message], &[Tool]) -> serde_json::Value + Send + Sync + 'static,
 {
-  Ok(Client::new(url, env_key(key_env)?, max_retries, build))
+  Ok(Client::new(url, env_key(key_env)?, max_retries, build)?)
 }
 
 fn env_key(name: &str) -> Result<String> {

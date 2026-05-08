@@ -239,7 +239,6 @@ impl Agent {
         tokio::spawn(async move { client.chat(&messages, &tools, Some(&chat_cancel)).await });
       let mut cancelled_turn = false;
       let mut steer_msg: Option<String> = None;
-      let mut restart_after_abort = false;
 
       let chat_result = 'chat: loop {
         tokio::select! {
@@ -261,28 +260,34 @@ impl Agent {
               }
               SteerEvent::New => {
                 cancel.cancel();
-                if matches!(
-                  self.apply_steer_event(SteerEvent::New, &mut auto_continue, &tui).await?,
-                  SteerAction::Restart
-                ) {
-                  restart_after_abort = true;
-                }
-                break 'chat chat.await;
+                self.apply_steer_event(SteerEvent::New, &mut auto_continue, &tui).await?;
+                chat.abort();
+                turn = 1;
+                wait_for_input = true;
+                tui.log.push("[steer] commands: /auto /stop /complete /cancel /new /q");
+                tui.log.push("[steer] waiting for your first message");
+                continue 'outer;
               }
               SteerEvent::Exit => {
                 cancel.cancel();
-                break 'chat chat.await;
+                chat.abort();
+                return Ok(self.messages.clone());
               }
               other => {
                 match self.apply_steer_event(other, &mut auto_continue, &tui).await? {
                   SteerAction::Exit => {
                     cancel.cancel();
-                    break 'chat chat.await;
+                    chat.abort();
+                    return Ok(self.messages.clone());
                   }
                   SteerAction::Restart => {
-                    restart_after_abort = true;
                     cancel.cancel();
-                    break 'chat chat.await;
+                    chat.abort();
+                    turn = 1;
+                    wait_for_input = true;
+                    tui.log.push("[steer] commands: /auto /stop /complete /cancel /new /q");
+                    tui.log.push("[steer] waiting for your first message");
+                    continue 'outer;
                   }
                   SteerAction::Continue => {}
                 }
@@ -295,13 +300,6 @@ impl Agent {
       let resp = match chat_result {
         Ok(Ok(resp)) => resp,
         Ok(Err(ClientError::Aborted { resp })) => {
-          if restart_after_abort {
-            turn = 1;
-            wait_for_input = true;
-            tui.log.push("[steer] commands: /auto /stop /complete /cancel /new /q");
-            tui.log.push("[steer] waiting for your first message");
-            continue 'outer;
-          }
           if !resp.content.is_empty()
             || !resp.reasoning_content.is_empty()
             || !resp.tool_calls.is_empty()
