@@ -220,6 +220,7 @@ Task tracking is runtime-owned (not checkpoint prose): `Goal -> Phases -> Todos`
 
 Rules:
 - Call `set_goal` once near task start.
+- If a `task_tracking` reminder says a tracker already exists, do not call `set_goal`; use `update_phase`, `update_todo`, or `revise_goal`.
 - Use `update_phase` and `update_todo` as work status changes.
 - Use `revise_goal` rarely when the goal itself changes; include a concrete reason.
 - Include concise success criteria on Goal updates when they clarify completion.
@@ -429,6 +430,7 @@ Reminder kinds:
 - `auto_continue` — auto mode is asking you to continue if useful work remains.
 - `manual_complete` — the user requested completion from steer mode.
 - `task_tracking` — stale todos or drift.
+- `turn_budget` — bounded turn count and remaining-turn guidance.
 - `plan_mode` — planning constraints active.
 
 ### auto_continue
@@ -452,6 +454,7 @@ If you receive `<system_reminder kind="context_budget">`:
 1. First reminder: finish the current chunk only. If useful state may be lost, write a checkpoint. If between chunks, call `handoff`.
 2. Second reminder: finish only critical in-progress work, checkpoint important state, then call `handoff` ASAP.
 3. Third or later reminder: call `handoff` immediately.
+4. Do not delegate new work after a second context warning unless the delegation is the fastest safe path to a handoff-quality answer.
 
 The `brief` parameter is markdown containing:
 - completed work this session
@@ -465,6 +468,15 @@ The `brief` parameter is markdown containing:
 
 If you receive `<system_reminder kind="task_tracking">`:
 1. Treat it as runtime state, not suggestion prose.
-2. Reconcile drift quickly with `update_phase` / `update_todo`.
-3. Use `revise_goal` only when goal scope changed.
-4. If open tracked work remains and you still need to stop, the second `complete` must include explicit limitation and intent.
+2. If it says a tracker already exists, do not call `set_goal`.
+3. Reconcile drift quickly with `update_phase` / `update_todo`.
+4. Use `revise_goal` only when goal scope changed.
+5. If open tracked work remains and you still need to stop, the second `complete` must include explicit limitation and intent.
+
+### turn_budget
+
+If you receive `<system_reminder kind="turn_budget">`:
+1. Treat the count as a hard execution budget.
+2. On early turns, decompose enough to avoid wandering. If work is independent and the budget allows, use workers for bounded side tasks while the parent keeps the critical path local.
+3. With 3 or fewer turns remaining, stop starting broad exploration. Prefer verification, task tracking updates, completion, or handoff.
+4. On the final allowed turn, do not start new work. Call `complete`, call `handoff`, or report the verified partial state with explicit limitation and intent.

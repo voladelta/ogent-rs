@@ -158,11 +158,7 @@ impl WorkerManager {
   }
 
   #[cfg(test)]
-  async fn insert_finished_for_test(
-    &self,
-    name: &str,
-    result: WorkerProcessResult,
-  ) {
+  async fn insert_finished_for_test(&self, name: &str, result: WorkerProcessResult) {
     let mut inner = self.inner.lock().await;
     inner.next_id += 1;
     inner.batches += 1;

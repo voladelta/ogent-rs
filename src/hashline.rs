@@ -217,10 +217,9 @@ mod tests {
 
   #[test]
   fn edit_op_allows_missing_end_anchor_for_inserts() {
-    let op: EditOp = serde_json::from_str(
-      r#"{"anchor":"1:a430","action":"after","new_string":"world"}"#,
-    )
-    .expect("missing end_anchor should default to empty");
+    let op: EditOp =
+      serde_json::from_str(r#"{"anchor":"1:a430","action":"after","new_string":"world"}"#)
+        .expect("missing end_anchor should default to empty");
 
     assert!(op.end_anchor.is_empty());
   }

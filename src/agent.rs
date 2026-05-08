@@ -56,6 +56,7 @@ pub struct Agent {
   pub completion_summary: Option<String>,
   pub task_tracker: Option<TaskTracker>,
   pub complete_open_work_warned: bool,
+  last_turn_budget_reminder_turn: Option<i32>,
 }
 
 pub struct ToolResult {
@@ -83,6 +84,7 @@ impl Agent {
       completion_summary: None,
       task_tracker,
       complete_open_work_warned: false,
+      last_turn_budget_reminder_turn: None,
     }
   }
 
@@ -102,13 +104,17 @@ impl Agent {
         "\n--- turn {turn} | tokens: {} ---",
         self.total_prompt + self.total_completion
       );
+      self.push_turn_budget_reminder(max_turns, turn);
       let resp = self.client.chat(&self.messages, &self.tools, None).await?;
       let mut has_more = match self.handle_turn_response(resp).await {
         Ok(hm) => hm,
         Err(e) if e.is::<InteractiveRequiredError>() => return Ok(self.messages.clone()),
         Err(e) => return Err(e),
       };
-      if self.finish_turn(&mut has_more, auto_continue, None).await? {
+      if self
+        .finish_turn(&mut has_more, auto_continue, None, max_turns, turn)
+        .await?
+      {
         return Ok(self.messages.clone());
       }
       if turn == 1 && question_available_on_first_turn {
@@ -178,6 +184,7 @@ impl Agent {
         .status
         .set_turn_tokens(turn, self.total_prompt + self.total_completion);
       tui.log.push(format!("--- turn {turn} ---"));
+      self.push_turn_budget_reminder(max_turns, turn);
 
       let cancel = tokio_util::sync::CancellationToken::new();
       let client = self.client.clone();
@@ -266,7 +273,13 @@ impl Agent {
         .handle_turn_response_with_log(resp, Some(&tui.log))
         .await?;
       if self
-        .finish_turn(&mut has_more, auto_continue, Some(&tui.log))
+        .finish_turn(
+          &mut has_more,
+          auto_continue,
+          Some(&tui.log),
+          max_turns,
+          turn,
+        )
         .await?
       {
         return Ok(self.messages.clone());
@@ -286,6 +299,8 @@ impl Agent {
     has_more: &mut bool,
     auto_continue: bool,
     ui_log: Option<&crate::tui::UiLog>,
+    max_turns: i32,
+    turn: i32,
   ) -> Result<bool> {
     if !self.compact.last_handoff_path.is_empty() {
       if self.handle_handoff().await? {
@@ -318,6 +333,7 @@ impl Agent {
     if *has_more {
       self.check_compact();
       self.push_task_tracking_reminder();
+      self.push_turn_budget_reminder(max_turns, turn + 1);
       if auto_continue && !self.compact.compacting && !pushed_worker_status {
         self.messages.push(Message {
           role: "user".into(),
@@ -634,6 +650,20 @@ impl Agent {
       }
     }
   }
+
+  fn push_turn_budget_reminder(&mut self, max_turns: i32, turn: i32) {
+    if self.last_turn_budget_reminder_turn == Some(turn) {
+      return;
+    }
+    if let Some(reminder) = turn_budget_reminder(max_turns, turn) {
+      self.messages.push(Message {
+        role: "user".into(),
+        content: reminder,
+        ..Default::default()
+      });
+      self.last_turn_budget_reminder_turn = Some(turn);
+    }
+  }
 }
 
 fn truncate(s: &str, n: usize) -> String {
@@ -692,4 +722,68 @@ Summarize the current session retrospectively and call `complete` with structure
 - optional evidence: files touched, tests run, git head
 </system_reminder>"#
     .to_string()
+}
+
+fn turn_budget_reminder(max_turns: i32, turn: i32) -> Option<String> {
+  if max_turns <= 0 || turn <= 0 || turn > max_turns {
+    return None;
+  }
+  let remaining = max_turns - turn + 1;
+  if turn != 1 && !matches!(remaining, 5 | 3 | 2 | 1) {
+    return None;
+  }
+
+  let mut body = format!(
+    "<system_reminder kind=\"turn_budget\">\nYou are on turn {turn} of {max_turns}. {remaining} turn{} remain including this one.\n",
+    if remaining == 1 { "" } else { "s" }
+  );
+  if remaining == 1 {
+    body.push_str(
+      "This is the final allowed turn. Do not start new exploratory work. Complete, handoff, or report the verified partial state.\n",
+    );
+  } else if remaining <= 3 {
+    body.push_str(
+      "Use the remaining turns for verification, tracking updates, completion, or a necessary handoff. Avoid new exploratory delegation unless it directly completes the task.\n",
+    );
+  } else {
+    body.push_str(
+      "Use turns deliberately. If useful work is parallelizable, delegate bounded side work while keeping the critical path local.\n",
+    );
+  }
+  body.push_str("</system_reminder>");
+  Some(body)
+}
+
+#[cfg(test)]
+mod turn_budget_tests {
+  use super::turn_budget_reminder;
+
+  #[test]
+  fn turn_budget_emits_first_turn() {
+    let reminder = turn_budget_reminder(20, 1).expect("first turn should be shown");
+    assert!(reminder.contains("turn 1 of 20"));
+    assert!(reminder.contains("delegate bounded side work"));
+  }
+
+  #[test]
+  fn turn_budget_emits_thresholds_only_after_first_turn() {
+    assert!(turn_budget_reminder(20, 10).is_none());
+    assert!(turn_budget_reminder(20, 16).is_some());
+    assert!(turn_budget_reminder(20, 18).is_some());
+    assert!(turn_budget_reminder(20, 19).is_some());
+    assert!(turn_budget_reminder(20, 20).is_some());
+  }
+
+  #[test]
+  fn turn_budget_final_turn_is_explicit() {
+    let reminder = turn_budget_reminder(3, 3).expect("final turn should be shown");
+    assert!(reminder.contains("final allowed turn"));
+    assert!(reminder.contains("Complete, handoff, or report"));
+  }
+
+  #[test]
+  fn turn_budget_ignores_unbounded_runs() {
+    assert!(turn_budget_reminder(-1, 1).is_none());
+    assert!(turn_budget_reminder(0, 1).is_none());
+  }
 }

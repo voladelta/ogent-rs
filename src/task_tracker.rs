@@ -291,6 +291,7 @@ impl TaskTracker {
   fn render_compact_reminder(&self, stale_nudge: bool) -> String {
     let mut body = String::new();
     body.push_str("<system_reminder kind=\"task_tracking\">\n");
+    body.push_str("Task tracker already exists. Do not call `set_goal` again.\n");
     body.push_str(&self.render_summary_lines());
     if stale_nudge {
       body.push_str(&format!(
@@ -299,7 +300,7 @@ impl TaskTracker {
       ));
     }
     body.push_str(
-      "- Keep Goal -> Phases -> Todos current with set_goal/revise_goal/update_phase/update_todo.\n",
+      "- Keep Goal -> Phases -> Todos current with update_phase/update_todo. Use revise_goal only if the objective changed.\n",
     );
     body.push_str("</system_reminder>");
     body
@@ -461,7 +462,19 @@ mod tests {
     tracker.note_tool_turn(false, true);
     let reminder = tracker.take_reminder().expect("stale nudge expected");
     assert!(reminder.contains("Stale"));
+    assert!(reminder.contains("Do not call `set_goal` again"));
     assert!(tracker.take_reminder().is_none());
+  }
+
+  #[test]
+  fn restored_tracker_reminder_warns_against_set_goal() {
+    let mut tracker = seed();
+    tracker.mark_restored();
+    let reminder = tracker
+      .take_reminder()
+      .expect("restored tracker should remind");
+    assert!(reminder.contains("Task tracker already exists"));
+    assert!(reminder.contains("Use revise_goal only if the objective changed"));
   }
 
   #[test]
