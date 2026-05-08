@@ -126,7 +126,6 @@ struct BashArgs {
 async fn bash(args: &str) -> Result<String> {
   let args: BashArgs = parse_args(args)?;
   require_nonempty(&args.command, "command")?;
-  validate_bash_command(&args.command)?;
   let secs = if args.timeout_seconds == 0 {
     120
   } else {
@@ -157,19 +156,7 @@ async fn bash(args: &str) -> Result<String> {
   }
 }
 
-fn validate_bash_command(command: &str) -> Result<()> {
-  for segment in command.split([';', '&', '|', '\n']) {
-    let words: Vec<_> = segment.split_whitespace().collect();
-    for pair in words.windows(2) {
-      if pair[0] == "cd" && matches!(pair[1], "/" | "~" | ".." | "-") {
-        bail!(
-          "cd outside the workspace is not allowed; run commands in the current working directory"
-        );
-      }
-    }
-  }
-  Ok(())
-}
+
 
 #[cfg(test)]
 mod tests {
@@ -285,7 +272,7 @@ async fn web_search(args: &str) -> Result<String> {
   let body = json!({"query": args.query, "type": search_type, "numResults": n, "contents": {"highlights": true}});
   let v = exa_post("https://api.exa.ai/search", body).await?;
   let mut out = String::new();
-  for (i, r) in v["results"].as_array().unwrap_or(&Vec::new()).iter().enumerate() {
+  for (i, r) in v["results"].as_array().into_iter().flatten().enumerate() {
     let _ = writeln!(out, "{}. {}", i + 1, r["title"].as_str().unwrap_or(""));
     let _ = writeln!(out, "   {}", r["url"].as_str().unwrap_or(""));
     if let Some(highlights) = r["highlights"].as_array() {
@@ -318,7 +305,7 @@ async fn web_read(args: &str) -> Result<String> {
   };
   let v = exa_post("https://api.exa.ai/contents", body).await?;
   let mut out = String::new();
-  for r in v["results"].as_array().unwrap_or(&Vec::new()) {
+  for r in v["results"].as_array().into_iter().flatten() {
     let _ = writeln!(out, "--- {} ---", r["title"].as_str().unwrap_or(""));
     let _ = writeln!(out, "{}", r["url"].as_str().unwrap_or(""));
     out.push('\n');

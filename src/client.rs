@@ -8,6 +8,10 @@ use crate::types::{ChatResponse, Message, Tool};
 
 pub type BuildReq = Arc<dyn Fn(&[Message], &[Tool]) -> Value + Send + Sync>;
 
+#[derive(Debug, thiserror::Error)]
+#[error("rate limited (429): {body}")]
+struct RateLimited { body: String }
+
 #[derive(Clone)]
 pub struct Client {
   http: reqwest::Client,
@@ -45,7 +49,7 @@ impl Client {
       }
       match self.chat_once(&req_body, cancel).await {
         Ok(resp) => return Ok(resp),
-        Err(err) if err.to_string().starts_with("rate limited (429)") => return Err(err),
+        Err(err) if err.downcast_ref::<RateLimited>().is_some() => return Err(err),
         Err(err) => last_err = Some(err),
       }
     }
@@ -57,7 +61,7 @@ impl Client {
     req_body: &Value,
     cancel: Option<&tokio_util::sync::CancellationToken>,
   ) -> Result<ChatResponse> {
-    if cancel.map(|c| c.is_cancelled()).unwrap_or(false) {
+    if cancel.is_some_and(|c| c.is_cancelled()) {
       return Err(
         crate::types::ChatAbortedError {
           resp: ChatResponse::default(),
@@ -77,7 +81,7 @@ impl Client {
       let status = resp.status();
       let body = resp.text().await.unwrap_or_default();
       if status.as_u16() == 429 {
-        bail!("rate limited (429): {}", body.trim());
+        return Err(RateLimited { body: body.trim().to_string() }.into());
       }
       bail!("api {}: {}", status.as_u16(), body.trim());
     }

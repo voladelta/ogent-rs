@@ -84,7 +84,7 @@ pub async fn parse_sse_response(
   let mut buf = String::new();
 
   while let Some(item) = stream.next().await {
-    if cancel.map(|c| c.is_cancelled()).unwrap_or(false) {
+    if cancel.is_some_and(|c| c.is_cancelled()) {
       flush_tool_calls(&mut acc, &mut result);
       return Err(crate::types::ChatAbortedError { resp: result }.into());
     }
@@ -92,8 +92,8 @@ pub async fn parse_sse_response(
     buf.push_str(&String::from_utf8_lossy(&bytes));
     while let Some(pos) = buf.find('\n') {
       let line = buf[..pos].trim_end_matches('\r');
-      process_line(line, &mut result, &mut acc)?;
-      buf.drain(..pos + 1);
+      process_line(line, &mut result, &mut acc);
+      buf.drain(..=pos);
     }
   }
   flush_tool_calls(&mut acc, &mut result);
@@ -104,16 +104,16 @@ fn process_line(
   line: &str,
   result: &mut ChatResponse,
   acc: &mut Vec<AccToolCall>,
-) -> Result<()> {
+) {
   let Some(data) = line.strip_prefix("data:") else {
-    return Ok(());
+      return;
   };
   let data = data.trim_start();
   if data == "[DONE]" {
-    return Ok(());
+    return;
   }
   let Ok(chunk) = serde_json::from_str::<StreamChunk>(data) else {
-    return Ok(());
+    return;
   };
   if let Some(usage) = chunk.usage {
     result.usage = usage;
@@ -142,7 +142,6 @@ fn process_line(
       a.arguments.push_str(&tc.function.arguments);
     }
   }
-  Ok(())
 }
 
 #[cfg(test)]
@@ -153,9 +152,9 @@ mod tests {
   fn process_line_accumulates_tool_args() {
     let mut resp = ChatResponse::default();
     let mut acc = Vec::new();
-    process_line(r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"x","type":"function","function":{"name":"bash","arguments":"{\"command\""}}]}}]}"#, &mut resp, &mut acc).unwrap();
-    process_line(r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":":\"ls\""}}]}}]}"#, &mut resp, &mut acc).unwrap();
-    assert_eq!(acc.get(0).unwrap().arguments, "{\"command\":\"ls\"");
+    process_line(r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"x","type":"function","function":{"name":"bash","arguments":"{\"command\""}}]}}]}"#, &mut resp, &mut acc);
+    process_line(r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":":\"ls\""}}]}}]}"#, &mut resp, &mut acc);
+    assert_eq!(acc.first().unwrap().arguments, "{\"command\":\"ls\"");
   }
 
   #[test]
@@ -166,14 +165,12 @@ mod tests {
       r#"data: {"choices":[{"delta":{"content":null,"reasoning_content":"thinking"}}]}"#,
       &mut resp,
       &mut acc,
-    )
-    .unwrap();
+    );
     process_line(
       r#"data: {"choices":[{"delta":{"content":"hello","reasoning_content":null}}]}"#,
       &mut resp,
       &mut acc,
-    )
-    .unwrap();
+    );
     assert_eq!(resp.reasoning_content, "thinking");
     assert_eq!(resp.content, "hello");
   }

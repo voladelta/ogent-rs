@@ -664,30 +664,31 @@ impl Agent {
 }
 
 async fn run_read_only_batch(batch: &[&ToolCall]) -> anyhow::Result<Vec<ToolResult>> {
-  let futs = batch.iter().map(|tc| {
-    let name = tc.function.name.clone();
-    let args = tc.function.arguments.clone();
-    async move {
-      let output = match execute_tool(ToolContext { agent: None }, &name, &args).await {
-        Ok(out) => out,
-        Err(e) if e.to_string() == "interactive mode required" => {
-          "ERROR: interactive mode required".to_string()
-        }
-        Err(e) => format!("ERROR: {e}"),
-      };
-      ToolResult { name, args, output }
+  let futs = batch.iter().map(|tc| async {
+    let output = match execute_tool(ToolContext { agent: None }, &tc.function.name, &tc.function.arguments).await {
+      Ok(out) => out,
+      Err(e) if e.to_string() == "interactive mode required" => {
+        "ERROR: interactive mode required".to_string()
+      }
+      Err(e) => format!("ERROR: {e}"),
+    };
+    ToolResult {
+      name: tc.function.name.clone(),
+      args: tc.function.arguments.clone(),
+      output,
     }
   });
   let results = futures_util::future::join_all(futs).await;
-  for r in &results {
-    if r.output == "ERROR: interactive mode required" {
-      return Err(InteractiveRequiredError.into());
-    }
+  if results.iter().any(|r| r.output == "ERROR: interactive mode required") {
+    return Err(InteractiveRequiredError.into());
   }
   Ok(results)
 }
 
 fn truncate(s: &str, n: usize) -> String {
+  if s.len() <= n && !s.contains('\n') {
+    return s.to_string();
+  }
   let escaped = s.replace('\n', "\\n");
   if escaped.len() <= n {
     escaped

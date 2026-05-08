@@ -319,7 +319,7 @@ impl TaskTracker {
       let _ = writeln!(lines, "  notes: {}", self.goal.notes);
     }
     for criterion in self.goal.success_criteria.iter().take(4) {
-      let _ = writeln!(lines, "  success: {}", criterion);
+      let _ = writeln!(lines, "  success: {criterion}");
     }
     if !self.revisions.is_empty() {
       let _ = writeln!(lines, "- Goal revisions: {}", self.revisions.len());

@@ -27,10 +27,7 @@ pub fn render_hashlines(
 }
 
 pub fn source_lines(source: &str) -> Vec<String> {
-  if source.is_empty() {
-    return Vec::new();
-  }
-  let mut lines: Vec<String> = source.split('\n').map(ToString::to_string).collect();
+  let mut lines: Vec<String> = source.split('\n').map(String::from).collect();
   if lines.last().is_some_and(|s| s.is_empty()) {
     lines.pop();
   }
@@ -42,10 +39,10 @@ fn line_hash(line: &str) -> String {
 }
 
 fn fnv1a64(bytes: &[u8]) -> u64 {
-  let mut hash = 0xcbf29ce484222325u64;
+  let mut hash = 0xcbf2_9ce4_8422_2325u64;
   for b in bytes {
-    hash ^= *b as u64;
-    hash = hash.wrapping_mul(0x100000001b3);
+    hash ^= u64::from(*b);
+    hash = hash.wrapping_mul(0x0100_0000_01b3);
   }
   hash
 }
@@ -69,9 +66,6 @@ struct ResolvedEdit {
 
 pub fn apply_anchor_edits(source: &str, ops: &[EditOp]) -> Result<String> {
   let lines = source_lines(source);
-  if lines.is_empty() {
-    bail!("file is empty");
-  }
   let mut edits = Vec::with_capacity(ops.len());
   for (i, op) in ops.iter().enumerate() {
     edits.push(resolve_edit(&lines, op).map_err(|e| anyhow::anyhow!("op[{i}]: {e}"))?);
@@ -124,7 +118,7 @@ fn resolve_edit(lines: &[String], op: &EditOp) -> Result<ResolvedEdit> {
     }
     "replace" => ResolvedEdit {
       start_idx,
-      end_idx: Some(end.map(|a| a.line - 1).unwrap_or(start_idx)),
+      end_idx: Some(end.map_or(start_idx, |a| a.line - 1)),
       replacement,
       insert_mode: "",
     },
@@ -139,7 +133,7 @@ fn parse_anchor(value: &str) -> Result<Anchor<'_>> {
   let line: usize = line
     .parse()
     .map_err(|_| anyhow::anyhow!("invalid anchor line number: {value}"))?;
-  if line == 0 || hash.is_empty() || !hash.bytes().all(|b| b.is_ascii_hexdigit()) {
+  if line == 0 || hash.len() != 4 {
     bail!("invalid anchor: {value}");
   }
   Ok(Anchor { line, hash })
@@ -151,7 +145,7 @@ fn validate_anchor(lines: &[String], anchor: Anchor<'_>) -> Result<()> {
     bail!("anchor line is outside file: {}", anchor.line);
   }
   let current = line_hash(&lines[idx]);
-  if current != anchor.hash.to_ascii_lowercase() {
+  if !current.eq_ignore_ascii_case(anchor.hash) {
     bail!(
       "anchor mismatch at line {}: expected {}, current {}\n{}:{}|{}",
       anchor.line,
@@ -195,7 +189,7 @@ fn apply_resolved(mut lines: Vec<String>, mut edits: Vec<ResolvedEdit>) -> Resul
   for e in edits {
     match e.end_idx {
       None => lines.splice(e.start_idx..e.start_idx, e.replacement),
-      Some(end) => lines.splice(e.start_idx..end + 1, e.replacement),
+      Some(end) => lines.splice(e.start_idx..=end, e.replacement),
     };
   }
   Ok(lines)

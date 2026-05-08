@@ -268,19 +268,12 @@ pub async fn run_worker_process(args: WorkerProcessArgs) -> WorkerProcessResult 
 }
 
 pub fn format_dispatch_worker_result(result: WorkerProcessResult) -> Result<String> {
-  if let Some(err) = result.err {
-    if result.output.is_empty() {
-      bail!("worker failed with no output: {err}");
-    }
-    return Ok(format!("WORKER FAILED ({err}):\n\n{}", result.output));
+  match result.err {
+    Some(err) if result.output.is_empty() => bail!("worker failed with no output: {err}"),
+    Some(err) => Ok(format!("WORKER FAILED ({err}):\n\n{}", result.output)),
+    None if result.report.is_empty() => Ok(format!("Worker completed without summary. Output:\n\n{}", result.output)),
+    None => Ok(format!("Worker completed. Summary:\n\n{}", result.report)),
   }
-  if result.report.is_empty() {
-    return Ok(format!(
-      "Worker completed without summary. Output:\n\n{}",
-      result.output
-    ));
-  }
-  Ok(format!("Worker completed. Summary:\n\n{}", result.report))
 }
 
 pub fn validate_start_workers_args(args: &StartWorkersArgs) -> Result<()> {

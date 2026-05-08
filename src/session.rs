@@ -1,11 +1,11 @@
 use anyhow::Result;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use crate::types::Message;
 
-static COUNTER: AtomicU64 = AtomicU64::new(0);
+static COUNTER: AtomicU32 = AtomicU32::new(0);
 
 pub fn persist_session(messages: &[Message], worker: bool, session_id: &str) -> Result<()> {
   if messages.is_empty() {
@@ -17,12 +17,11 @@ pub fn persist_session(messages: &[Message], worker: bool, session_id: &str) -> 
     name = format!("{name}-worker-{session_id}");
   }
   let path = format!(".ogent/sessions/{name}.jsonl");
-  let mut out = String::new();
+  let mut file = fs::File::create(&path)?;
   for message in messages {
-    out.push_str(&serde_json::to_string(message)?);
-    out.push('\n');
+    serde_json::to_writer(&mut file, message)?;
+    file.write_all(b"\n")?;
   }
-  fs::write(path, out)?;
   Ok(())
 }
 
@@ -54,7 +53,7 @@ pub fn find_latest_handoff(dir: &str) -> Option<String> {
     .flatten()
     .filter(|e| e.path().extension().is_some_and(|ext| ext == "md"))
     .collect();
-  entries.sort_by_key(|e| e.file_name());
+  entries.sort_by_key(|e| e.metadata().and_then(|m| m.modified()).ok());
   entries.last().map(|e| e.path().display().to_string())
 }
 
@@ -68,12 +67,11 @@ pub fn find_latest_session(dir: &str) -> Option<String> {
       let name_ok = path
         .file_name()
         .and_then(|n| n.to_str())
-        .map(|name| !name.contains("-worker-"))
-        .unwrap_or(false);
+        .is_some_and(|name| !name.contains("-worker-"));
       ext_ok && name_ok
     })
     .collect();
-  entries.sort_by_key(|e| e.file_name());
+  entries.sort_by_key(|e| e.metadata().and_then(|m| m.modified()).ok());
   entries.last().map(|e| e.path().display().to_string())
 }
 

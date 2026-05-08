@@ -1,4 +1,5 @@
 use anyhow::{Result, bail};
+use std::fmt::Write;
 use std::fs;
 use std::path::PathBuf;
 
@@ -67,11 +68,12 @@ pub fn discover_skills_message() -> String {
       if name.is_empty() || !seen.insert(name.clone()) {
         continue;
       }
-      out.push_str(&format!(
-        "  <skill name=\"{}\" description=\"{}\" />\n",
+      let _ = writeln!(
+        out,
+        "  <skill name=\"{}\" description=\"{}\" />",
         xml_escape(&name),
         xml_escape(&desc)
-      ));
+      );
     }
   }
   if seen.is_empty() {
@@ -88,11 +90,13 @@ fn parse_frontmatter(content: &str) -> Option<&str> {
 
 fn strip_frontmatter(content: &str) -> String {
   parse_frontmatter(content)
-    .map(|_| {
-      let end = content[3..].find("---").unwrap() + 6;
-      content[end..].trim().to_string()
-    })
-    .unwrap_or_else(|| content.trim().to_string())
+    .map_or_else(
+      || content.trim().to_string(),
+      |_| {
+        let end = content[3..].find("---").unwrap() + 6;
+        content[end..].trim().to_string()
+      },
+    )
 }
 
 fn parse_skill_frontmatter(content: &str) -> (String, String, Option<crate::workflow::Workflow>) {
@@ -126,8 +130,15 @@ fn parse_skill_frontmatter(content: &str) -> (String, String, Option<crate::work
 }
 
 fn xml_escape(s: &str) -> String {
-  s.replace('&', "&amp;")
-    .replace('"', "&quot;")
-    .replace('<', "&lt;")
-    .replace('>', "&gt;")
+  let mut out = String::with_capacity(s.len());
+  for c in s.chars() {
+    match c {
+      '&' => out.push_str("&amp;"),
+      '"' => out.push_str("&quot;"),
+      '<' => out.push_str("&lt;"),
+      '>' => out.push_str("&gt;"),
+      _ => out.push(c),
+    }
+  }
+  out
 }
