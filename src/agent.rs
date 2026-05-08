@@ -333,6 +333,19 @@ impl Agent {
       let mut has_more = self
         .handle_turn_response_with_log(resp, Some(&tui.log))
         .await?;
+
+      if self.completion_summary.is_some() {
+        if !self.compact.last_handoff_path.is_empty() {
+          if self.handle_handoff().await? {
+            return Ok(self.messages.clone());
+          }
+        }
+        tui.log.push("[steer] task complete; send a message to continue or /q to quit");
+        self.completion_summary = None;
+        wait_for_input = true;
+        continue;
+      }
+
       if self
         .finish_turn(
           &mut has_more,

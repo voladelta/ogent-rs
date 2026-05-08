@@ -87,10 +87,6 @@ impl UiLog {
     self.lines.lock().expect("ui log poisoned").clone()
   }
 
-  pub fn len(&self) -> usize {
-    self.len.load(Ordering::Relaxed)
-  }
-
   pub(crate) fn generation(&self) -> u64 {
     self.generation.load(Ordering::Relaxed)
   }
@@ -292,15 +288,15 @@ fn run_ui_loop(
               }
               KeyCode::Enter => {
                 let filtered = selector.filtered();
-                if let Some(selected) = filtered.get(selector.selected) {
-                  if let Some(start) = selector_start {
-                    let end = textarea.cursor();
-                    textarea.move_cursor(CursorMove::Jump(start.0 as u16, start.1 as u16));
-                    textarea.start_selection();
-                    textarea.move_cursor(CursorMove::Jump(end.0 as u16, end.1 as u16));
-                    textarea.cut();
-                    textarea.insert_str(selected);
-                  }
+                if let Some(selected) = filtered.get(selector.selected)
+                  && let Some(start) = selector_start
+                {
+                  let end = textarea.cursor();
+                  textarea.move_cursor(CursorMove::Jump(start.0 as u16, start.1 as u16));
+                  textarea.start_selection();
+                  textarea.move_cursor(CursorMove::Jump(end.0 as u16, end.1 as u16));
+                  textarea.cut();
+                  textarea.insert_str(selected);
                 }
                 file_selector = None;
                 selector_start = None;
