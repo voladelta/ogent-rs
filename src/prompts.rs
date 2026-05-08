@@ -68,31 +68,29 @@ pub fn discover_skills_message() -> String {
   }
 }
 
+fn parse_frontmatter(content: &str) -> Option<&str> {
+  content.strip_prefix("---").and_then(|rest| rest.find("---").map(|end| &rest[..end]))
+}
+
 fn strip_frontmatter(content: &str) -> String {
-  if !content.starts_with("---") {
-    return content.trim().to_string();
-  }
-  let Some(end) = content[3..].find("---") else {
-    return content.trim().to_string();
-  };
-  content[3 + end + 3..].trim().to_string()
+  parse_frontmatter(content)
+    .map(|_| {
+      let end = content[3..].find("---").unwrap() + 6;
+      content[end..].trim().to_string()
+    })
+    .unwrap_or_else(|| content.trim().to_string())
 }
 
 fn parse_skill_frontmatter(content: &str) -> (String, String) {
-  if !content.starts_with("---") {
-    return (String::new(), String::new());
-  }
-  let Some(end) = content[3..].find("---") else {
+  let Some(fm) = parse_frontmatter(content) else {
     return (String::new(), String::new());
   };
-  let fm = &content[3..3 + end];
   let mut name = String::new();
   let mut description = String::new();
   for line in fm.lines().map(str::trim) {
     if let Some(rest) = line.strip_prefix("name:") {
       name = rest.trim().to_string();
-    }
-    if let Some(rest) = line.strip_prefix("description:") {
+    } else if let Some(rest) = line.strip_prefix("description:") {
       description = rest.trim().to_string();
     }
   }
@@ -103,4 +101,5 @@ fn xml_escape(s: &str) -> String {
   s.replace('&', "&amp;")
     .replace('"', "&quot;")
     .replace('<', "&lt;")
+    .replace('>', "&gt;")
 }

@@ -1,11 +1,15 @@
 use anyhow::{Result, bail};
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
-pub fn workspace_root() -> PathBuf {
-  std::env::current_dir()
-    .unwrap_or_else(|_| PathBuf::from("."))
-    .canonicalize()
-    .unwrap_or_else(|_| PathBuf::from("."))
+pub fn workspace_root() -> &'static Path {
+  static ROOT: OnceLock<PathBuf> = OnceLock::new();
+  ROOT.get_or_init(|| {
+    std::env::current_dir()
+      .unwrap_or_else(|_| PathBuf::from("."))
+      .canonicalize()
+      .unwrap_or_else(|_| PathBuf::from("."))
+  })
 }
 
 pub fn workspace_path(path: &str) -> Result<PathBuf> {
@@ -37,21 +41,21 @@ pub fn readable_path(path: &str) -> Result<PathBuf> {
 }
 
 fn absolute_tool_path(path: &str) -> PathBuf {
-  if let Some(rest) = path.strip_prefix("~/") {
-    if let Some(home) = std::env::var_os("HOME") {
-      return PathBuf::from(home).join(rest);
-    }
+  if let Some(rest) = path.strip_prefix("~/")
+    && let Some(home) = std::env::var_os("HOME")
+  {
+    return PathBuf::from(home).join(rest);
   }
   let p = PathBuf::from(path);
   if p.is_absolute() {
-    clean(&p)
+    normalize(&p)
   } else {
-    clean(&workspace_root().join(p))
+    normalize(&workspace_root().join(p))
   }
 }
 
 fn path_in_workspace(path: &Path) -> bool {
-  path_in_root(path, &workspace_root())
+  path_in_root(path, workspace_root())
 }
 
 fn path_in_allowed_root(path: &Path) -> bool {
@@ -61,19 +65,17 @@ fn path_in_allowed_root(path: &Path) -> bool {
 }
 
 fn path_in_root(path: &Path, root: &Path) -> bool {
-  let path = clean(path);
-  let root = clean(root);
+  let path = normalize(path);
+  let root = normalize(root);
   path == root || path.starts_with(root)
 }
 
-fn clean(path: &Path) -> PathBuf {
+fn normalize(path: &Path) -> PathBuf {
   let mut out = PathBuf::new();
   for c in path.components() {
     match c {
       std::path::Component::CurDir => {}
-      std::path::Component::ParentDir => {
-        out.pop();
-      }
+      std::path::Component::ParentDir => { out.pop(); }
       other => out.push(other.as_os_str()),
     }
   }

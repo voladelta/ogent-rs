@@ -14,8 +14,8 @@ const Z_URL: &str = "https://api.z.ai/api/coding/paas/v4/chat/completions";
 struct DeepSeekRequest<'a> {
   model: &'a str,
   messages: &'a [Message],
-  #[serde(skip_serializing_if = "Vec::is_empty")]
-  tools: &'a Vec<Tool>,
+  #[serde(skip_serializing_if = "<[Tool]>::is_empty")]
+  tools: &'a [Tool],
   stream: bool,
   max_tokens: i32,
   thinking: DeepSeekThinking,
@@ -32,8 +32,8 @@ struct DeepSeekThinking {
 struct KimiRequest<'a> {
   model: &'a str,
   messages: &'a [Message],
-  #[serde(skip_serializing_if = "Vec::is_empty")]
-  tools: &'a Vec<Tool>,
+  #[serde(skip_serializing_if = "<[Tool]>::is_empty")]
+  tools: &'a [Tool],
   stream: bool,
   max_tokens: i32,
   chat_template_args: KimiThinking,
@@ -48,8 +48,8 @@ struct KimiThinking {
 struct ZRequest<'a> {
   model: &'a str,
   messages: &'a [Message],
-  #[serde(skip_serializing_if = "Vec::is_empty")]
-  tools: &'a Vec<Tool>,
+  #[serde(skip_serializing_if = "<[Tool]>::is_empty")]
+  tools: &'a [Tool],
   stream: bool,
   max_tokens: i32,
   thinking: ZThinking,

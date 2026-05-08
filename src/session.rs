@@ -1,8 +1,11 @@
 use anyhow::Result;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::types::Message;
+
+static COUNTER: AtomicU64 = AtomicU64::new(0);
 
 pub fn persist_session(messages: &[Message], worker: bool, session_id: &str) -> Result<()> {
   if messages.is_empty() {
@@ -28,14 +31,14 @@ pub fn append_journal(session_id: &str, summary: &str) -> Result<()> {
     return Ok(());
   }
   fs::create_dir_all(".ogent")?;
-  let timestamp = timestamp();
+  let ts = timestamp();
   let mut file = OpenOptions::new()
     .create(true)
     .append(true)
     .open(".ogent/journal.md")?;
-  writeln!(file, "## Session {timestamp}")?;
+  writeln!(file, "## Session {ts}")?;
   writeln!(file)?;
-  writeln!(file, "- Timestamp: {timestamp}")?;
+  writeln!(file, "- Timestamp: {ts}")?;
   writeln!(file, "- Session: {session_id}")?;
   writeln!(file)?;
   writeln!(file, "{}", summary.trim())?;
@@ -76,16 +79,13 @@ pub fn find_latest_session(dir: &str) -> Option<String> {
 
 pub fn load_session(path: &str) -> Result<Vec<Message>> {
   let data = fs::read_to_string(path)?;
-  let mut messages = Vec::new();
-  for line in data.lines() {
-    if line.trim().is_empty() {
-      continue;
-    }
-    let msg: Message = serde_json::from_str(line)
-      .map_err(|e| anyhow::anyhow!("parse error in session file: {e}"))?;
-    messages.push(msg);
-  }
-  Ok(messages)
+  data.lines()
+    .filter(|l| !l.trim().is_empty())
+    .map(|line| {
+      serde_json::from_str(line)
+        .map_err(|e| anyhow::anyhow!("parse error in session file: {e}"))
+    })
+    .collect()
 }
 
 pub fn timestamp() -> String {
@@ -98,10 +98,5 @@ pub fn timestamp() -> String {
 }
 
 fn rand_suffix() -> String {
-  use std::time::{SystemTime, UNIX_EPOCH};
-  let nanos = SystemTime::now()
-    .duration_since(UNIX_EPOCH)
-    .unwrap_or_default()
-    .as_nanos();
-  format!("{:04x}", nanos & 0xFFFF)
+  format!("{:04x}", COUNTER.fetch_add(1, Ordering::Relaxed))
 }

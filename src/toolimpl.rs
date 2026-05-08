@@ -1,15 +1,29 @@
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 use serde_json::{Value, json};
+use std::fmt::Write;
 use std::fs;
 use std::path::Path;
 use std::process::Stdio;
+use std::sync::OnceLock;
 use tokio::process::Command;
 use tokio::time::{Duration, timeout};
 
 use crate::hashline::{EditOp, apply_anchor_edits, render_hashlines};
 use crate::task_tracker::{Complexity, GoalState, PhaseUpdate, Status, TaskTracker, TodoUpdate};
 use crate::tools::{ToolContext, parse_args, require_nonempty};
+
+fn require_agent<'a>(
+  agent: Option<&'a mut crate::agent::Agent>,
+  tool: &str,
+) -> Result<&'a mut crate::agent::Agent> {
+  agent.ok_or_else(|| anyhow::anyhow!("{tool} requires an active agent"))
+}
+
+fn exa_client() -> &'static reqwest::Client {
+  static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+  CLIENT.get_or_init(reqwest::Client::new)
+}
 
 pub async fn execute_tool(mut ctx: ToolContext<'_>, name: &str, args: &str) -> Result<String> {
   match name {
@@ -132,13 +146,10 @@ async fn bash(args: &str) -> Result<String> {
     Err(_) => bail!("command timed out after {secs}s"),
     Ok(Err(e)) => bail!("exec: {e}"),
     Ok(Ok(out)) => {
-      let combined = format!(
-        "{}{}",
-        String::from_utf8_lossy(&out.stdout),
-        String::from_utf8_lossy(&out.stderr)
-      );
+      let mut combined = String::from_utf8_lossy(&out.stdout).into_owned();
+      combined.push_str(&String::from_utf8_lossy(&out.stderr));
       if !out.status.success() {
-        bail!("exit err: {}\n{}", out.status, combined);
+        bail!("exit err: {}\n{combined}", out.status);
       }
       Ok(combined)
     }
@@ -212,17 +223,14 @@ fn repo_map_walk(
   if depth == 0 {
     out.push_str(".\n");
   } else if let Some(name) = rel.file_name() {
-    out.push_str(&format!(
-      "{}{}\n",
-      "  ".repeat(depth),
-      name.to_string_lossy()
-    ));
+    let _ = writeln!(out, "{}{}", "  ".repeat(depth), name.to_string_lossy());
   }
   if path.is_dir() && depth < max_depth {
     let mut entries: Vec<_> = fs::read_dir(path)?.flatten().collect();
     entries.sort_by_key(|e| e.file_name());
     for entry in entries {
-      let name = entry.file_name().to_string_lossy().to_string();
+      let name = entry.file_name();
+      let name = name.to_string_lossy();
       if name.starts_with('.') || name == "node_modules" || name == "target" {
         continue;
       }
@@ -272,24 +280,16 @@ async fn web_search(args: &str) -> Result<String> {
   let args: WebSearchArgs = parse_args(args)?;
   require_nonempty(&args.query, "query")?;
   let n = args.num_results.clamp(1, 100);
-  let body = json!({"query": args.query, "type": if args.search_type.is_empty() { "auto" } else { &args.search_type }, "numResults": n, "contents": {"highlights": true}});
+  let search_type = if args.search_type.is_empty() { "auto" } else { &args.search_type };
+  let body = json!({"query": args.query, "type": search_type, "numResults": n, "contents": {"highlights": true}});
   let v = exa_post("https://api.exa.ai/search", body).await?;
   let mut out = String::new();
-  for (i, r) in v["results"]
-    .as_array()
-    .unwrap_or(&Vec::new())
-    .iter()
-    .enumerate()
-  {
-    out.push_str(&format!(
-      "{}. {}\n   {}\n",
-      i + 1,
-      r["title"].as_str().unwrap_or(""),
-      r["url"].as_str().unwrap_or("")
-    ));
+  for (i, r) in v["results"].as_array().unwrap_or(&Vec::new()).iter().enumerate() {
+    let _ = writeln!(out, "{}. {}", i + 1, r["title"].as_str().unwrap_or(""));
+    let _ = writeln!(out, "   {}", r["url"].as_str().unwrap_or(""));
     if let Some(highlights) = r["highlights"].as_array() {
       for h in highlights {
-        out.push_str(&format!("   > {}\n", h.as_str().unwrap_or("")));
+        let _ = writeln!(out, "   > {}", h.as_str().unwrap_or(""));
       }
     }
     out.push('\n');
@@ -309,11 +309,7 @@ async fn web_read(args: &str) -> Result<String> {
   if args.urls.is_empty() {
     bail!("urls is required");
   }
-  let mode = if args.mode.is_empty() {
-    "highlights"
-  } else {
-    &args.mode
-  };
+  let mode = if args.mode.is_empty() { "highlights" } else { &args.mode };
   let body = if mode == "text" {
     json!({"urls": args.urls, "text": true})
   } else {
@@ -322,17 +318,15 @@ async fn web_read(args: &str) -> Result<String> {
   let v = exa_post("https://api.exa.ai/contents", body).await?;
   let mut out = String::new();
   for r in v["results"].as_array().unwrap_or(&Vec::new()) {
-    out.push_str(&format!(
-      "--- {} ---\n{}\n\n",
-      r["title"].as_str().unwrap_or(""),
-      r["url"].as_str().unwrap_or("")
-    ));
+    let _ = writeln!(out, "--- {} ---", r["title"].as_str().unwrap_or(""));
+    let _ = writeln!(out, "{}", r["url"].as_str().unwrap_or(""));
+    out.push('\n');
     if mode == "text" {
       out.push_str(r["text"].as_str().unwrap_or(""));
       out.push_str("\n\n");
     } else if let Some(highlights) = r["highlights"].as_array() {
       for h in highlights {
-        out.push_str(&format!("> {}\n", h.as_str().unwrap_or("")));
+        let _ = writeln!(out, "> {}", h.as_str().unwrap_or(""));
       }
       out.push('\n');
     }
@@ -361,7 +355,7 @@ async fn exa_post(url: &str, body: Value) -> Result<Value> {
   if key.is_empty() {
     bail!("EXA_API_KEY not set");
   }
-  let resp = reqwest::Client::new()
+  let resp = exa_client()
     .post(url)
     .header("x-api-key", key)
     .json(&body)
@@ -420,9 +414,7 @@ struct SetGoalArgs {
 fn set_goal(agent: Option<&mut crate::agent::Agent>, args: &str) -> Result<String> {
   let args: SetGoalArgs = parse_args(args)?;
   require_nonempty(&args.goal, "goal")?;
-  let Some(agent) = agent else {
-    bail!("set_goal requires an active agent");
-  };
+  let agent = require_agent(agent, "set_goal")?;
   if agent.task_tracker.is_some() {
     bail!("set_goal can only be called once; use revise_goal for goal changes");
   }
@@ -458,9 +450,7 @@ fn revise_goal(agent: Option<&mut crate::agent::Agent>, args: &str) -> Result<St
   let args: ReviseGoalArgs = parse_args(args)?;
   require_nonempty(&args.goal, "goal")?;
   require_nonempty(&args.reason, "reason")?;
-  let Some(agent) = agent else {
-    bail!("revise_goal requires an active agent");
-  };
+  let agent = require_agent(agent, "revise_goal")?;
   let Some(tracker) = agent.task_tracker.as_mut() else {
     bail!("set_goal must be called before revise_goal");
   };
@@ -491,9 +481,7 @@ fn update_phase(agent: Option<&mut crate::agent::Agent>, args: &str) -> Result<S
   let args: UpdatePhaseArgs = parse_args(args)?;
   require_nonempty(&args.phase_id, "phase_id")?;
   require_nonempty(&args.title, "title")?;
-  let Some(agent) = agent else {
-    bail!("update_phase requires an active agent");
-  };
+  let agent = require_agent(agent, "update_phase")?;
   let Some(tracker) = agent.task_tracker.as_mut() else {
     bail!("set_goal must be called before update_phase");
   };
@@ -523,9 +511,7 @@ fn update_todo(agent: Option<&mut crate::agent::Agent>, args: &str) -> Result<St
   require_nonempty(&args.phase_id, "phase_id")?;
   require_nonempty(&args.todo_id, "todo_id")?;
   require_nonempty(&args.title, "title")?;
-  let Some(agent) = agent else {
-    bail!("update_todo requires an active agent");
-  };
+  let agent = require_agent(agent, "update_todo")?;
   let Some(tracker) = agent.task_tracker.as_mut() else {
     bail!("set_goal must be called before update_todo");
   };
@@ -610,9 +596,7 @@ struct CompleteArgs {
 fn complete(agent: Option<&mut crate::agent::Agent>, args: &str) -> Result<String> {
   let args: CompleteArgs = parse_args(args)?;
   require_nonempty(&args.summary, "summary")?;
-  let Some(agent) = agent else {
-    bail!("complete requires an active agent");
-  };
+  let agent = require_agent(agent, "complete")?;
   if agent
     .task_tracker
     .as_ref()
@@ -635,9 +619,7 @@ fn complete(agent: Option<&mut crate::agent::Agent>, args: &str) -> Result<Strin
 fn worker_complete(agent: Option<&mut crate::agent::Agent>, args: &str) -> Result<String> {
   let args: CompleteArgs = parse_args(args)?;
   require_nonempty(&args.summary, "summary")?;
-  let Some(agent) = agent else {
-    bail!("worker_complete requires an active agent");
-  };
+  let agent = require_agent(agent, "worker_complete")?;
   agent.completion_summary = Some(args.summary.trim().to_string());
   Ok("Worker marked complete.".to_string())
 }

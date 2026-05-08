@@ -199,7 +199,7 @@ fn run_ui_loop(
   let mut follow_bottom = true;
 
   while !stop.load(Ordering::Relaxed) {
-    let (log_width, log_height) = draw(terminal, &log, &status, &mut scroll_y, follow_bottom)?;
+    let (_log_width, log_height, max_scroll_y) = draw(terminal, &log, &status, &mut scroll_y, follow_bottom)?;
     if event::poll(Duration::from_millis(100))? {
       match event::read()? {
         Event::Key(key) => {
@@ -240,7 +240,7 @@ fn run_ui_loop(
             }
             KeyCode::Down => {
               scroll_y = scroll_y.saturating_add(1);
-              if scroll_y >= max_scroll(&log, log_width, log_height) {
+              if scroll_y >= max_scroll_y {
                 follow_bottom = true;
               }
             }
@@ -250,7 +250,7 @@ fn run_ui_loop(
             }
             KeyCode::PageDown => {
               scroll_y = scroll_y.saturating_add(log_height as usize);
-              if scroll_y >= max_scroll(&log, log_width, log_height) {
+              if scroll_y >= max_scroll_y {
                 follow_bottom = true;
               }
             }
@@ -272,7 +272,7 @@ fn run_ui_loop(
           }
           MouseEventKind::ScrollDown => {
             scroll_y = scroll_y.saturating_add(3);
-            if scroll_y >= max_scroll(&log, log_width, log_height) {
+            if scroll_y >= max_scroll_y {
               follow_bottom = true;
             }
           }
@@ -303,26 +303,39 @@ fn draw(
   status: &UiStatus,
   scroll_y: &mut usize,
   follow_bottom: bool,
-) -> Result<(u16, u16)> {
+) -> Result<(u16, u16, usize)> {
   let status_snapshot = status.snapshot();
   let log_lines = log.snapshot();
-  let mut dims: Option<(u16, u16)> = None;
+  let area = terminal.size()?.into();
+  let chunks = Layout::default()
+    .direction(Direction::Vertical)
+    .constraints([
+      Constraint::Length(1),
+      Constraint::Min(1),
+      Constraint::Length(3),
+    ])
+    .split(area);
+
+  let log_width = chunks[1].width.saturating_sub(2);
+  let log_height = chunks[1].height.saturating_sub(2);
+
+  let lines: Vec<Line> = log_lines.iter().map(|line| render_log_line(line)).collect();
+  let paragraph = Paragraph::new(lines)
+    .wrap(Wrap { trim: true })
+    .block(Block::default().borders(Borders::ALL).title("log"));
+  let total_wrapped = paragraph.line_count(log_width.max(1));
+  let max_scroll = total_wrapped.saturating_sub(log_height as usize);
+  let y = if follow_bottom {
+    max_scroll
+  } else {
+    (*scroll_y).min(max_scroll)
+  };
+  *scroll_y = y;
+
   terminal.draw(|frame| {
     frame.render_widget(Clear, frame.area());
-    let chunks = Layout::default()
-      .direction(Direction::Vertical)
-      .constraints([
-        Constraint::Length(1),
-        Constraint::Min(1),
-        Constraint::Length(3),
-      ])
-      .split(frame.area());
 
-    let auto = if status_snapshot.auto {
-      "auto on"
-    } else {
-      "auto off"
-    };
+    let auto = if status_snapshot.auto { "auto on" } else { "auto off" };
     let mut bar = format!(
       "{} | {} | turn {} | tokens {} | {}",
       status_snapshot.profile,
@@ -334,22 +347,6 @@ fn draw(
     truncate_to_width(&mut bar, chunks[0].width.saturating_sub(1) as usize);
     frame.render_widget(Paragraph::new(bar), chunks[0]);
 
-    let log_width = chunks[1].width.saturating_sub(2);
-    let log_height = chunks[1].height.saturating_sub(2);
-    dims = Some((log_width, log_height));
-
-    let lines: Vec<Line> = log_lines.iter().map(|line| render_log_line(line)).collect();
-    let paragraph = Paragraph::new(lines)
-      .wrap(Wrap { trim: true })
-      .block(Block::default().borders(Borders::ALL).title("log"));
-    let total_wrapped = paragraph.line_count(log_width.max(1));
-    let max_scroll = total_wrapped.saturating_sub(log_height as usize);
-    let y = if follow_bottom {
-      max_scroll
-    } else {
-      (*scroll_y).min(max_scroll)
-    };
-    *scroll_y = y;
     frame.render_widget(paragraph.scroll((y as u16, 0)), chunks[1]);
 
     let mut scrollbar_state = ScrollbarState::new(total_wrapped).position(y);
@@ -373,18 +370,7 @@ fn draw(
       chunks[2],
     );
   })?;
-  Ok(dims.unwrap_or((0, 0)))
-}
-
-fn max_scroll(log: &UiLog, log_width: u16, log_height: u16) -> usize {
-  let lines: Vec<Line> = log
-    .snapshot()
-    .iter()
-    .map(|line| render_log_line(line))
-    .collect();
-  let paragraph = Paragraph::new(lines).wrap(Wrap { trim: true });
-  let total_wrapped = paragraph.line_count(log_width.max(1));
-  total_wrapped.saturating_sub(log_height as usize)
+  Ok((log_width, log_height, max_scroll))
 }
 
 fn truncate_to_width(value: &mut String, width: usize) {
@@ -479,15 +465,15 @@ fn inline_markdown_spans(value: &str) -> Vec<Span<'static>> {
         rest = &rest[next..];
         continue;
       }
-      if let Some(after_tick) = rest.strip_prefix('`') {
-        if let Some(end) = after_tick.find('`') {
-          spans.push(Span::styled(
-            after_tick[..end].to_string(),
-            Style::default().fg(Color::Green),
-          ));
-          rest = &after_tick[end + 1..];
-          continue;
-        }
+      if let Some(after_tick) = rest.strip_prefix('`')
+        && let Some(end) = after_tick.find('`')
+      {
+        spans.push(Span::styled(
+          after_tick[..end].to_string(),
+          Style::default().fg(Color::Green),
+        ));
+        rest = &after_tick[end + 1..];
+        continue;
       }
       if let Some(after_bold) = rest.strip_prefix("**") {
         style = if style.add_modifier.contains(Modifier::BOLD) {

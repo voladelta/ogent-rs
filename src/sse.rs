@@ -1,7 +1,6 @@
 use anyhow::{Context, Result};
 use futures_util::StreamExt;
 use serde::Deserialize;
-use std::collections::BTreeMap;
 
 use crate::types::{ChatResponse, FunctionCall, ToolCall, Usage};
 
@@ -54,54 +53,58 @@ struct AccToolCall {
   arguments: String,
 }
 
+impl AccToolCall {
+  fn into_tool_call(self) -> ToolCall {
+    ToolCall {
+      id: self.id,
+      kind: self.kind,
+      function: FunctionCall {
+        name: self.name,
+        arguments: self.arguments,
+      },
+    }
+  }
+}
+
+fn flush_tool_calls(acc: &mut Vec<AccToolCall>, result: &mut ChatResponse) {
+  result.tool_calls.extend(
+    std::mem::take(acc)
+      .into_iter()
+      .map(AccToolCall::into_tool_call),
+  );
+}
+
 pub async fn parse_sse_response(
   resp: reqwest::Response,
   cancel: Option<&tokio_util::sync::CancellationToken>,
 ) -> Result<ChatResponse> {
   let mut result = ChatResponse::default();
-  let mut acc: BTreeMap<usize, AccToolCall> = BTreeMap::new();
+  let mut acc: Vec<AccToolCall> = Vec::new();
   let mut stream = resp.bytes_stream();
   let mut buf = String::new();
 
   while let Some(item) = stream.next().await {
     if cancel.map(|c| c.is_cancelled()).unwrap_or(false) {
-      for (_, a) in std::mem::take(&mut acc) {
-        result.tool_calls.push(ToolCall {
-          id: a.id,
-          kind: a.kind,
-          function: FunctionCall {
-            name: a.name,
-            arguments: a.arguments,
-          },
-        });
-      }
+      flush_tool_calls(&mut acc, &mut result);
       return Err(crate::types::ChatAbortedError { resp: result }.into());
     }
     let bytes = item.context("read sse")?;
     buf.push_str(&String::from_utf8_lossy(&bytes));
     while let Some(pos) = buf.find('\n') {
-      let line = buf[..pos].trim_end_matches('\r').to_string();
-      buf = buf[pos + 1..].to_string();
-      process_line(&line, &mut result, &mut acc)?;
+      let line = buf[..pos].trim_end_matches('\r');
+      let rest = buf[pos + 1..].to_string();
+      process_line(line, &mut result, &mut acc)?;
+      buf = rest;
     }
   }
-  for (_, a) in acc {
-    result.tool_calls.push(ToolCall {
-      id: a.id,
-      kind: a.kind,
-      function: FunctionCall {
-        name: a.name,
-        arguments: a.arguments,
-      },
-    });
-  }
+  flush_tool_calls(&mut acc, &mut result);
   Ok(result)
 }
 
 fn process_line(
   line: &str,
   result: &mut ChatResponse,
-  acc: &mut BTreeMap<usize, AccToolCall>,
+  acc: &mut Vec<AccToolCall>,
 ) -> Result<()> {
   let Some(data) = line.strip_prefix("data:") else {
     return Ok(());
@@ -124,7 +127,10 @@ fn process_line(
       result.content.push_str(&content);
     }
     for tc in choice.delta.tool_calls {
-      let a = acc.entry(tc.index).or_default();
+      if tc.index >= acc.len() {
+        acc.resize_with(tc.index + 1, AccToolCall::default);
+      }
+      let a = &mut acc[tc.index];
       if !tc.id.is_empty() {
         a.id = tc.id;
       }
@@ -147,16 +153,16 @@ mod tests {
   #[test]
   fn process_line_accumulates_tool_args() {
     let mut resp = ChatResponse::default();
-    let mut acc = BTreeMap::new();
+    let mut acc = Vec::new();
     process_line(r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"x","type":"function","function":{"name":"bash","arguments":"{\"command\""}}]}}]}"#, &mut resp, &mut acc).unwrap();
-    process_line(r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":":\"ls\"}"}}]}}]}"#, &mut resp, &mut acc).unwrap();
-    assert_eq!(acc.get(&0).unwrap().arguments, r#"{"command":"ls"}"#);
+    process_line(r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":":\"ls\""}}]}}]}"#, &mut resp, &mut acc).unwrap();
+    assert_eq!(acc.get(0).unwrap().arguments, "{\"command\":\"ls\"");
   }
 
   #[test]
   fn process_line_accepts_null_content_chunks() {
     let mut resp = ChatResponse::default();
-    let mut acc = BTreeMap::new();
+    let mut acc = Vec::new();
     process_line(
       r#"data: {"choices":[{"delta":{"content":null,"reasoning_content":"thinking"}}]}"#,
       &mut resp,

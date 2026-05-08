@@ -454,55 +454,34 @@ impl Agent {
     });
 
     let mut results = Vec::with_capacity(resp.tool_calls.len());
+    let mut read_only_batch: Vec<&ToolCall> = Vec::new();
 
-    let mut i = 0;
-    while i < resp.tool_calls.len() {
-      if !is_read_only_tool(&resp.tool_calls[i].function.name) {
-        let output = self.run_tool_call(&resp.tool_calls[i]).await;
-        let is_interactive = output == "ERROR: interactive mode required";
-        let completed = self.completion_summary.is_some();
-        results.push(ToolResult {
-          name: resp.tool_calls[i].function.name.clone(),
-          args: resp.tool_calls[i].function.arguments.clone(),
-          output,
-        });
-        if is_interactive {
-          return Err(InteractiveRequiredError.into());
-        }
-        if completed {
-          break;
-        }
-        i += 1;
+    for tc in &resp.tool_calls {
+      if is_read_only_tool(&tc.function.name) {
+        read_only_batch.push(tc);
         continue;
       }
-
-      let start = i;
-      while i < resp.tool_calls.len() && is_read_only_tool(&resp.tool_calls[i].function.name) {
-        i += 1;
+      if !read_only_batch.is_empty() {
+        results.extend(run_read_only_batch(&read_only_batch).await?);
+        read_only_batch.clear();
       }
-
-      let group = &resp.tool_calls[start..i];
-      let futs = group.iter().map(|tc| {
-        let name = tc.function.name.clone();
-        let args = tc.function.arguments.clone();
-        async move {
-          let output = match execute_tool(ToolContext { agent: None }, &name, &args).await {
-            Ok(out) => out,
-            Err(e) if e.to_string() == "interactive mode required" => {
-              "ERROR: interactive mode required".to_string()
-            }
-            Err(e) => format!("ERROR: {e}"),
-          };
-          ToolResult { name, args, output }
-        }
+      let output = self.run_tool_call(tc).await;
+      let is_interactive = output == "ERROR: interactive mode required";
+      results.push(ToolResult {
+        name: tc.function.name.clone(),
+        args: tc.function.arguments.clone(),
+        output,
       });
-      let group_results = futures_util::future::join_all(futs).await;
-      for r in group_results {
-        if r.output == "ERROR: interactive mode required" {
-          return Err(InteractiveRequiredError.into());
-        }
-        results.push(r);
+      if is_interactive {
+        return Err(InteractiveRequiredError.into());
       }
+      if self.completion_summary.is_some() {
+        break;
+      }
+    }
+
+    if !read_only_batch.is_empty() {
+      results.extend(run_read_only_batch(&read_only_batch).await?);
     }
 
     for (tc, r) in resp.tool_calls.iter().zip(results.iter()) {
@@ -518,7 +497,6 @@ impl Agent {
   }
 
   async fn run_tool_call(&mut self, tc: &ToolCall) -> String {
-    let _read_only = is_read_only_tool(&tc.function.name);
     match execute_tool(
       ToolContext { agent: Some(self) },
       &tc.function.name,
@@ -536,12 +514,11 @@ impl Agent {
 
   fn check_compact(&mut self) {
     if self.compact.threshold < 0.0 || self.compact.context_limit == 0 {
-      self.compact.compacting = false;
-      self.compact.urgency = 0;
       return;
     }
     let total = (self.total_prompt + self.total_completion) as usize;
-    if total as f64 / (self.compact.context_limit as f64) < self.compact.threshold {
+    let ratio = total as f64 / self.compact.context_limit as f64;
+    if ratio < self.compact.threshold {
       self.compact.compacting = false;
       self.compact.urgency = 0;
       return;
@@ -563,8 +540,8 @@ impl Agent {
     self.messages.push(Message {
       role: "user".into(),
       content: format!(
-        "<system_reminder urgency=\"{}\" kind=\"context_budget\">\n{}\n</system_reminder>",
-        self.compact.urgency, body
+        "<system_reminder urgency=\"{}\" kind=\"context_budget\">\n{body}\n</system_reminder>",
+        self.compact.urgency
       ),
       ..Default::default()
     });
@@ -641,14 +618,14 @@ impl Agent {
   }
 
   fn push_task_tracking_reminder(&mut self) {
-    if let Some(tracker) = self.task_tracker.as_mut() {
-      if let Some(reminder) = tracker.take_reminder() {
-        self.messages.push(Message {
-          role: "user".into(),
-          content: reminder,
-          ..Default::default()
-        });
-      }
+    if let Some(tracker) = self.task_tracker.as_mut()
+      && let Some(reminder) = tracker.take_reminder()
+    {
+      self.messages.push(Message {
+        role: "user".into(),
+        content: reminder,
+        ..Default::default()
+      });
     }
   }
 
@@ -667,15 +644,36 @@ impl Agent {
   }
 }
 
+async fn run_read_only_batch(batch: &[&ToolCall]) -> anyhow::Result<Vec<ToolResult>> {
+  let futs = batch.iter().map(|tc| {
+    let name = tc.function.name.clone();
+    let args = tc.function.arguments.clone();
+    async move {
+      let output = match execute_tool(ToolContext { agent: None }, &name, &args).await {
+        Ok(out) => out,
+        Err(e) if e.to_string() == "interactive mode required" => {
+          "ERROR: interactive mode required".to_string()
+        }
+        Err(e) => format!("ERROR: {e}"),
+      };
+      ToolResult { name, args, output }
+    }
+  });
+  let results = futures_util::future::join_all(futs).await;
+  for r in &results {
+    if r.output == "ERROR: interactive mode required" {
+      return Err(InteractiveRequiredError.into());
+    }
+  }
+  Ok(results)
+}
+
 fn truncate(s: &str, n: usize) -> String {
   let escaped = s.replace('\n', "\\n");
   if escaped.len() <= n {
     escaped
   } else {
-    let mut end = n.min(escaped.len());
-    while !escaped.is_char_boundary(end) {
-      end -= 1;
-    }
+    let end = escaped.floor_char_boundary(n);
     format!("{}...", &escaped[..end])
   }
 }
@@ -731,49 +729,20 @@ fn turn_budget_reminder(max_turns: i32, turn: i32) -> Option<String> {
   }
   let remaining = max_turns - turn + 1;
 
-  let tier = if remaining == 1 {
-    1
-  } else if remaining == 2 {
-    2
-  } else if remaining == 3 {
-    3
-  } else if max_turns >= 10 && remaining == max_turns / 2 {
-    4
-  } else if max_turns >= 10 && remaining == max_turns / 4 && max_turns / 4 >= 5 {
-    5
-  } else if turn == 1 {
-    6
-  } else {
-    return None;
+  let msg = match remaining {
+    1 => "This is the FINAL turn. If the task is done, call `complete`. Otherwise call `handoff` for the human to review and resume. Do not call tools that require follow-up verification.",
+    2 => "Two turns left. Do not start new work. Call `complete` if done, or `handoff` for the human to resume.",
+    3 => "Three turns left. If done, call `complete`. Otherwise finish the current chunk and prepare to `handoff` for human review and resume.",
+    _ if max_turns >= 10 && remaining == max_turns / 2 => "Half the turn budget is used. If useful work is parallelizable and delegatable, delegate coworkers now. Keep the critical path local.",
+    _ if max_turns >= 10 && remaining == max_turns / 4 && max_turns / 4 >= 5 => "Three-quarters of the turn budget is used. Focus on verification, tracking updates, completion, or a necessary handoff. Avoid new exploratory delegation.",
+    _ if turn == 1 => "Use turns deliberately. If useful work is parallelizable and delegatable, delegate coworkers now while keeping the critical path local.",
+    _ => return None,
   };
 
-  let mut body = format!(
-    "<system_reminder kind=\"turn_budget\">\nYou are on turn {turn} of {max_turns}. {remaining} turn{} remain including this one.\n",
+  Some(format!(
+    "<system_reminder kind=\"turn_budget\">\nYou are on turn {turn} of {max_turns}. {remaining} turn{} remain including this one.\n{msg}\n</system_reminder>",
     if remaining == 1 { "" } else { "s" }
-  );
-  match tier {
-    1 => body.push_str(
-      "This is the FINAL turn. If the task is done, call `complete`. Otherwise call `handoff` for the human to review and resume. Do not call tools that require follow-up verification.\n",
-    ),
-    2 => body.push_str(
-      "Two turns left. Do not start new work. Call `complete` if done, or `handoff` for the human to resume.\n",
-    ),
-    3 => body.push_str(
-      "Three turns left. If done, call `complete`. Otherwise finish the current chunk and prepare to `handoff` for human review and resume.\n",
-    ),
-    4 => body.push_str(
-      "Half the turn budget is used. If useful work is parallelizable and delegatable, delegate coworkers now. Keep the critical path local.\n",
-    ),
-    5 => body.push_str(
-      "Three-quarters of the turn budget is used. Focus on verification, tracking updates, completion, or a necessary handoff. Avoid new exploratory delegation.\n",
-    ),
-    6 => body.push_str(
-      "Use turns deliberately. If useful work is parallelizable and delegatable, delegate coworkers now while keeping the critical path local.\n",
-    ),
-    _ => {}
-  };
-  body.push_str("</system_reminder>");
-  Some(body)
+  ))
 }
 
 #[cfg(test)]

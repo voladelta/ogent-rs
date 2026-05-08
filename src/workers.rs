@@ -1,7 +1,6 @@
 use anyhow::{Result, bail};
 use serde::Deserialize;
 use std::collections::HashSet;
-use std::sync::Arc;
 
 use tokio::process::Command;
 use tokio::sync::Mutex;
@@ -38,9 +37,8 @@ pub struct StartWorkersArgs {
   pub coworkers: Vec<AsyncCoworkerArgs>,
 }
 
-#[derive(Clone)]
 pub struct WorkerManager {
-  inner: Arc<Mutex<Inner>>,
+  inner: Mutex<Inner>,
 }
 
 struct Inner {
@@ -66,11 +64,11 @@ impl Default for WorkerManager {
 impl WorkerManager {
   pub fn new() -> Self {
     Self {
-      inner: Arc::new(Mutex::new(Inner {
+      inner: Mutex::new(Inner {
         next_id: 0,
         batches: 0,
         workers: Vec::new(),
-      })),
+      }),
     }
   }
 

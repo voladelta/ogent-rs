@@ -225,9 +225,11 @@ Common options:
 | `--autocompact <percent>` | Start handoff/compaction when remaining context crosses the threshold |
 | `--handoff` | Exit after writing a handoff during compaction |
 | `--continue` | Resume from the newest `.ogent/handoffs/*.md` file |
+| `--resume` | Resume from the latest non-worker session (`.ogent/sessions/*.jsonl`) |
+| `--resume-session <name>` | Resume from a specific session file by name (without `.jsonl`) |
 | `--worker` | Internal worker mode. Reads system prompt from stdin |
 
-Non-steer mode requires a prompt unless `--continue` is used.
+Non-steer mode requires a prompt unless `--continue` or `--resume` is used.
 
 ## Tools
 
@@ -322,6 +324,24 @@ Handoffs are written to `.ogent/handoffs/*.md`. When a task tracker exists, hand
 cargo run -- --continue
 ```
 
+### Resume from Session
+
+Resume a previous conversation from `.ogent/sessions/*.jsonl` without a handoff:
+
+```bash
+# Resume the latest non-worker session
+cargo run -- --resume "Now add a type hint to the function"
+
+# Resume a specific session by name (without .jsonl)
+cargo run -- --resume --resume-session 1778216383-2028 "Add a main block"
+```
+
+Sessions are saved even when the run hits `--max-turns`. If the turn limit is reached, the exit message prints:
+
+```
+Reached max turns (N). Session saved. Resume with ogent --resume.
+```
+
 ## Turn Limits
 
 ```bash
@@ -331,6 +351,21 @@ cargo run -- --max-turns 20 "Add auth middleware"
 `--max-turns=-1` is unlimited.
 
 Worker limits can be set by the parent agent through the `max_turns` field in `dispatch_worker` or async worker specs.
+
+### Turn Budget Reminders
+
+The agent receives contextual reminders at key points in the turn budget to guide behavior:
+
+| Reminder | When | Guidance |
+|---|---|---|
+| Turn 1 | Always | "Use turns deliberately. Delegate coworkers now if work is parallelizable." |
+| 50% used | `max_turns >= 10`, remaining = `max_turns/2` | "If useful work is parallelizable and delegatable, delegate coworkers now." |
+| 75% used | `max_turns >= 10`, remaining = `max_turns/4` (>= 5) | "Focus on verification, completion, or handoff. Avoid new delegation." |
+| 3 left | `remaining == 3` | "Finish current chunk and prepare to `handoff` for human review and resume." |
+| 2 left | `remaining == 2` | "No new work. `complete` or `handoff` for human resume." |
+| FINAL | `remaining == 1` | "`complete` if done. Otherwise `handoff` for human to review and resume." |
+
+These reminders help the agent avoid overcommitting on the final turns and explicitly permit `handoff` as a safe exit strategy when the turn budget is exhausted.
 
 ## Token Reporting
 
@@ -455,6 +490,12 @@ cargo run -- "Add tests for src/auth.rs and write README documentation"
 
 # Continue from handoff
 cargo run -- --continue
+
+# Resume from the latest session
+cargo run -- --resume "Add more tests"
+
+# Resume from a specific session by name
+cargo run -- --resume --resume-session 1778216383-2028 "Add a main block"
 
 # Auto-compact context at 10%, write handoff, then exit
 cargo run -- --autocompact 10 --handoff "Large refactoring task"

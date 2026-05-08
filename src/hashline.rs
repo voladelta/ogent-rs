@@ -1,7 +1,6 @@
 use anyhow::{Result, bail};
 use serde::Deserialize;
-
-const ANCHOR_HASH_WIDTH: usize = 4;
+use std::fmt::Write;
 
 #[derive(Debug, Clone, Copy)]
 struct Anchor<'a> {
@@ -20,12 +19,9 @@ pub fn render_hashlines(
   let slice_end = end.unwrap_or(lines.len()).min(lines.len());
   let mut out = String::new();
   for (i, line) in lines[slice_start..slice_end].iter().enumerate() {
-    out.push_str(&format!(
-      "{}:{}|{}\n",
-      start_line + slice_start + i,
-      line_hash(line),
-      line
-    ));
+    let line_no = start_line + slice_start + i;
+    let hash = line_hash(line);
+    let _ = writeln!(out, "{line_no}:{hash}|{line}");
   }
   out
 }
@@ -42,8 +38,7 @@ pub fn source_lines(source: &str) -> Vec<String> {
 }
 
 fn line_hash(line: &str) -> String {
-  let hash = fnv1a64(line.as_bytes());
-  format!("{hash:016x}")[..ANCHOR_HASH_WIDTH].to_string()
+  format!("{:04x}", fnv1a64(line.as_bytes()) >> 48)
 }
 
 fn fnv1a64(bytes: &[u8]) -> u64 {

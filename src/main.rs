@@ -152,14 +152,14 @@ async fn main() -> Result<()> {
       append_to_last_user_message(&mut messages, &cwd_msg);
     }
   }
-  if let Some(tracker) = task_tracker.as_mut() {
-    if let Some(reminder) = tracker.take_reminder() {
-      messages.push(Message {
-        role: "user".into(),
-        content: reminder,
-        ..Default::default()
-      });
-    }
+  if let Some(tracker) = task_tracker.as_mut()
+    && let Some(reminder) = tracker.take_reminder()
+  {
+    messages.push(Message {
+      role: "user".into(),
+      content: reminder,
+      ..Default::default()
+    });
   }
 
   let mut agent = Agent::new(client, messages, tools, compact, task_tracker);
@@ -224,7 +224,7 @@ fn build_10x_coder_messages(prompt: &str) -> Vec<Message> {
   ]
 }
 
-fn append_to_last_user_message(messages: &mut Vec<Message>, content: &str) {
+fn append_to_last_user_message(messages: &mut [Message], content: &str) {
   if content.is_empty() {
     return;
   }

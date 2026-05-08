@@ -6,7 +6,7 @@ use tokio::time::{Duration, sleep};
 use crate::sse::parse_sse_response;
 use crate::types::{ChatResponse, Message, Tool};
 
-pub type BuildReq = Arc<dyn Fn(&[Message], &Vec<Tool>) -> Value + Send + Sync>;
+pub type BuildReq = Arc<dyn Fn(&[Message], &[Tool]) -> Value + Send + Sync>;
 
 #[derive(Clone)]
 pub struct Client {
@@ -20,7 +20,7 @@ pub struct Client {
 impl Client {
   pub fn new<F>(url: &str, api_key: String, max_retries: usize, build_req: F) -> Self
   where
-    F: Fn(&[Message], &Vec<Tool>) -> Value + Send + Sync + 'static,
+    F: Fn(&[Message], &[Tool]) -> Value + Send + Sync + 'static,
   {
     Self {
       http: reqwest::Client::new(),
@@ -34,7 +34,7 @@ impl Client {
   pub async fn chat(
     &self,
     messages: &[Message],
-    tools: &Vec<Tool>,
+    tools: &[Tool],
     cancel: Option<&tokio_util::sync::CancellationToken>,
   ) -> Result<ChatResponse> {
     let req_body = (self.build_req)(messages, tools);

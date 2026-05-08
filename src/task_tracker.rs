@@ -289,74 +289,74 @@ impl TaskTracker {
   }
 
   fn render_compact_reminder(&self, stale_nudge: bool) -> String {
-    let mut body = String::new();
-    body.push_str("<system_reminder kind=\"task_tracking\">\n");
+    use std::fmt::Write;
+    let mut body = String::from("<system_reminder kind=\"task_tracking\">\n");
     body.push_str("Task tracker already exists. Do not call `set_goal` again.\n");
     body.push_str(&self.render_summary_lines());
     if stale_nudge {
-      body.push_str(&format!(
-        "- Stale: non-tracking work progressed for {} turns without tracker updates.\n",
+      let _ = writeln!(
+        body,
+        "- Stale: non-tracking work progressed for {} turns without tracker updates.",
         self.stale_turns
-      ));
+      );
     }
-    body.push_str(
-      "- Keep Goal -> Phases -> Todos current with update_phase/update_todo. Use revise_goal only if the objective changed.\n",
-    );
+    body.push_str("- Keep Goal -> Phases -> Todos current with update_phase/update_todo. Use revise_goal only if the objective changed.\n");
     body.push_str("</system_reminder>");
     body
   }
 
   fn render_summary_lines(&self) -> String {
+    use std::fmt::Write;
     let mut lines = String::new();
-    lines.push_str(&format!(
-      "- Goal: [{}|{}] {}\n",
+    let _ = writeln!(
+      lines,
+      "- Goal: [{}|{}] {}",
       format_status(self.goal.status),
       format_complexity(self.goal.complexity),
       self.goal.title
-    ));
+    );
     if !self.goal.notes.is_empty() {
-      lines.push_str(&format!("  notes: {}\n", self.goal.notes));
+      let _ = writeln!(lines, "  notes: {}", self.goal.notes);
     }
     for criterion in self.goal.success_criteria.iter().take(4) {
-      lines.push_str(&format!("  success: {}\n", criterion));
+      let _ = writeln!(lines, "  success: {}", criterion);
     }
     if !self.revisions.is_empty() {
-      lines.push_str(&format!("- Goal revisions: {}\n", self.revisions.len()));
+      let _ = writeln!(lines, "- Goal revisions: {}", self.revisions.len());
     }
     let mut counts = [0usize; 5];
     for phase in &self.phases {
       counts[status_index(phase.status)] += 1;
     }
-    lines.push_str(&format!(
-      "- Phases: pending={} in_progress={} blocked={} completed={} skipped={}\n",
-      counts[status_index(Status::Pending)],
-      counts[status_index(Status::InProgress)],
-      counts[status_index(Status::Blocked)],
-      counts[status_index(Status::Completed)],
-      counts[status_index(Status::Skipped)]
-    ));
+    let _ = writeln!(
+      lines,
+      "- Phases: pending={} in_progress={} blocked={} completed={} skipped={}",
+      counts[0], counts[1], counts[3], counts[2], counts[4]
+    );
     let mut emitted = 0usize;
     for phase in &self.phases {
       if phase.status.is_open() && emitted < 4 {
-        lines.push_str(&format!(
-          "- phase({}) [{}|{}] {}\n",
+        let _ = writeln!(
+          lines,
+          "- phase({}) [{}|{}] {}",
           phase.id,
           format_status(phase.status),
           format_complexity(phase.complexity),
           phase.title
-        ));
+        );
         emitted += 1;
       }
       for todo in &phase.todos {
         if todo.status.is_open() && emitted < 8 {
-          lines.push_str(&format!(
-            "  - todo({}/{}) [{}|{}] {}\n",
+          let _ = writeln!(
+            lines,
+            "  - todo({}/{}) [{}|{}] {}",
             phase.id,
             todo.id,
             format_status(todo.status),
             format_complexity(todo.complexity),
             todo.title
-          ));
+          );
           emitted += 1;
         }
       }
