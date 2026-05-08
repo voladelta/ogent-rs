@@ -18,7 +18,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{
   Block, Borders, Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap,
 };
-use ratatui_textarea::{CursorMove, TextArea};
+use ratatui_textarea::{CursorMove, TextArea, WrapMode};
 use std::io;
 use std::sync::{
   Arc, Mutex,
@@ -222,6 +222,7 @@ fn run_ui_loop(
       .borders(Borders::ALL)
       .title("message or command"),
   );
+  textarea.set_wrap_mode(WrapMode::Word);
   let mut scroll_y: usize = 0;
   let mut follow_bottom = true;
   let mut file_selector: Option<FileSelector> = None;
