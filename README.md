@@ -438,6 +438,7 @@ Supported commands:
 | `/stop` | Disable auto-continuation after the current turn |
 | `/complete` | Ask the agent to summarize the session, call `complete`, save the journal entry, and exit |
 | `/cancel` | Cancel the in-flight model request |
+| `/new` | Restart the session from scratch: clear history (except system prompt), reset turns/tokens/workers, and wait for input |
 | `/q`, `/quit`, `quit`, `exit`, `Esc`, `Ctrl-C` | Exit steer mode |
 | any other text | Abort the in-flight model request, append the text as a new user message, and re-prompt |
 

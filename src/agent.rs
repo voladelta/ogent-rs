@@ -426,13 +426,10 @@ impl Agent {
         tui.log.push("[steer] complete requested");
       }
       SteerEvent::New => {
-        let system = self
-          .messages
-          .first()
-          .filter(|m| m.role == "system")
-          .map(|m| m.content.clone())
-          .unwrap_or_default();
-        self.messages = vec![system_msg(system)];
+        let mut messages = crate::prompts::build_10x_coder_messages("");
+        let workflow_state = crate::prompts::enrich_initial_messages(&mut messages);
+        self.messages = messages;
+        self.workflow_state = workflow_state;
         self.total_prompt = 0;
         self.total_completion = 0;
         self.worker_manager = WorkerManager::new();

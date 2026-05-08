@@ -3,6 +3,8 @@ use std::fmt::Write;
 use std::fs;
 use std::path::PathBuf;
 
+use crate::types::Message;
+
 pub const TENX_CODER_SYSTEM_PROMPT: &str = include_str!("../prompts/10x-coder.md");
 
 pub const WORKER_SUMMARY_PROMPT: &str = "\n\n## Worker Report Protocol\n\nWhen done, call `worker_complete` with a concise Markdown summary:\n\n```json\n{\"summary\":\"...\"}\n```\n\nInclude in the summary:\n- What you accomplished\n- Files inspected, commands run, results\n- Decisions made\n- Files modified (list)\n- Blockers (omit if none)\n\nRules:\n- Concise fragments are preferred.\n- Never fabricate or embellish results. Report only what you actually observed or did.\n- If blocked or missing information, use `worker_question` instead of stopping silently.\n- Do not write intermediate analysis, planning, or decision documents to the repo.";
@@ -144,4 +146,68 @@ fn xml_escape(s: &str) -> String {
     }
   }
   out
+}
+
+pub fn build_10x_coder_messages(prompt: &str) -> Vec<Message> {
+  vec![
+    Message {
+      role: "system".into(),
+      content: TENX_CODER_SYSTEM_PROMPT.to_string(),
+      ..Default::default()
+    },
+    Message {
+      role: "user".into(),
+      content: prompt.to_string(),
+      ..Default::default()
+    },
+  ]
+}
+
+pub fn enrich_initial_messages(messages: &mut [Message]) -> Option<crate::workflow::WorkflowState> {
+  let mut workflow_state = None;
+  append_to_last_user_message(messages, &discover_skills_message());
+  if let Ok((name, root, body, workflow)) = load_skill_content("colgrep") {
+    append_to_last_user_message(
+      messages,
+      &format!("<skill name=\"{name}\" root=\"{root}\">\n{body}\n</skill>"),
+    );
+    if let Some(wf) = workflow {
+      workflow_state = Some(crate::workflow::WorkflowState::new(wf));
+    }
+  }
+  if let Ok((name, root, body, workflow)) = load_skill_content("codectx") {
+    append_to_last_user_message(
+      messages,
+      &format!("<skill name=\"{name}\" root=\"{root}\">\n{body}\n</skill>"),
+    );
+    if let Some(wf) = workflow {
+      workflow_state = Some(crate::workflow::WorkflowState::new(wf));
+    }
+  }
+  let cwd_msg = current_working_directory_reminder();
+  if !cwd_msg.is_empty() {
+    append_to_last_user_message(messages, &cwd_msg);
+  }
+  workflow_state
+}
+
+fn append_to_last_user_message(messages: &mut [Message], content: &str) {
+  if content.is_empty() {
+    return;
+  }
+  if let Some(message) = messages.iter_mut().rev().find(|m| m.role == "user") {
+    if message.content.is_empty() {
+      message.content = content.to_string();
+    } else {
+      message.content.push_str("\n\n");
+      message.content.push_str(content);
+    }
+  }
+}
+
+fn current_working_directory_reminder() -> String {
+  std::env::current_dir().map_or(String::new(), |cwd| format!(
+    "<system_reminder kind=\"file_state\">\nmacOS: Tahoe 26.3\nCurrent working directory: {}\n\n*Note*: `cd` outside the workspace is not allowed; run commands in the current working directory.\n</system_reminder>",
+    cwd.display()
+  ))
 }
