@@ -229,7 +229,7 @@ fn run_ui_loop(
   let mut all_files: Option<Vec<String>> = None;
   let mut cursor_visible = false;
 
-  let mut prev_generation = log.generation();
+  let mut prev_generation = log.generation().wrapping_sub(1);
   let mut log_height = 0u16;
   let mut max_scroll_y = 0usize;
   while !stop.load(Ordering::Relaxed) {
