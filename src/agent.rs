@@ -262,24 +262,18 @@ impl Agent {
           {
             self.total_prompt += resp.usage.prompt_tokens;
             self.total_completion += resp.usage.completion_tokens;
-            self.messages.push(Message {
-              role: "assistant".into(),
-              content: resp.content.clone(),
-              reasoning_content: resp.reasoning_content.clone(),
-              tool_calls: resp.tool_calls.clone(),
-              ..Default::default()
-            });
+            self.messages.push(assistant_msg_full(
+              resp.content.clone(),
+              resp.reasoning_content.clone(),
+              resp.tool_calls.clone(),
+            ));
           }
           if cancelled_turn {
             wait_for_input = true;
             continue;
           }
           if let Some(msg) = steer_msg {
-            self.messages.push(Message {
-              role: "user".into(),
-              content: msg.clone(),
-              ..Default::default()
-            });
+            self.messages.push(user_msg(msg.clone()));
             tui.log.push(format!("[steer] {}", truncate(&msg, 200)));
             turn += 1;
             continue;
@@ -335,18 +329,10 @@ impl Agent {
     let mut pushed_worker_status = false;
     if let Some(msg) = self.worker_manager.status_message().await {
       if let Some(log) = ui_log {
-        self.messages.push(Message {
-          role: "user".into(),
-          content: msg.clone(),
-          ..Default::default()
-        });
+        self.messages.push(user_msg(msg.clone()));
         log.push(format!("[workers] {}", truncate(&msg, 200)));
       } else {
-        self.messages.push(Message {
-          role: "user".into(),
-          content: msg,
-          ..Default::default()
-        });
+        self.messages.push(user_msg(msg));
       }
       pushed_worker_status = true;
       *has_more = true;
@@ -356,11 +342,7 @@ impl Agent {
       self.push_task_tracking_reminder();
       self.push_turn_budget_reminder(max_turns, turn + 1);
       if auto_continue && !self.compact.compacting && !pushed_worker_status {
-        self.messages.push(Message {
-          role: "user".into(),
-          content: AUTO_CONTINUE_REMINDER.to_string(),
-          ..Default::default()
-        });
+        self.messages.push(user_msg(AUTO_CONTINUE_REMINDER.to_string()));
       }
     }
     Ok(false)
@@ -374,11 +356,7 @@ impl Agent {
   ) -> Result<bool, AgentError> {
     match event {
       SteerEvent::Message(content) => {
-        self.messages.push(Message {
-          role: "user".into(),
-          content: content.clone(),
-          ..Default::default()
-        });
+        self.messages.push(user_msg(content.clone()));
         tui.log.push(format!("[user] {}", truncate(&content, 200)));
       }
       SteerEvent::Auto => {
@@ -396,11 +374,7 @@ impl Agent {
       }
       SteerEvent::Complete => {
         let content = MANUAL_COMPLETE_REMINDER.to_string();
-        self.messages.push(Message {
-          role: "user".into(),
-          content: content.clone(),
-          ..Default::default()
-        });
+        self.messages.push(user_msg(content.clone()));
         tui.log.push("[steer] complete requested");
       }
       SteerEvent::Exit => return Ok(true),
@@ -438,12 +412,10 @@ impl Agent {
     }
 
     if resp.tool_calls.is_empty() {
-      self.messages.push(Message {
-        role: "assistant".into(),
-        content: resp.content.clone(),
-        reasoning_content: resp.reasoning_content,
-        ..Default::default()
-      });
+      self.messages.push(assistant_msg_with_reasoning(
+        resp.content.clone(),
+        resp.reasoning_content,
+      ));
       if ui_log.is_none() {
         print!("{}", resp.content);
         self.report_tokens();
@@ -465,13 +437,11 @@ impl Agent {
   }
 
   async fn process_tool_calls(&mut self, resp: &ChatResponse) -> Result<Vec<ToolResult>, AgentError> {
-    self.messages.push(Message {
-      role: "assistant".into(),
-      content: resp.content.clone(),
-      reasoning_content: resp.reasoning_content.clone(),
-      tool_calls: resp.tool_calls.clone(),
-      ..Default::default()
-    });
+    self.messages.push(assistant_msg_full(
+      resp.content.clone(),
+      resp.reasoning_content.clone(),
+      resp.tool_calls.clone(),
+    ));
 
     let mut results = Vec::with_capacity(resp.tool_calls.len());
     let mut read_only_batch: Vec<&ToolCall> = Vec::new();
@@ -505,12 +475,7 @@ impl Agent {
     }
 
     for (tc, r) in resp.tool_calls.iter().zip(results.iter()) {
-      self.messages.push(Message {
-        role: "tool".into(),
-        tool_call_id: tc.id.clone(),
-        content: r.output.clone(),
-        ..Default::default()
-      });
+      self.messages.push(tool_msg(r.output.clone(), tc.id.clone()));
     }
     self.record_task_tracking_turn(&results);
     Ok(results)
@@ -556,14 +521,10 @@ impl Agent {
         "Context budget at {pct}%.\nEXHAUSTED.\nDo not write more files, delegate, or start new work.\nCall `handoff` IMMEDIATELY with completed files, current state, verification state, blockers, and next steps."
       ),
     };
-    self.messages.push(Message {
-      role: "user".into(),
-      content: format!(
-        "<system_reminder urgency=\"{}\" kind=\"context_budget\">\n{body}\n</system_reminder>",
-        self.compact.urgency
-      ),
-      ..Default::default()
-    });
+    self.messages.push(user_msg(format!(
+      "<system_reminder urgency=\"{}\" kind=\"context_budget\">\n{body}\n</system_reminder>",
+      self.compact.urgency
+    )));
   }
 
   async fn handle_handoff(&mut self) -> Result<bool, AgentError> {
@@ -587,18 +548,10 @@ impl Agent {
       .map(|m| m.content.clone())
       .unwrap_or_default();
     self.messages = vec![
-      Message {
-        role: "system".into(),
-        content: system,
-        ..Default::default()
-      },
-      Message {
-        role: "user".into(),
-        content: format!(
-          "## Previous Session Handoff\n\n{stripped}\n\nPlease process this handoff brief and continue the work."
-        ),
-        ..Default::default()
-      },
+      system_msg(system),
+      user_msg(format!(
+        "## Previous Session Handoff\n\n{stripped}\n\nPlease process this handoff brief and continue the work."
+      )),
     ];
     self.push_task_tracking_reminder();
     self.compact.compacting = false;
@@ -640,11 +593,7 @@ impl Agent {
     if let Some(tracker) = self.task_tracker.as_mut()
       && let Some(reminder) = tracker.take_reminder()
     {
-      self.messages.push(Message {
-        role: "user".into(),
-        content: reminder,
-        ..Default::default()
-      });
+      self.messages.push(user_msg(reminder));
     }
   }
 
@@ -653,13 +602,60 @@ impl Agent {
       return;
     }
     if let Some(reminder) = turn_budget_reminder(max_turns, turn) {
-      self.messages.push(Message {
-        role: "user".into(),
-        content: reminder,
-        ..Default::default()
-      });
+      self.messages.push(user_msg(reminder));
       self.last_turn_budget_reminder_turn = Some(turn);
     }
+  }
+}
+
+fn user_msg(content: impl Into<String>) -> Message {
+  Message {
+    role: "user".into(),
+    content: content.into(),
+    ..Default::default()
+  }
+}
+
+fn system_msg(content: impl Into<String>) -> Message {
+  Message {
+    role: "system".into(),
+    content: content.into(),
+    ..Default::default()
+  }
+}
+
+fn assistant_msg_with_reasoning(
+  content: impl Into<String>,
+  reasoning: impl Into<String>,
+) -> Message {
+  Message {
+    role: "assistant".into(),
+    content: content.into(),
+    reasoning_content: reasoning.into(),
+    ..Default::default()
+  }
+}
+
+fn assistant_msg_full(
+  content: impl Into<String>,
+  reasoning: impl Into<String>,
+  tool_calls: Vec<ToolCall>,
+) -> Message {
+  Message {
+    role: "assistant".into(),
+    content: content.into(),
+    reasoning_content: reasoning.into(),
+    tool_calls,
+    ..Default::default()
+  }
+}
+
+fn tool_msg(content: impl Into<String>, tool_call_id: impl Into<String>) -> Message {
+  Message {
+    role: "tool".into(),
+    content: content.into(),
+    tool_call_id: tool_call_id.into(),
+    ..Default::default()
   }
 }
 

@@ -7,7 +7,6 @@ mod providers;
 mod session;
 mod sse;
 mod task_tracker;
-mod toolimpl;
 mod tools;
 mod tui;
 mod types;
