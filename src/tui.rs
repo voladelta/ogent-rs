@@ -36,6 +36,7 @@ pub enum SteerEvent {
   Stop,
   Cancel,
   Complete,
+  New,
   Exit,
 }
 
@@ -60,6 +61,10 @@ impl UiLog {
     if content.ends_with('\n') {
       self.push("assistant:");
     }
+  }
+
+  pub fn clear(&self) {
+    self.lines.lock().expect("ui log poisoned").clear();
   }
 
   fn snapshot(&self) -> Vec<String> {
@@ -396,6 +401,7 @@ pub fn parse_steer_event(line: &str) -> SteerEvent {
     "/stop" => SteerEvent::Stop,
     "/cancel" => SteerEvent::Cancel,
     "/complete" => SteerEvent::Complete,
+    "/new" => SteerEvent::New,
     "/q" | "/quit" | "quit" | "exit" => SteerEvent::Exit,
     other => SteerEvent::Message(other.to_string()),
   }
@@ -787,6 +793,7 @@ mod tests {
     assert_eq!(parse_steer_event("/stop"), SteerEvent::Stop);
     assert_eq!(parse_steer_event("/cancel"), SteerEvent::Cancel);
     assert_eq!(parse_steer_event("/complete"), SteerEvent::Complete);
+    assert_eq!(parse_steer_event("/new"), SteerEvent::New);
     assert_eq!(parse_steer_event("/q"), SteerEvent::Exit);
     assert_eq!(parse_steer_event("/quit"), SteerEvent::Exit);
     assert_eq!(parse_steer_event("quit"), SteerEvent::Exit);

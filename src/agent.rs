@@ -15,6 +15,12 @@ pub enum AgentError {
   Other(#[from] anyhow::Error),
 }
 
+enum SteerAction {
+  Continue,
+  Exit,
+  Restart,
+}
+
 #[derive(Debug, Clone)]
 pub struct CompactState {
   pub threshold: f64,
@@ -163,19 +169,24 @@ impl Agent {
   ) -> Result<Vec<Message>, AgentError> {
     tui
       .log
-      .push("[steer] commands: /auto /stop /complete /cancel /q");
+      .push("[steer] commands: /auto /stop /complete /cancel /new /q");
     if wait_for_input {
       tui.log.push("[steer] waiting for your first message");
     }
     let mut turn = 1;
-    loop {
+    'outer: loop {
       let wait_baseline_len = self.messages.len();
       while let Ok(event) = tui.rx.try_recv() {
-        if self
-          .apply_steer_event(event, &mut auto_continue, &tui)
-          .await?
-        {
-          return Ok(self.messages.clone());
+        match self.apply_steer_event(event, &mut auto_continue, &tui).await? {
+          SteerAction::Exit => return Ok(self.messages.clone()),
+          SteerAction::Restart => {
+            turn = 1;
+            wait_for_input = true;
+            tui.log.push("[steer] commands: /auto /stop /complete /cancel /new /q");
+            tui.log.push("[steer] waiting for your first message");
+            continue 'outer;
+          }
+          SteerAction::Continue => {}
         }
         if self.messages.len() > wait_baseline_len
           && matches!(self.messages.last().map(|m| m.role.as_str()), Some("user"))
@@ -188,11 +199,16 @@ impl Agent {
         let Some(event) = tui.rx.recv().await else {
           continue;
         };
-        if self
-          .apply_steer_event(event, &mut auto_continue, &tui)
-          .await?
-        {
-          return Ok(self.messages.clone());
+        match self.apply_steer_event(event, &mut auto_continue, &tui).await? {
+          SteerAction::Exit => return Ok(self.messages.clone()),
+          SteerAction::Restart => {
+            turn = 1;
+            wait_for_input = true;
+            tui.log.push("[steer] commands: /auto /stop /complete /cancel /new /q");
+            tui.log.push("[steer] waiting for your first message");
+            continue 'outer;
+          }
+          SteerAction::Continue => {}
         }
         if self.messages.len() > wait_baseline_len
           && matches!(self.messages.last().map(|m| m.role.as_str()), Some("user"))
@@ -223,6 +239,7 @@ impl Agent {
         tokio::spawn(async move { client.chat(&messages, &tools, Some(&chat_cancel)).await });
       let mut cancelled_turn = false;
       let mut steer_msg: Option<String> = None;
+      let mut restart_after_abort = false;
 
       let chat_result = 'chat: loop {
         tokio::select! {
@@ -242,14 +259,32 @@ impl Agent {
                 cancel.cancel();
                 steer_msg = Some(MANUAL_COMPLETE_REMINDER.to_string());
               }
+              SteerEvent::New => {
+                cancel.cancel();
+                if matches!(
+                  self.apply_steer_event(SteerEvent::New, &mut auto_continue, &tui).await?,
+                  SteerAction::Restart
+                ) {
+                  restart_after_abort = true;
+                }
+                break 'chat chat.await;
+              }
               SteerEvent::Exit => {
                 cancel.cancel();
                 break 'chat chat.await;
               }
               other => {
-                if self.apply_steer_event(other, &mut auto_continue, &tui).await? {
-                  cancel.cancel();
-                  break 'chat chat.await;
+                match self.apply_steer_event(other, &mut auto_continue, &tui).await? {
+                  SteerAction::Exit => {
+                    cancel.cancel();
+                    break 'chat chat.await;
+                  }
+                  SteerAction::Restart => {
+                    restart_after_abort = true;
+                    cancel.cancel();
+                    break 'chat chat.await;
+                  }
+                  SteerAction::Continue => {}
                 }
               }
             }
@@ -260,6 +295,13 @@ impl Agent {
       let resp = match chat_result {
         Ok(Ok(resp)) => resp,
         Ok(Err(ClientError::Aborted { resp })) => {
+          if restart_after_abort {
+            turn = 1;
+            wait_for_input = true;
+            tui.log.push("[steer] commands: /auto /stop /complete /cancel /new /q");
+            tui.log.push("[steer] waiting for your first message");
+            continue 'outer;
+          }
           if !resp.content.is_empty()
             || !resp.reasoning_content.is_empty()
             || !resp.tool_calls.is_empty()
@@ -359,7 +401,7 @@ impl Agent {
     event: SteerEvent,
     auto_continue: &mut bool,
     tui: &TuiHandle,
-  ) -> Result<bool, AgentError> {
+  ) -> Result<SteerAction, AgentError> {
     match event {
       SteerEvent::Message(content) => {
         self.messages.push(user_msg(content.clone()));
@@ -383,9 +425,31 @@ impl Agent {
         self.messages.push(user_msg(content.clone()));
         tui.log.push("[steer] complete requested");
       }
-      SteerEvent::Exit => return Ok(true),
+      SteerEvent::New => {
+        let system = self
+          .messages
+          .first()
+          .filter(|m| m.role == "system")
+          .map(|m| m.content.clone())
+          .unwrap_or_default();
+        self.messages = vec![system_msg(system)];
+        self.total_prompt = 0;
+        self.total_completion = 0;
+        self.worker_manager = WorkerManager::new();
+        self.completion_summary = None;
+        self.complete_open_work_warned = false;
+        self.last_turn_budget_reminder_turn = None;
+        self.compact.last_handoff_path = String::new();
+        self.compact.compacting = false;
+        self.compact.urgency = 0;
+        tui.log.clear();
+        tui.status.set_turn_tokens(0, 0);
+        tui.log.push("[steer] new session started");
+        return Ok(SteerAction::Restart);
+      }
+      SteerEvent::Exit => return Ok(SteerAction::Exit),
     }
-    Ok(false)
+    Ok(SteerAction::Continue)
   }
 
   async fn handle_turn_response(&mut self, resp: ChatResponse) -> Result<bool, AgentError> {
