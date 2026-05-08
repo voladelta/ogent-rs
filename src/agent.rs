@@ -55,6 +55,7 @@ pub struct Agent {
   pub compact: CompactState,
   pub completion_summary: Option<String>,
   pub task_tracker: Option<TaskTracker>,
+  pub workflow_state: Option<crate::workflow::WorkflowState>,
   pub complete_open_work_warned: bool,
   last_turn_budget_reminder_turn: Option<i32>,
 }
@@ -72,6 +73,7 @@ impl Agent {
     tools: Vec<Tool>,
     compact: CompactState,
     task_tracker: Option<TaskTracker>,
+    workflow_state: Option<crate::workflow::WorkflowState>,
   ) -> Self {
     Self {
       client,
@@ -83,8 +85,23 @@ impl Agent {
       compact,
       completion_summary: None,
       task_tracker,
+      workflow_state,
       complete_open_work_warned: false,
       last_turn_budget_reminder_turn: None,
+    }
+  }
+
+  fn refresh_workflow_reminder(&mut self) {
+    const WORKFLOW_MARKER: &str = "\n\n[Workflow]";
+    if let Some(ref ws) = self.workflow_state {
+      let reminder = ws.reminder_text();
+      if let Some(first) = self.messages.first_mut()
+        && first.role == "system" {
+          if let Some(idx) = first.content.find(WORKFLOW_MARKER) {
+            first.content.truncate(idx);
+          }
+          first.content.push_str(&format!("{WORKFLOW_MARKER}\n{reminder}"));
+        }
     }
   }
 
@@ -106,6 +123,7 @@ impl Agent {
         self.total_prompt + self.total_completion
       );
       self.push_turn_budget_reminder(max_turns, turn);
+      self.refresh_workflow_reminder();
       let resp = self.client.chat(&self.messages, &self.tools, None).await?;
       let mut has_more = match self.handle_turn_response(resp).await {
         Ok(hm) => hm,
@@ -186,6 +204,7 @@ impl Agent {
         .set_turn_tokens(turn, self.total_prompt + self.total_completion);
       tui.log.push(format!("--- turn {turn} ---"));
       self.push_turn_budget_reminder(max_turns, turn);
+      self.refresh_workflow_reminder();
 
       let cancel = tokio_util::sync::CancellationToken::new();
       let client = self.client.clone();

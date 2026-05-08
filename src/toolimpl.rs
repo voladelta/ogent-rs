@@ -41,7 +41,7 @@ pub async fn execute_tool(mut ctx: ToolContext<'_>, name: &str, args: &str) -> R
     "revise_goal" => revise_goal(ctx.agent.as_deref_mut(), args),
     "update_phase" => update_phase(ctx.agent.as_deref_mut(), args),
     "update_todo" => update_todo(ctx.agent.as_deref_mut(), args),
-    "load_skill" => load_skill(args),
+    "load_skill" => load_skill(ctx.agent.as_deref_mut(), args),
     "load_worker_template" => load_worker_template(args),
     "dispatch_worker" => dispatch_worker(args).await,
     "start_workers" => start_workers(ctx.agent.as_deref_mut(), args).await,
@@ -486,6 +486,16 @@ fn update_phase(agent: Option<&mut crate::agent::Agent>, args: &str) -> Result<S
   let Some(tracker) = agent.task_tracker.as_mut() else {
     bail!("set_goal must be called before update_phase");
   };
+  if let Some(ref mut ws) = agent.workflow_state {
+    if args.status == Status::InProgress {
+      ws.transition_to(&args.phase_id).map_err(|e| anyhow::anyhow!("{e}"))?;
+    } else if args.status == Status::Completed
+      && ws.current_phase.as_deref() != Some(&args.phase_id) {
+        // Agent may mark a terminal phase completed without ever setting it in_progress.
+        // Transition workflow state so complete/terminal checks align.
+        let _ = ws.transition_to(&args.phase_id);
+      }
+  }
   tracker.update_phase(PhaseUpdate {
     id: args.phase_id.trim().to_string(),
     title: args.title.trim().to_string(),
@@ -532,10 +542,14 @@ struct LoadSkillArgs {
   name: String,
 }
 
-fn load_skill(args: &str) -> Result<String> {
+fn load_skill(agent: Option<&mut crate::agent::Agent>, args: &str) -> Result<String> {
   let args: LoadSkillArgs = parse_args(args)?;
   require_nonempty(&args.name, "name")?;
-  let (name, root, body) = crate::prompts::load_skill_content(&args.name)?;
+  let (name, root, body, workflow) = crate::prompts::load_skill_content(&args.name)?;
+  if let Some(agent) = agent
+    && let Some(wf) = workflow {
+      agent.workflow_state = Some(crate::workflow::WorkflowState::new(wf));
+    }
   Ok(format!(
     "<skill name=\"{name}\" root=\"{root}\">\n{body}\n</skill>"
   ))
@@ -614,6 +628,22 @@ fn complete(agent: Option<&mut crate::agent::Agent>, args: &str) -> Result<Strin
   let args: CompleteArgs = parse_args(args)?;
   require_nonempty(&args.summary, "summary")?;
   let agent = require_agent(agent, "complete")?;
+  // Workflow gate
+  if let Some(ref ws) = agent.workflow_state
+    && let Some(ref phase) = ws.current_phase
+      && let Some(def) = ws.definition.phases.get(phase)
+        && !def.terminal {
+          if !agent.complete_open_work_warned {
+            agent.complete_open_work_warned = true;
+            return Ok(format!(
+              "WARNING: Workflow not complete. Current phase '{}' is not terminal. Allowed exits: {:?}. Call complete again with explicit Limitation and Intent if you must stop.",
+              phase, def.next
+            ));
+          }
+          if !summary_has_limitation_and_intent(&args.summary) {
+            bail!("Workflow incomplete; second complete requires explicit Limitation and Intent");
+          }
+        }
   if agent
     .task_tracker
     .as_ref()

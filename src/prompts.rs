@@ -27,14 +27,14 @@ pub fn skill_roots() -> Vec<PathBuf> {
   dirs
 }
 
-pub fn load_skill_content(skill_name: &str) -> Result<(String, String, String)> {
+pub fn load_skill_content(skill_name: &str) -> Result<(String, String, String, Option<crate::workflow::Workflow>)> {
   for dir in skill_roots() {
     let root = dir.join(skill_name);
     let path = root.join("SKILL.md");
     let Ok(content) = fs::read_to_string(&path) else {
       continue;
     };
-    let (name, _) = parse_skill_frontmatter(&content);
+    let (name, _, workflow) = parse_skill_frontmatter(&content);
     return Ok((
       if name.is_empty() {
         skill_name.to_string()
@@ -43,6 +43,7 @@ pub fn load_skill_content(skill_name: &str) -> Result<(String, String, String)> 
       },
       root.display().to_string(),
       strip_frontmatter(&content),
+      workflow,
     ));
   }
   bail!("skill {skill_name} not found in local .ogent/skills, .skills, or ~/.ogent/skills")
@@ -62,7 +63,7 @@ pub fn discover_skills_message() -> String {
       let Ok(content) = fs::read_to_string(entry.path().join("SKILL.md")) else {
         continue;
       };
-      let (name, desc) = parse_skill_frontmatter(&content);
+      let (name, desc, _) = parse_skill_frontmatter(&content);
       if name.is_empty() || !seen.insert(name.clone()) {
         continue;
       }
@@ -94,20 +95,34 @@ fn strip_frontmatter(content: &str) -> String {
     .unwrap_or_else(|| content.trim().to_string())
 }
 
-fn parse_skill_frontmatter(content: &str) -> (String, String) {
+fn parse_skill_frontmatter(content: &str) -> (String, String, Option<crate::workflow::Workflow>) {
   let Some(fm) = parse_frontmatter(content) else {
-    return (String::new(), String::new());
+    return (String::new(), String::new(), None);
   };
   let mut name = String::new();
   let mut description = String::new();
-  for line in fm.lines().map(str::trim) {
-    if let Some(rest) = line.strip_prefix("name:") {
-      name = rest.trim().to_string();
-    } else if let Some(rest) = line.strip_prefix("description:") {
-      description = rest.trim().to_string();
+  let mut workflow = None;
+
+  if let Ok(value) = serde_yaml::from_str::<serde_yaml::Value>(fm) {
+    if let Some(w) = value.get("workflow") {
+      workflow = serde_yaml::from_value(w.clone()).ok();
+    }
+    if let Some(n) = value.get("name").and_then(|v| v.as_str()) {
+      name = n.to_string();
+    }
+    if let Some(d) = value.get("description").and_then(|v| v.as_str()) {
+      description = d.to_string();
+    }
+  } else {
+    for line in fm.lines().map(str::trim) {
+      if let Some(rest) = line.strip_prefix("name:") {
+        name = rest.trim().to_string();
+      } else if let Some(rest) = line.strip_prefix("description:") {
+        description = rest.trim().to_string();
+      }
     }
   }
-  (name, description)
+  (name, description, workflow)
 }
 
 fn xml_escape(s: &str) -> String {

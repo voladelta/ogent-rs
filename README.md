@@ -105,6 +105,8 @@ At startup, available skills are discovered and listed in the user message. The 
 
 The `colgrep` and `codectx` skills are preloaded: if their `SKILL.md` files exist in a skill root, ogent auto-injects their full body into the initial user message after the skills list. This gives the 10x coder semantic code search and repo context instructions without spending a turn on `load_skill`.
 
+Skills may optionally define a **workflow** graph in YAML frontmatter. When loaded, ogent enforces the phase graph at runtime: transitions are validated, loops are bounded, and `complete` is gated to terminal phases only. See "Workflow Skills" below.
+
 Install the search CLIs you want the agent to use for efficient codebase discovery:
 
 ```bash
@@ -163,6 +165,45 @@ Skills are **domain knowledge packages** stored as `.ogent/skills/<name>/SKILL.m
 ```
 
 Each `SKILL.md` has YAML frontmatter (`name`, `description`) and Markdown instructions. The description helps the agent decide when to apply the skill. The full body is loaded only when triggered (progressive disclosure).
+
+### Workflow Skills
+
+Skills can optionally define a directed phase graph that ogent enforces at runtime. This keeps the agent bound to a workflow instead of improvising turn-by-turn.
+
+Add a `workflow:` block to the skill frontmatter:
+
+```yaml
+---
+name: my-flow
+description: TDD-style implementation flow
+workflow:
+  phases:
+    write_test:
+      next: [implement]
+    implement:
+      next: [run_test]
+    run_test:
+      next: [done, refactor]
+      gate: true          # requires explicit branch choice
+    refactor:
+      next: [run_test]
+      max_visits: 3       # hard loop budget
+    done:
+      terminal: true      # only here can complete succeed
+---
+```
+
+**Fields:**
+- `phases`: map of phase IDs to `PhaseDef`
+- `next`: list of allowed next phases
+- `terminal`: if `true`, `complete` is allowed only from this phase
+- `gate`: if `true`, the LLM sees a reminder to explicitly choose a branch
+- `max_visits`: reject transitions after N visits (loop budget)
+
+**Enforcement points:**
+1. **`update_phase`** — when status is `in_progress`, the target phase must be in `next` of the current phase. Illegal transitions return a tool error.
+2. **`complete`** — if the current phase is not terminal, `complete` is rejected with the allowed exit phases listed.
+3. **System prompt injection** — before every LLM call, ogent appends `[Workflow] Phase: X. Visits: N. Next: [...].` to the system prompt so the agent is anchored.
 
 ```bash
 mkdir -p .ogent/skills/my-skill
@@ -440,6 +481,7 @@ When a steering message arrives during an LLM stream, the agent cancels the in-f
 | `src/tools.rs` | Tool registry and JSON schemas |
 | `src/toolimpl.rs` | Tool implementations |
 | `src/task_tracker.rs` | Runtime task tracker state, validation, reminders, handoff serialization |
+| `src/workflow.rs` | Workflow graph parsing and phase transition validation |
 | `src/workers.rs` | Worker subprocess execution and async worker manager |
 | `src/hashline.rs` | Hash anchors and validated anchored edits |
 | `src/prompts.rs` | Embedded prompts, skill discovery, skill loading |

@@ -12,6 +12,7 @@ mod tools;
 mod tui;
 mod types;
 mod workers;
+mod workflow;
 mod workspace;
 
 use anyhow::{Result, bail};
@@ -133,19 +134,26 @@ async fn main() -> Result<()> {
     (messages, tools::configured_coder_tools(args.steer), None)
   };
 
+  let mut workflow_state = None;
   if !is_resume {
     append_to_last_user_message(&mut messages, &prompts::discover_skills_message());
-    if let Ok((name, root, body)) = prompts::load_skill_content("colgrep") {
+    if let Ok((name, root, body, workflow)) = prompts::load_skill_content("colgrep") {
       append_to_last_user_message(
         &mut messages,
         &format!("<skill name=\"{name}\" root=\"{root}\">\n{body}\n</skill>"),
       );
+      if let Some(wf) = workflow {
+        workflow_state = Some(crate::workflow::WorkflowState::new(wf));
+      }
     }
-    if let Ok((name, root, body)) = prompts::load_skill_content("codectx") {
+    if let Ok((name, root, body, workflow)) = prompts::load_skill_content("codectx") {
       append_to_last_user_message(
         &mut messages,
         &format!("<skill name=\"{name}\" root=\"{root}\">\n{body}\n</skill>"),
       );
+      if let Some(wf) = workflow {
+        workflow_state = Some(crate::workflow::WorkflowState::new(wf));
+      }
     }
     let cwd_msg = current_working_directory_reminder();
     if !cwd_msg.is_empty() {
@@ -162,7 +170,7 @@ async fn main() -> Result<()> {
     });
   }
 
-  let mut agent = Agent::new(client, messages, tools, compact, task_tracker);
+  let mut agent = Agent::new(client, messages, tools, compact, task_tracker, workflow_state);
   let loop_result = if args.steer {
     let tui = tui::start(args.profile.clone(), profile.model.to_string(), args.auto)?;
     agent

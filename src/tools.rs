@@ -160,7 +160,6 @@ pub fn is_read_only_tool(name: &str) -> bool {
       | "web_search"
       | "web_read"
       | "code_web_context"
-      | "load_skill"
       | "load_worker_template"
   )
 }
