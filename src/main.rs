@@ -43,8 +43,10 @@ struct Args {
   handoff: bool,
   #[arg(long = "continue", default_value_t = false)]
   continue_flag: bool,
-  #[arg(long, value_name = "SESSION", num_args = 0..=1)]
-  resume: Option<Option<String>>,
+  #[arg(long, default_value_t = false)]
+  resume: bool,
+  #[arg(long, value_name = "SESSION")]
+  resume_session: Option<String>,
   prompt: Vec<String>,
 }
 
@@ -66,7 +68,7 @@ async fn main() -> Result<()> {
   };
   let session_id = format!("{}-{:04x}", session::timestamp(), std::process::id());
 
-  let is_resume = args.resume.is_some();
+  let is_resume = args.resume;
   let wait_for_steer_input =
     args.steer && !args.worker && !args.continue_flag && !is_resume && args.prompt.is_empty();
 
@@ -104,11 +106,12 @@ async fn main() -> Result<()> {
       tools::configured_coder_tools(args.steer),
       task_tracker,
     )
-  } else if let Some(session_name) = args.resume {
-    let path = match session_name {
-      Some(name) => format!(".ogent/sessions/{}.jsonl", name),
-      None => session::find_latest_session(".ogent/sessions")
-        .ok_or_else(|| anyhow::anyhow!("no session found"))?,
+  } else if is_resume {
+    let path = if let Some(name) = args.resume_session {
+      format!(".ogent/sessions/{}.jsonl", name)
+    } else {
+      session::find_latest_session(".ogent/sessions")
+        .ok_or_else(|| anyhow::anyhow!("no session found"))?
     };
     eprintln!("[resume] loading {path}");
     let mut loaded = session::load_session(&path)?;
