@@ -74,12 +74,10 @@ fn find_latest_file(dir: &str, ext: &str, name_filter: fn(&str) -> bool) -> Opti
 
 pub fn load_session(path: &str) -> Result<Vec<Message>> {
   let data = fs::read_to_string(path)?;
-  data.lines()
+  data
+    .lines()
     .filter(|l| !l.trim().is_empty())
-    .map(|line| {
-      serde_json::from_str(line)
-        .context("parse error in session file")
-    })
+    .map(|line| serde_json::from_str(line).context("parse error in session file"))
     .collect()
 }
 

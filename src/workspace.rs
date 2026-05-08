@@ -72,7 +72,9 @@ fn normalize(path: &Path) -> PathBuf {
   for c in path.components() {
     match c {
       std::path::Component::CurDir => {}
-      std::path::Component::ParentDir => { out.pop(); }
+      std::path::Component::ParentDir => {
+        out.pop();
+      }
       other => out.push(other.as_os_str()),
     }
   }

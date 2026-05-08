@@ -271,7 +271,10 @@ pub fn format_dispatch_worker_result(result: WorkerProcessResult) -> Result<Stri
   match result.err {
     Some(err) if result.output.is_empty() => bail!("worker failed with no output: {err}"),
     Some(err) => Ok(format!("WORKER FAILED ({err}):\n\n{}", result.output)),
-    None if result.report.is_empty() => Ok(format!("Worker completed without summary. Output:\n\n{}", result.output)),
+    None if result.report.is_empty() => Ok(format!(
+      "Worker completed without summary. Output:\n\n{}",
+      result.output
+    )),
     None => Ok(format!("Worker completed. Summary:\n\n{}", result.report)),
   }
 }

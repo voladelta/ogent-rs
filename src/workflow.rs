@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Workflow {
@@ -30,7 +30,11 @@ pub enum WorkflowError {
     allowed: Vec<String>,
   },
   #[error("phase '{phase}' would exceed max_visits ({visits}/{max})")]
-  MaxVisitsExceeded { phase: String, visits: u32, max: u32 },
+  MaxVisitsExceeded {
+    phase: String,
+    visits: u32,
+    max: u32,
+  },
 }
 
 #[derive(Debug, Clone)]
@@ -52,7 +56,10 @@ impl WorkflowState {
   pub fn transition_to(&mut self, phase: &str) -> Result<(), WorkflowError> {
     // Validate transition from current phase
     if let Some(ref current) = self.current_phase {
-      let def = self.definition.phases.get(current)
+      let def = self
+        .definition
+        .phases
+        .get(current)
         .ok_or_else(|| WorkflowError::UnknownCurrentPhase(current.clone()))?;
       if !def.next.is_empty() && !def.next.contains(&phase.to_string()) {
         return Err(WorkflowError::InvalidTransition {
@@ -65,16 +72,17 @@ impl WorkflowState {
 
     // Check max visits for target phase BEFORE entering
     if let Some(def) = self.definition.phases.get(phase)
-      && let Some(max) = def.max_visits {
-        let visits = self.visits.get(phase).unwrap_or(&0) + 1;
-        if visits > max {
-          return Err(WorkflowError::MaxVisitsExceeded {
-            phase: phase.to_string(),
-            visits,
-            max,
-          });
-        }
+      && let Some(max) = def.max_visits
+    {
+      let visits = self.visits.get(phase).unwrap_or(&0) + 1;
+      if visits > max {
+        return Err(WorkflowError::MaxVisitsExceeded {
+          phase: phase.to_string(),
+          visits,
+          max,
+        });
       }
+    }
 
     self.current_phase = Some(phase.to_string());
     *self.visits.entry(phase.to_string()).or_insert(0) += 1;
@@ -110,12 +118,50 @@ mod tests {
 
   fn test_workflow() -> Workflow {
     let mut phases = HashMap::new();
-    phases.insert("plan".to_string(), PhaseDef { next: vec!["implement".to_string()], ..Default::default() });
-    phases.insert("implement".to_string(), PhaseDef { next: vec!["test".to_string()], ..Default::default() });
-    phases.insert("test".to_string(), PhaseDef { next: vec!["done".to_string()], ..Default::default() });
-    phases.insert("done".to_string(), PhaseDef { terminal: true, ..Default::default() });
-    phases.insert("loop".to_string(), PhaseDef { next: vec!["verify".to_string()], max_visits: Some(2), ..Default::default() });
-    phases.insert("verify".to_string(), PhaseDef { next: vec!["done".to_string(), "loop".to_string()], gate: true, ..Default::default() });
+    phases.insert(
+      "plan".to_string(),
+      PhaseDef {
+        next: vec!["implement".to_string()],
+        ..Default::default()
+      },
+    );
+    phases.insert(
+      "implement".to_string(),
+      PhaseDef {
+        next: vec!["test".to_string()],
+        ..Default::default()
+      },
+    );
+    phases.insert(
+      "test".to_string(),
+      PhaseDef {
+        next: vec!["done".to_string()],
+        ..Default::default()
+      },
+    );
+    phases.insert(
+      "done".to_string(),
+      PhaseDef {
+        terminal: true,
+        ..Default::default()
+      },
+    );
+    phases.insert(
+      "loop".to_string(),
+      PhaseDef {
+        next: vec!["verify".to_string()],
+        max_visits: Some(2),
+        ..Default::default()
+      },
+    );
+    phases.insert(
+      "verify".to_string(),
+      PhaseDef {
+        next: vec!["done".to_string(), "loop".to_string()],
+        gate: true,
+        ..Default::default()
+      },
+    );
     Workflow { phases }
   }
 

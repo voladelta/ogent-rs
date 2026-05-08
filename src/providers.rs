@@ -66,19 +66,24 @@ pub fn new_client(profile: &Profile, max_retries: usize) -> Result<Client> {
   match profile.backend {
     "kimi" => {
       let model = profile.model;
-      make_client(KIMI_URL, "BASETEN_API_KEY", max_retries, move |messages, tools| {
-        serde_json::to_value(KimiRequest {
-          model,
-          messages,
-          tools,
-          stream: true,
-          max_tokens: 262_144,
-          chat_template_args: KimiThinking {
-            enable_thinking: true,
-          },
-        })
-        .expect("serialize request")
-      })
+      make_client(
+        KIMI_URL,
+        "BASETEN_API_KEY",
+        max_retries,
+        move |messages, tools| {
+          serde_json::to_value(KimiRequest {
+            model,
+            messages,
+            tools,
+            stream: true,
+            max_tokens: 262_144,
+            chat_template_args: KimiThinking {
+              enable_thinking: true,
+            },
+          })
+          .expect("serialize request")
+        },
+      )
     }
     "z" => {
       let model = profile.model;
@@ -100,29 +105,29 @@ pub fn new_client(profile: &Profile, max_retries: usize) -> Result<Client> {
     "deepseek" => {
       let model = profile.model;
       let effort = profile.effort;
-      make_client(DEEPSEEK_URL, "DEEPSEEK_API_KEY", max_retries, move |messages, tools| {
-        serde_json::to_value(DeepSeekRequest {
-          model,
-          messages,
-          tools,
-          stream: true,
-          max_tokens: 393_216,
-          thinking: DeepSeekThinking { kind: "enabled" },
-          reasoning_effort: effort,
-        })
-        .expect("serialize request")
-      })
+      make_client(
+        DEEPSEEK_URL,
+        "DEEPSEEK_API_KEY",
+        max_retries,
+        move |messages, tools| {
+          serde_json::to_value(DeepSeekRequest {
+            model,
+            messages,
+            tools,
+            stream: true,
+            max_tokens: 393_216,
+            thinking: DeepSeekThinking { kind: "enabled" },
+            reasoning_effort: effort,
+          })
+          .expect("serialize request")
+        },
+      )
     }
     other => bail!("unknown backend: {other}"),
   }
 }
 
-fn make_client<F>(
-  url: &str,
-  key_env: &str,
-  max_retries: usize,
-  build: F,
-) -> Result<Client>
+fn make_client<F>(url: &str, key_env: &str, max_retries: usize, build: F) -> Result<Client>
 where
   F: Fn(&[Message], &[Tool]) -> serde_json::Value + Send + Sync + 'static,
 {

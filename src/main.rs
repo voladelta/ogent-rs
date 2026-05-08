@@ -84,8 +84,7 @@ async fn main() -> Result<()> {
       None,
     )
   } else if args.continue_flag {
-    let path = session::find_latest_handoff(".ogent/handoffs")
-      .context("no handoff found")?;
+    let path = session::find_latest_handoff(".ogent/handoffs").context("no handoff found")?;
     eprintln!("[continue] resuming from {path}");
     let data = tokio::fs::read_to_string(&path).await.unwrap_or_default();
     let mut task_tracker = crate::task_tracker::TaskTracker::from_handoff_text(&data);
@@ -110,8 +109,7 @@ async fn main() -> Result<()> {
     let path = if let Some(name) = args.resume_session {
       format!(".ogent/sessions/{}.jsonl", name)
     } else {
-      session::find_latest_session(".ogent/sessions")
-        .context("no session found")?
+      session::find_latest_session(".ogent/sessions").context("no session found")?
     };
     eprintln!("[resume] loading {path}");
     let mut loaded = session::load_session(&path)?;
@@ -169,7 +167,14 @@ async fn main() -> Result<()> {
     });
   }
 
-  let mut agent = Agent::new(client, messages, tools, compact, task_tracker, workflow_state);
+  let mut agent = Agent::new(
+    client,
+    messages,
+    tools,
+    compact,
+    task_tracker,
+    workflow_state,
+  );
   let loop_result = if args.steer {
     let tui = tui::start(args.profile.clone(), profile.model.to_string(), args.auto)?;
     agent

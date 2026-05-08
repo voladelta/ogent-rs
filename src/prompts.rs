@@ -28,7 +28,9 @@ pub fn skill_roots() -> Vec<PathBuf> {
   dirs
 }
 
-pub fn load_skill_content(skill_name: &str) -> Result<(String, String, String, Option<crate::workflow::Workflow>)> {
+pub fn load_skill_content(
+  skill_name: &str,
+) -> Result<(String, String, String, Option<crate::workflow::Workflow>)> {
   for dir in skill_roots() {
     let root = dir.join(skill_name);
     let path = root.join("SKILL.md");
@@ -85,18 +87,19 @@ pub fn discover_skills_message() -> String {
 }
 
 fn parse_frontmatter(content: &str) -> Option<&str> {
-  content.strip_prefix("---").and_then(|rest| rest.find("---").map(|end| &rest[..end]))
+  content
+    .strip_prefix("---")
+    .and_then(|rest| rest.find("---").map(|end| &rest[..end]))
 }
 
 fn strip_frontmatter(content: &str) -> String {
-  parse_frontmatter(content)
-    .map_or_else(
-      || content.trim().to_string(),
-      |_| {
-        let end = content[3..].find("---").unwrap() + 6;
-        content[end..].trim().to_string()
-      },
-    )
+  parse_frontmatter(content).map_or_else(
+    || content.trim().to_string(),
+    |_| {
+      let end = content[3..].find("---").unwrap() + 6;
+      content[end..].trim().to_string()
+    },
+  )
 }
 
 fn parse_skill_frontmatter(content: &str) -> (String, String, Option<crate::workflow::Workflow>) {

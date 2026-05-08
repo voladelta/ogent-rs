@@ -28,7 +28,11 @@ pub fn render_hashlines(
 
 pub fn source_lines(source: &str) -> Vec<String> {
   let has_trailing = source.ends_with('\n');
-  let s = if has_trailing { &source[..source.len() - 1] } else { source };
+  let s = if has_trailing {
+    &source[..source.len() - 1]
+  } else {
+    source
+  };
   if s.is_empty() {
     return Vec::new();
   }

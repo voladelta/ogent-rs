@@ -61,5 +61,3 @@ pub struct ChatResponse {
   pub tool_calls: Vec<ToolCall>,
   pub usage: Usage,
 }
-
-

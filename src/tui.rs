@@ -8,16 +8,17 @@ use crossterm::terminal::{
   DisableLineWrap, EnableLineWrap, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode,
   enable_raw_mode,
 };
-use ratatui::Terminal;
-use ratatui::backend::CrosstermBackend;
 use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Config, Matcher};
+use ratatui::Terminal;
+use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout, Margin, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{
   Block, Borders, Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap,
 };
+use ratatui_textarea::{CursorMove, TextArea};
 use std::io;
 use std::sync::{
   Arc, Mutex,
@@ -78,7 +79,6 @@ struct StatusInner {
   turn: i32,
   tokens: i32,
   auto: bool,
-  input: String,
 }
 
 impl UiStatus {
@@ -90,7 +90,6 @@ impl UiStatus {
         turn: 0,
         tokens: 0,
         auto,
-        input: String::new(),
       })),
     }
   }
@@ -103,10 +102,6 @@ impl UiStatus {
 
   pub fn set_auto(&self, auto: bool) {
     self.inner.lock().expect("ui status poisoned").auto = auto;
-  }
-
-  fn set_input(&self, input: String) {
-    self.inner.lock().expect("ui status poisoned").input = input;
   }
 
   fn snapshot(&self) -> StatusInner {
@@ -175,7 +170,7 @@ fn run_ui(
   )?;
   let backend = CrosstermBackend::new(stdout);
   let mut terminal = Terminal::new(backend)?;
-  terminal.show_cursor()?;
+  terminal.hide_cursor()?;
   let result = run_ui_loop(&mut terminal, tx, log, status, stop);
 
   let _ = execute!(
@@ -197,132 +192,173 @@ fn run_ui_loop(
   status: UiStatus,
   stop: Arc<AtomicBool>,
 ) -> Result<()> {
-  let mut input = String::new();
+  let mut textarea = TextArea::default();
+  textarea.set_block(
+    Block::default()
+      .borders(Borders::ALL)
+      .title("message or command"),
+  );
   let mut scroll_y: usize = 0;
   let mut follow_bottom = true;
   let mut file_selector: Option<FileSelector> = None;
-  let mut selector_start: usize = 0;
+  let mut selector_start: Option<ratatui_textarea::DataCursor> = None;
   let mut all_files: Option<Vec<String>> = None;
+  let mut cursor_visible = false;
 
   while !stop.load(Ordering::Relaxed) {
-    let (log_height, max_scroll_y) = draw(terminal, &log, &status, &mut scroll_y, follow_bottom, file_selector.as_ref())?;
+    let has_selector = file_selector.is_some();
+    if has_selector != cursor_visible {
+      if has_selector {
+        terminal.show_cursor()?;
+      } else {
+        terminal.hide_cursor()?;
+      }
+      cursor_visible = has_selector;
+    }
+
+    let (log_height, max_scroll_y) = draw(
+      terminal,
+      &log,
+      &status,
+      &textarea,
+      &mut scroll_y,
+      follow_bottom,
+      file_selector.as_ref(),
+    )?;
     if event::poll(Duration::from_millis(100))? {
       match event::read()? {
         Event::Key(key) => {
           if key.kind != KeyEventKind::Press {
             continue;
           }
+
+          if let Some(ref mut selector) = file_selector {
+            match key.code {
+              KeyCode::Char(c) => {
+                selector.update_query(c);
+                let input = key_event_to_input(&key);
+                textarea.input_without_shortcuts(input);
+              }
+              KeyCode::Backspace => {
+                selector.backspace();
+                let input = key_event_to_input(&key);
+                textarea.input_without_shortcuts(input);
+                if let Some(start) = selector_start {
+                  let cursor = textarea.cursor();
+                  if cursor.0 < start.0 || (cursor.0 == start.0 && cursor.1 <= start.1) {
+                    file_selector = None;
+                    selector_start = None;
+                  }
+                }
+              }
+              KeyCode::Enter => {
+                let filtered = selector.filtered();
+                if let Some(selected) = filtered.get(selector.selected) {
+                  if let Some(start) = selector_start {
+                    let end = textarea.cursor();
+                    textarea.move_cursor(CursorMove::Jump(start.0 as u16, start.1 as u16));
+                    textarea.start_selection();
+                    textarea.move_cursor(CursorMove::Jump(end.0 as u16, end.1 as u16));
+                    textarea.cut();
+                    textarea.insert_str(selected);
+                  }
+                }
+                file_selector = None;
+                selector_start = None;
+              }
+              KeyCode::Esc => {
+                file_selector = None;
+                selector_start = None;
+              }
+              KeyCode::Up => {
+                selector.selected = selector.selected.saturating_sub(1);
+              }
+              KeyCode::Down => {
+                let filtered_count = selector.filtered().len();
+                if selector.selected + 1 < filtered_count {
+                  selector.selected += 1;
+                }
+              }
+              _ => {}
+            }
+            continue;
+          }
+
           match key.code {
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
               let _ = tx.send(SteerEvent::Exit);
               break;
             }
-            KeyCode::Char(c) => {
-              if let Some(ref mut selector) = file_selector {
-                selector.update_query(c);
-                input.push(c);
-              } else {
-                if c == '@' {
-                  if all_files.is_none() {
-                    all_files = Some(collect_workspace_files());
-                  }
-                  selector_start = input.len();
-                  file_selector = Some(FileSelector::new(all_files.as_ref().unwrap().clone()));
-                }
-                input.push(c);
-                follow_bottom = true;
-              }
+            KeyCode::Esc => {
+              let _ = tx.send(SteerEvent::Exit);
+              break;
             }
-            KeyCode::Backspace => {
-              if let Some(ref mut selector) = file_selector {
-                selector.backspace();
-                input.pop();
-                if input.len() <= selector_start {
-                  file_selector = None;
-                }
-              } else {
-                input.pop();
+            KeyCode::Char('@') => {
+              if all_files.is_none() {
+                all_files = Some(collect_workspace_files());
               }
+              selector_start = Some(textarea.cursor());
+              let input = key_event_to_input(&key);
+              textarea.input_without_shortcuts(input);
+              file_selector = Some(FileSelector::new(all_files.as_ref().unwrap().clone()));
             }
             KeyCode::Enter => {
-              if let Some(ref mut selector) = file_selector {
-                let filtered = selector.filtered();
-                if let Some(selected) = filtered.get(selector.selected) {
-                  input.truncate(selector_start);
-                  input.push_str(selected);
-                }
-                file_selector = None;
+              if key.modifiers.contains(KeyModifiers::SHIFT) {
+                textarea.insert_newline();
               } else {
-                let line = input.trim().to_string();
-                input.clear();
-                status.set_input(String::new());
-                follow_bottom = true;
-                let event = parse_steer_event(&line);
-                let exit = matches!(event, SteerEvent::Exit);
-                let _ = tx.send(event);
-                if exit {
-                  break;
+                let text = textarea.lines().join("\n").trim().to_string();
+                if !text.is_empty() {
+                  textarea.clear();
+                  follow_bottom = true;
+                  let event = parse_steer_event(&text);
+                  let exit = matches!(event, SteerEvent::Exit);
+                  let _ = tx.send(event);
+                  if exit {
+                    break;
+                  }
                 }
               }
             }
-            KeyCode::Esc => {
-              if file_selector.is_some() {
-                file_selector = None;
-              } else {
-                let _ = tx.send(SteerEvent::Exit);
-                break;
-              }
+            KeyCode::Char('j') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+              textarea.insert_newline();
             }
             KeyCode::Up => {
-              if let Some(ref mut selector) = file_selector {
-                selector.selected = selector.selected.saturating_sub(1);
-              } else {
+              let prev = textarea.cursor();
+              textarea.move_cursor(CursorMove::Up);
+              if textarea.cursor() == prev {
                 follow_bottom = false;
                 scroll_y = scroll_y.saturating_sub(1);
               }
             }
             KeyCode::Down => {
-              if let Some(ref mut selector) = file_selector {
-                let filtered_count = selector.filtered().len();
-                if selector.selected + 1 < filtered_count {
-                  selector.selected += 1;
-                }
-              } else {
+              let prev = textarea.cursor();
+              textarea.move_cursor(CursorMove::Down);
+              if textarea.cursor() == prev {
                 scroll_y = scroll_y.saturating_add(1);
                 if scroll_y >= max_scroll_y {
                   follow_bottom = true;
                 }
               }
             }
-            KeyCode::PageUp if file_selector.is_none() => {
+            KeyCode::PageUp => {
               follow_bottom = false;
               scroll_y = scroll_y.saturating_sub(log_height as usize);
             }
-            KeyCode::PageDown if file_selector.is_none() => {
+            KeyCode::PageDown => {
               scroll_y = scroll_y.saturating_add(log_height as usize);
               if scroll_y >= max_scroll_y {
                 follow_bottom = true;
               }
             }
-            KeyCode::Home => {
-              if let Some(ref mut selector) = file_selector {
-                selector.selected = 0;
-              } else {
-                follow_bottom = false;
-                scroll_y = 0;
-              }
+            KeyCode::Home | KeyCode::End => {
+              let input = key_event_to_input(&key);
+              textarea.input(input);
             }
-            KeyCode::End => {
-              if let Some(ref mut selector) = file_selector {
-                let filtered_count = selector.filtered().len();
-                selector.selected = filtered_count.saturating_sub(1);
-              } else {
-                follow_bottom = true;
-              }
+            _ => {
+              let input = key_event_to_input(&key);
+              textarea.input(input);
             }
-            _ => {}
           }
-          status.set_input(input.clone());
         }
         Event::Mouse(mouse) => match mouse.kind {
           MouseEventKind::ScrollUp => {
@@ -402,7 +438,9 @@ impl FileSelector {
       let pattern = Pattern::parse(&self.query, CaseMatching::Ignore, Normalization::Smart);
       let matches = pattern.match_list(&self.files, &mut matcher);
       self.filtered_cache.clear();
-      self.filtered_cache.extend(matches.into_iter().map(|(s, _)| s.to_string()));
+      self
+        .filtered_cache
+        .extend(matches.into_iter().map(|(s, _)| s.to_string()));
     }
   }
 
@@ -453,6 +491,7 @@ fn draw(
   terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
   log: &UiLog,
   status: &UiStatus,
+  textarea: &TextArea,
   scroll_y: &mut usize,
   follow_bottom: bool,
   file_selector: Option<&FileSelector>,
@@ -465,7 +504,7 @@ fn draw(
     .constraints([
       Constraint::Length(1),
       Constraint::Min(1),
-      Constraint::Length(3),
+      Constraint::Length(5),
     ])
     .split(area);
 
@@ -488,7 +527,11 @@ fn draw(
   terminal.draw(|frame| {
     frame.render_widget(Clear, frame.area());
 
-    let auto = if status_snapshot.auto { "auto on" } else { "auto off" };
+    let auto = if status_snapshot.auto {
+      "auto on"
+    } else {
+      "auto off"
+    };
     let mut bar = format!(
       "{} | {} | turn {} | tokens {} | {}",
       status_snapshot.profile,
@@ -512,16 +555,7 @@ fn draw(
       &mut scrollbar_state,
     );
 
-    let input_width = chunks[2].width.saturating_sub(3) as usize;
-    let input_text = tail_cells(&status_snapshot.input, input_width);
-    frame.render_widget(
-      Paragraph::new(input_text.as_str()).block(
-        Block::default()
-          .borders(Borders::ALL)
-          .title("message or command"),
-      ),
-      chunks[2],
-    );
+    frame.render_widget(textarea, chunks[2]);
 
     if let Some(selector) = file_selector {
       let filtered = selector.filtered();
@@ -555,20 +589,62 @@ fn draw(
 
       frame.render_widget(Clear, popup_area);
       frame.render_widget(
-        Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title("file selector")),
+        Paragraph::new(lines).block(
+          Block::default()
+            .borders(Borders::ALL)
+            .title("file selector"),
+        ),
         popup_area,
       );
 
       let cursor_x = popup_area.x + 2 + UnicodeWidthStr::width(selector.query.as_str()) as u16;
       let cursor_y = popup_area.y + 1;
       frame.set_cursor_position((cursor_x.min(popup_area.x + popup_area.width - 1), cursor_y));
-    } else {
-      let input_display_width = UnicodeWidthStr::width(input_text.as_str()) as u16;
-      let input_area = chunks[2].inner(Margin { vertical: 1, horizontal: 1 });
-      frame.set_cursor_position((input_area.x + input_display_width, input_area.y));
     }
   })?;
   Ok((log_height, max_scroll))
+}
+
+fn key_event_to_input(key: &event::KeyEvent) -> ratatui_textarea::Input {
+  use ratatui_textarea::Key;
+  let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+  let alt = key.modifiers.contains(KeyModifiers::ALT);
+  let shift = key.modifiers.contains(KeyModifiers::SHIFT);
+
+  if key.code == KeyCode::BackTab {
+    return ratatui_textarea::Input {
+      key: Key::Tab,
+      shift: true,
+      ctrl,
+      alt,
+    };
+  }
+
+  let key_val = match key.code {
+    KeyCode::Char(c) => Key::Char(c),
+    KeyCode::Backspace => Key::Backspace,
+    KeyCode::Enter => Key::Enter,
+    KeyCode::Left => Key::Left,
+    KeyCode::Right => Key::Right,
+    KeyCode::Up => Key::Up,
+    KeyCode::Down => Key::Down,
+    KeyCode::Tab => Key::Tab,
+    KeyCode::Delete => Key::Delete,
+    KeyCode::Home => Key::Home,
+    KeyCode::End => Key::End,
+    KeyCode::PageUp => Key::PageUp,
+    KeyCode::PageDown => Key::PageDown,
+    KeyCode::Esc => Key::Esc,
+    KeyCode::F(x) => Key::F(x),
+    _ => Key::Null,
+  };
+
+  ratatui_textarea::Input {
+    key: key_val,
+    ctrl,
+    alt,
+    shift,
+  }
 }
 
 fn truncate_to_width(value: &mut String, width: usize) {

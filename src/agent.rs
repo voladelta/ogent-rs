@@ -100,12 +100,16 @@ impl Agent {
     if let Some(ref ws) = self.workflow_state {
       let reminder = ws.reminder_text();
       if let Some(first) = self.messages.first_mut()
-        && first.role == "system" {
-          if let Some(idx) = first.content.find(WORKFLOW_MARKER) {
-            first.content.truncate(idx);
-          }
-          let _ = std::fmt::Write::write_fmt(&mut first.content, format_args!("{WORKFLOW_MARKER}\n{reminder}"));
+        && first.role == "system"
+      {
+        if let Some(idx) = first.content.find(WORKFLOW_MARKER) {
+          first.content.truncate(idx);
         }
+        let _ = std::fmt::Write::write_fmt(
+          &mut first.content,
+          format_args!("{WORKFLOW_MARKER}\n{reminder}"),
+        );
+      }
     }
   }
 
@@ -342,7 +346,9 @@ impl Agent {
       self.push_task_tracking_reminder();
       self.push_turn_budget_reminder(max_turns, turn + 1);
       if auto_continue && !self.compact.compacting && !pushed_worker_status {
-        self.messages.push(user_msg(AUTO_CONTINUE_REMINDER.to_string()));
+        self
+          .messages
+          .push(user_msg(AUTO_CONTINUE_REMINDER.to_string()));
       }
     }
     Ok(false)
@@ -436,7 +442,10 @@ impl Agent {
     Ok(true)
   }
 
-  async fn process_tool_calls(&mut self, resp: &ChatResponse) -> Result<Vec<ToolResult>, AgentError> {
+  async fn process_tool_calls(
+    &mut self,
+    resp: &ChatResponse,
+  ) -> Result<Vec<ToolResult>, AgentError> {
     self.messages.push(assistant_msg_full(
       resp.content.clone(),
       resp.reasoning_content.clone(),
@@ -475,7 +484,9 @@ impl Agent {
     }
 
     for (tc, r) in resp.tool_calls.iter().zip(results.iter()) {
-      self.messages.push(tool_msg(r.output.clone(), tc.id.clone()));
+      self
+        .messages
+        .push(tool_msg(r.output.clone(), tc.id.clone()));
     }
     self.record_task_tracking_turn(&results);
     Ok(results)
@@ -664,9 +675,7 @@ const INTERACTIVE_ERR: &str = "ERROR: interactive mode required";
 fn format_tool_result(result: anyhow::Result<String>) -> (String, bool) {
   match result {
     Ok(out) => (out, false),
-    Err(e) if e.to_string() == "interactive mode required" => {
-      (INTERACTIVE_ERR.to_string(), true)
-    }
+    Err(e) if e.to_string() == "interactive mode required" => (INTERACTIVE_ERR.to_string(), true),
     Err(e) => (format!("ERROR: {e}"), false),
   }
 }
@@ -674,7 +683,12 @@ fn format_tool_result(result: anyhow::Result<String>) -> (String, bool) {
 async fn run_read_only_batch(batch: &[&ToolCall]) -> Result<Vec<ToolResult>, AgentError> {
   let futs = batch.iter().map(|tc| async {
     let (output, _) = format_tool_result(
-      execute_tool(ToolContext { agent: None }, &tc.function.name, &tc.function.arguments).await,
+      execute_tool(
+        ToolContext { agent: None },
+        &tc.function.name,
+        &tc.function.arguments,
+      )
+      .await,
     );
     ToolResult {
       name: tc.function.name.clone(),
@@ -758,12 +772,24 @@ fn turn_budget_reminder(max_turns: i32, turn: i32) -> Option<String> {
   let remaining = max_turns - turn + 1;
 
   let msg = match remaining {
-    1 => "This is the FINAL turn. If the task is done, call `complete`. Otherwise call `handoff` for the human to review and resume. Do not call tools that require follow-up verification.",
-    2 => "Two turns left. Do not start new work. Call `complete` if done, or `handoff` for the human to resume.",
-    3 => "Three turns left. If done, call `complete`. Otherwise finish the current chunk and prepare to `handoff` for human review and resume.",
-    _ if max_turns >= 10 && remaining == max_turns / 2 => "Half the turn budget is used. If useful work is parallelizable and delegatable, delegate coworkers now. Keep the critical path local.",
-    _ if max_turns >= 10 && remaining == max_turns / 4 && max_turns / 4 >= 5 => "Three-quarters of the turn budget is used. Focus on verification, tracking updates, completion, or a necessary handoff. Avoid new exploratory delegation.",
-    _ if turn == 1 => "Use turns deliberately. If useful work is parallelizable and delegatable, delegate coworkers now while keeping the critical path local.",
+    1 => {
+      "This is the FINAL turn. If the task is done, call `complete`. Otherwise call `handoff` for the human to review and resume. Do not call tools that require follow-up verification."
+    }
+    2 => {
+      "Two turns left. Do not start new work. Call `complete` if done, or `handoff` for the human to resume."
+    }
+    3 => {
+      "Three turns left. If done, call `complete`. Otherwise finish the current chunk and prepare to `handoff` for human review and resume."
+    }
+    _ if max_turns >= 10 && remaining == max_turns / 2 => {
+      "Half the turn budget is used. If useful work is parallelizable and delegatable, delegate coworkers now. Keep the critical path local."
+    }
+    _ if max_turns >= 10 && remaining == max_turns / 4 && max_turns / 4 >= 5 => {
+      "Three-quarters of the turn budget is used. Focus on verification, tracking updates, completion, or a necessary handoff. Avoid new exploratory delegation."
+    }
+    _ if turn == 1 => {
+      "Use turns deliberately. If useful work is parallelizable and delegatable, delegate coworkers now while keeping the critical path local."
+    }
     _ => return None,
   };
 

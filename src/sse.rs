@@ -110,19 +110,19 @@ pub async fn parse_sse_response(
     }
   }
   if !buf[consumed..].is_empty() {
-    process_line(buf[consumed..].trim_end_matches('\r'), &mut result, &mut acc);
+    process_line(
+      buf[consumed..].trim_end_matches('\r'),
+      &mut result,
+      &mut acc,
+    );
   }
   flush_tool_calls(&mut acc, &mut result);
   Ok(result)
 }
 
-fn process_line(
-  line: &str,
-  result: &mut ChatResponse,
-  acc: &mut Vec<AccToolCall>,
-) {
+fn process_line(line: &str, result: &mut ChatResponse, acc: &mut Vec<AccToolCall>) {
   let Some(data) = line.strip_prefix("data:") else {
-      return;
+    return;
   };
   let data = data.trim_start();
   if data == "[DONE]" {
@@ -168,8 +168,16 @@ mod tests {
   fn process_line_accumulates_tool_args() {
     let mut resp = ChatResponse::default();
     let mut acc = Vec::new();
-    process_line(r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"x","type":"function","function":{"name":"bash","arguments":"{\"command\""}}]}}]}"#, &mut resp, &mut acc);
-    process_line(r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":":\"ls\""}}]}}]}"#, &mut resp, &mut acc);
+    process_line(
+      r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"x","type":"function","function":{"name":"bash","arguments":"{\"command\""}}]}}]}"#,
+      &mut resp,
+      &mut acc,
+    );
+    process_line(
+      r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":":\"ls\""}}]}}]}"#,
+      &mut resp,
+      &mut acc,
+    );
     assert_eq!(acc.first().unwrap().arguments, "{\"command\":\"ls\"");
   }
 
