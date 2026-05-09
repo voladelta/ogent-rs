@@ -21,6 +21,16 @@ pub enum ClientError {
   Sse(#[from] crate::sse::SseError),
 }
 
+impl ClientError {
+  pub fn is_retryable(&self) -> bool {
+    match self {
+      ClientError::ApiError { status, .. } => matches!(status, 429 | 500 | 502 | 503 | 504),
+      ClientError::Http(e) => e.is_connect() || e.is_timeout(),
+      _ => false,
+    }
+  }
+}
+
 #[derive(Clone)]
 pub struct Client {
   http: reqwest::Client,
@@ -36,13 +46,17 @@ impl Client {
     api_key: String,
     max_retries: usize,
     build_req: F,
+    request_timeout_secs: u64,
   ) -> Result<Self, ClientError>
   where
     F: Fn(&[Message], &[Tool]) -> Value + Send + Sync + 'static,
   {
     Ok(Self {
       http: reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(120))
+        .connect_timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(request_timeout_secs))
+        .pool_max_idle_per_host(128)
+        .pool_idle_timeout(Duration::from_secs(30))
         .build()
         .map_err(ClientError::Http)?,
       url: url.to_string(),
@@ -62,11 +76,12 @@ impl Client {
     let mut last_err = None;
     for attempt in 0..=self.max_retries {
       if attempt > 0 {
-        sleep(Duration::from_secs(attempt as u64)).await;
+        let delay_secs = 2u64.saturating_pow((attempt - 1) as u32).min(60);
+        sleep(Duration::from_secs(delay_secs)).await;
       }
       match self.chat_once(&req_body, cancel).await {
         Ok(resp) => return Ok(resp),
-        Err(err @ ClientError::RateLimited { .. }) => return Err(err),
+        Err(err) if !err.is_retryable() => return Err(err),
         Err(err) => last_err = Some(err),
       }
     }

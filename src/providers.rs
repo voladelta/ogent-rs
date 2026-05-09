@@ -85,6 +85,7 @@ pub fn new_client(profile: &Profile, max_retries: usize) -> Result<Client> {
           })
           .expect("serialize request")
         },
+        600,
       )
     }
     "z" => {
@@ -102,7 +103,7 @@ pub fn new_client(profile: &Profile, max_retries: usize) -> Result<Client> {
           },
         })
         .expect("serialize request")
-      })
+      }, 600)
     }
     "deepseek" => {
       let model = profile.model;
@@ -123,17 +124,18 @@ pub fn new_client(profile: &Profile, max_retries: usize) -> Result<Client> {
           })
           .expect("serialize request")
         },
+        600,
       )
     }
     other => bail!("unknown backend: {other}"),
   }
 }
 
-fn make_client<F>(url: &str, key_env: &str, max_retries: usize, build: F) -> Result<Client>
+fn make_client<F>(url: &str, key_env: &str, max_retries: usize, build: F, timeout_secs: u64) -> Result<Client>
 where
   F: Fn(&[Message], &[Tool]) -> serde_json::Value + Send + Sync + 'static,
 {
-  Ok(Client::new(url, env_key(key_env)?, max_retries, build)?)
+  Ok(Client::new(url, env_key(key_env)?, max_retries, build, timeout_secs)?)
 }
 
 fn env_key(name: &str) -> Result<String> {
