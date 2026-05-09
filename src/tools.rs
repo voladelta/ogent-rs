@@ -323,19 +323,25 @@ fn check_bash_cds(command: &str) -> Result<()> {
     if words.next() == Some("cd") {
       let path = words.next().unwrap_or("");
       if path.is_empty() {
-        bail!("cd without argument is not allowed (would go to $HOME). Use a relative path within the workspace (e.g., ./foo) or /tmp.");
+        bail!(
+          "cd without argument is not allowed (would go to $HOME). Use a relative path within the workspace (e.g., ./foo) or /tmp."
+        );
       }
       let target = if path == "~" {
         if let Some(home) = std::env::var_os("HOME") {
           PathBuf::from(home)
         } else {
-          bail!("cd to ~ is not allowed. Use a relative path within the workspace (e.g., ./foo) or /tmp.");
+          bail!(
+            "cd to ~ is not allowed. Use a relative path within the workspace (e.g., ./foo) or /tmp."
+          );
         }
       } else if let Some(rest) = path.strip_prefix("~/") {
         if let Some(home) = std::env::var_os("HOME") {
           PathBuf::from(home).join(rest)
         } else {
-          bail!("cd to ~/... is not allowed. Use a relative path within the workspace (e.g., ./foo) or /tmp.");
+          bail!(
+            "cd to ~/... is not allowed. Use a relative path within the workspace (e.g., ./foo) or /tmp."
+          );
         }
       } else if path.starts_with('/') {
         PathBuf::from(path)

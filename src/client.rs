@@ -31,7 +31,12 @@ pub struct Client {
 }
 
 impl Client {
-  pub fn new<F>(url: &str, api_key: String, max_retries: usize, build_req: F) -> Result<Self, ClientError>
+  pub fn new<F>(
+    url: &str,
+    api_key: String,
+    max_retries: usize,
+    build_req: F,
+  ) -> Result<Self, ClientError>
   where
     F: Fn(&[Message], &[Tool]) -> Value + Send + Sync + 'static,
   {

@@ -308,80 +308,80 @@ fn run_ui_loop(
             }
           } else {
             match key.code {
-            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-              let _ = tx.send(SteerEvent::Exit);
-              break;
-            }
-            KeyCode::Esc => {
-              let _ = tx.send(SteerEvent::Exit);
-              break;
-            }
-            KeyCode::Char('@') => {
-              if all_files.is_none() {
-                all_files = Some(collect_workspace_files());
+              KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                let _ = tx.send(SteerEvent::Exit);
+                break;
               }
-              selector_start = Some(textarea.cursor());
-              let input = key_event_to_input(&key);
-              textarea.input_without_shortcuts(input);
-              file_selector = Some(FileSelector::new(all_files.as_ref().unwrap().clone()));
-            }
-            KeyCode::Enter => {
-              if key.modifiers.contains(KeyModifiers::SHIFT) {
-                textarea.insert_newline();
-              } else {
-                let text = textarea.lines().join("\n").trim().to_string();
-                if !text.is_empty() {
-                  textarea.clear();
-                  follow_bottom = true;
-                  let event = parse_steer_event(&text);
-                  let exit = matches!(event, SteerEvent::Exit);
-                  let _ = tx.send(event);
-                  if exit {
-                    break;
+              KeyCode::Esc => {
+                let _ = tx.send(SteerEvent::Exit);
+                break;
+              }
+              KeyCode::Char('@') => {
+                if all_files.is_none() {
+                  all_files = Some(collect_workspace_files());
+                }
+                selector_start = Some(textarea.cursor());
+                let input = key_event_to_input(&key);
+                textarea.input_without_shortcuts(input);
+                file_selector = Some(FileSelector::new(all_files.as_ref().unwrap().clone()));
+              }
+              KeyCode::Enter => {
+                if key.modifiers.contains(KeyModifiers::SHIFT) {
+                  textarea.insert_newline();
+                } else {
+                  let text = textarea.lines().join("\n").trim().to_string();
+                  if !text.is_empty() {
+                    textarea.clear();
+                    follow_bottom = true;
+                    let event = parse_steer_event(&text);
+                    let exit = matches!(event, SteerEvent::Exit);
+                    let _ = tx.send(event);
+                    if exit {
+                      break;
+                    }
                   }
                 }
               }
-            }
-            KeyCode::Char('j') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-              textarea.insert_newline();
-            }
-            KeyCode::Up => {
-              let prev = textarea.cursor();
-              textarea.move_cursor(CursorMove::Up);
-              if textarea.cursor() == prev {
-                follow_bottom = false;
-                scroll_y = scroll_y.saturating_sub(1);
+              KeyCode::Char('j') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                textarea.insert_newline();
               }
-            }
-            KeyCode::Down => {
-              let prev = textarea.cursor();
-              textarea.move_cursor(CursorMove::Down);
-              if textarea.cursor() == prev {
-                scroll_y = scroll_y.saturating_add(1);
+              KeyCode::Up => {
+                let prev = textarea.cursor();
+                textarea.move_cursor(CursorMove::Up);
+                if textarea.cursor() == prev {
+                  follow_bottom = false;
+                  scroll_y = scroll_y.saturating_sub(1);
+                }
+              }
+              KeyCode::Down => {
+                let prev = textarea.cursor();
+                textarea.move_cursor(CursorMove::Down);
+                if textarea.cursor() == prev {
+                  scroll_y = scroll_y.saturating_add(1);
+                  if scroll_y >= max_scroll_y {
+                    follow_bottom = true;
+                  }
+                }
+              }
+              KeyCode::PageUp => {
+                follow_bottom = false;
+                scroll_y = scroll_y.saturating_sub(log_height as usize);
+              }
+              KeyCode::PageDown => {
+                scroll_y = scroll_y.saturating_add(log_height as usize);
                 if scroll_y >= max_scroll_y {
                   follow_bottom = true;
                 }
               }
-            }
-            KeyCode::PageUp => {
-              follow_bottom = false;
-              scroll_y = scroll_y.saturating_sub(log_height as usize);
-            }
-            KeyCode::PageDown => {
-              scroll_y = scroll_y.saturating_add(log_height as usize);
-              if scroll_y >= max_scroll_y {
-                follow_bottom = true;
+              KeyCode::Home | KeyCode::End => {
+                let input = key_event_to_input(&key);
+                textarea.input(input);
+              }
+              _ => {
+                let input = key_event_to_input(&key);
+                textarea.input(input);
               }
             }
-            KeyCode::Home | KeyCode::End => {
-              let input = key_event_to_input(&key);
-              textarea.input(input);
-            }
-            _ => {
-              let input = key_event_to_input(&key);
-              textarea.input(input);
-            }
-          }
           }
         }
         Event::Mouse(mouse) => match mouse.kind {

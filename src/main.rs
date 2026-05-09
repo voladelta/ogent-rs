@@ -66,7 +66,37 @@ async fn main() -> Result<()> {
   } else {
     CompactState::disabled()
   };
-  let session_id = format!("{}-{:04x}", session::timestamp(), std::process::id());
+  let session_id = session::generate_session_id();
+  let mode = if args.worker {
+    "worker"
+  } else if args.steer {
+    "steer"
+  } else {
+    "default"
+  };
+  let mut meta = session::SessionMeta {
+    session_id: session_id.clone(),
+    parent_session: None,
+    profile: args.profile.clone(),
+    mode: mode.to_string(),
+    max_turns: args.max_turns,
+    turn: 0,
+    flags: session::SessionFlags {
+      steer: args.steer,
+      auto: args.auto,
+      worker: args.worker,
+      autocompact: args.autocompact,
+      handoff: args.handoff,
+      retry: args.retry,
+      continue_flag: args.continue_flag,
+      resume: args.resume,
+    },
+    usage: session::SessionUsage {
+      prompt_tokens: 0,
+      completion_tokens: 0,
+    },
+  };
+  let mut old_session_id: Option<String> = None;
 
   let is_resume = args.resume;
   let wait_for_steer_input =
@@ -113,6 +143,13 @@ async fn main() -> Result<()> {
     } else {
       session::find_latest_session(".ogent/sessions").context("no session found")?
     };
+    old_session_id = Some(
+      path
+        .strip_prefix(".ogent/sessions/")
+        .and_then(|p| p.strip_suffix(".jsonl"))
+        .unwrap_or(&path)
+        .to_string(),
+    );
     eprintln!("[resume] loading {path}");
     let mut loaded = session::load_session(&path)?;
     let prompt = args.prompt.join(" ");
@@ -123,7 +160,12 @@ async fn main() -> Result<()> {
         ..Default::default()
       });
     }
-    (loaded, tools::configured_coder_tools(args.steer), None, None)
+    (
+      loaded,
+      tools::configured_coder_tools(args.steer),
+      None,
+      None,
+    )
   } else {
     if args.prompt.is_empty() && !args.steer {
       bail!("usage: ogent [--profile ...] [--steer] <prompt>");
@@ -131,8 +173,23 @@ async fn main() -> Result<()> {
     let prompt = args.prompt.join(" ");
     let mut messages = prompts::build_10x_coder_messages(&prompt);
     let workflow_state = prompts::enrich_initial_messages(&mut messages);
-    (messages, tools::configured_coder_tools(args.steer), None, workflow_state)
+    (
+      messages,
+      tools::configured_coder_tools(args.steer),
+      None,
+      workflow_state,
+    )
   };
+  if let Some(ref sid) = old_session_id {
+    meta.parent_session = Some(sid.clone());
+    if let Ok(old_meta) = session::read_meta(sid) {
+      eprintln!(
+        "[resume] parent session {sid} (profile: {}, mode: {})",
+        old_meta.profile, old_meta.mode
+      );
+    }
+  }
+  session::write_meta(&meta)?;
   if let Some(tracker) = task_tracker.as_mut()
     && let Some(reminder) = tracker.take_reminder()
   {
@@ -150,6 +207,7 @@ async fn main() -> Result<()> {
     compact,
     task_tracker,
     workflow_state,
+    meta,
   );
   let loop_result = if args.steer {
     let tui = tui::start(args.profile.clone(), profile.model.to_string(), args.auto)?;
@@ -165,17 +223,23 @@ async fn main() -> Result<()> {
   let final_messages = match loop_result {
     Ok(msgs) => msgs,
     Err(e) => {
-      session::persist_session(&agent.messages, args.worker, &session_id)?;
+      agent.meta.usage.prompt_tokens = agent.total_prompt;
+      agent.meta.usage.completion_tokens = agent.total_completion;
+      session::write_meta(&agent.meta)?;
+      session::persist_session(&agent.messages, &agent.meta.session_id)?;
       return Err(e.into());
     }
   };
-  session::persist_session(&final_messages, args.worker, &session_id)?;
+  agent.meta.usage.prompt_tokens = agent.total_prompt;
+  agent.meta.usage.completion_tokens = agent.total_completion;
+  session::write_meta(&agent.meta)?;
+  session::persist_session(&final_messages, &agent.meta.session_id)?;
   if args.worker {
     if let Some(summary) = agent.completion_summary.as_deref() {
       print!("{summary}");
     }
   } else if let Some(summary) = agent.completion_summary.as_deref() {
-    session::append_journal(&session_id, summary)?;
+    session::append_journal(&agent.meta.session_id, summary)?;
   }
   Ok(())
 }

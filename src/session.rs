@@ -1,22 +1,72 @@
+use crate::types::Message;
 use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::path::PathBuf;
 
-use crate::types::Message;
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionMeta {
+  pub session_id: String,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub parent_session: Option<String>,
+  pub profile: String,
+  pub mode: String,
+  pub max_turns: i32,
+  pub turn: i32,
+  pub flags: SessionFlags,
+  pub usage: SessionUsage,
+}
 
-static COUNTER: AtomicU32 = AtomicU32::new(0);
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionFlags {
+  pub steer: bool,
+  pub auto: bool,
+  pub worker: bool,
+  pub autocompact: i32,
+  pub handoff: bool,
+  pub retry: usize,
+  #[serde(rename = "continue")]
+  pub continue_flag: bool,
+  pub resume: bool,
+}
 
-pub fn persist_session(messages: &[Message], worker: bool, session_id: &str) -> Result<()> {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionUsage {
+  pub prompt_tokens: i32,
+  pub completion_tokens: i32,
+}
+
+pub fn generate_session_id() -> String {
+  format!("{}-{:04x}", timestamp(), std::process::id())
+}
+
+pub fn session_dir(session_id: &str) -> PathBuf {
+  PathBuf::from(format!(".ogent/sessions/{session_id}"))
+}
+
+pub fn write_meta(meta: &SessionMeta) -> Result<()> {
+  let dir = session_dir(&meta.session_id);
+  fs::create_dir_all(&dir)?;
+  let data = serde_json::to_string_pretty(meta)?;
+  fs::write(dir.join("meta.json"), data)?;
+  Ok(())
+}
+
+pub fn read_meta(session_id: &str) -> Result<SessionMeta> {
+  let path = session_dir(session_id).join("meta.json");
+  let data =
+    fs::read_to_string(&path).with_context(|| format!("no meta.json in session {session_id}"))?;
+  serde_json::from_str(&data).context("invalid meta.json")
+}
+
+pub fn persist_session(messages: &[Message], session_id: &str) -> Result<()> {
   if messages.is_empty() {
     return Ok(());
   }
-  fs::create_dir_all(".ogent/sessions")?;
-  let mut name = format!("{}-{}", timestamp(), rand_suffix());
-  if worker {
-    name = format!("{name}-worker-{session_id}");
-  }
-  let path = format!(".ogent/sessions/{name}.jsonl");
+  let dir = session_dir(session_id);
+  fs::create_dir_all(&dir)?;
+  let path = dir.join("messages.jsonl");
   let mut file = fs::File::create(&path)?;
   for message in messages {
     serde_json::to_writer(&mut file, message)?;
@@ -52,7 +102,24 @@ pub fn find_latest_handoff(dir: &str) -> Option<String> {
 }
 
 pub fn find_latest_session(dir: &str) -> Option<String> {
+  let latest_dir = find_latest_session_dir(dir);
+  if latest_dir.is_some() {
+    return latest_dir;
+  }
   find_latest_file(dir, "jsonl", |name| !name.contains("-worker-"))
+}
+
+fn find_latest_session_dir(dir: &str) -> Option<String> {
+  let mut entries: Vec<_> = fs::read_dir(dir)
+    .ok()?
+    .flatten()
+    .filter(|e| e.path().is_dir())
+    .filter(|e| e.path().join("meta.json").exists())
+    .collect();
+  entries.sort_by_key(|e| e.metadata().and_then(|m| m.modified()).ok());
+  entries
+    .last()
+    .and_then(|e| e.path().file_name()?.to_str().map(String::from))
 }
 
 fn find_latest_file(dir: &str, ext: &str, name_filter: fn(&str) -> bool) -> Option<String> {
@@ -72,7 +139,33 @@ fn find_latest_file(dir: &str, ext: &str, name_filter: fn(&str) -> bool) -> Opti
   entries.last().map(|e| e.path().display().to_string())
 }
 
-pub fn load_session(path: &str) -> Result<Vec<Message>> {
+pub fn load_session(path_or_id: &str) -> Result<Vec<Message>> {
+  let dir = session_dir(path_or_id);
+  if dir.join("messages.jsonl").exists() {
+    return load_jsonl_file(&dir.join("messages.jsonl"));
+  }
+  let p = path_or_id;
+  let p = p.strip_suffix("/messages.jsonl").unwrap_or(p);
+  let p = p.strip_suffix(".jsonl").unwrap_or(p);
+  if let Some(id) = p.strip_prefix(".ogent/sessions/") {
+    let id = id.strip_suffix('/').unwrap_or(id);
+    let dir = session_dir(id);
+    if dir.join("messages.jsonl").exists() {
+      return load_jsonl_file(&dir.join("messages.jsonl"));
+    }
+  }
+  let jsonl_path = PathBuf::from(path_or_id);
+  if jsonl_path.exists() {
+    return load_jsonl_file(&jsonl_path);
+  }
+  let jsonl_path = PathBuf::from(format!("{path_or_id}.jsonl"));
+  if jsonl_path.exists() {
+    return load_jsonl_file(&jsonl_path);
+  }
+  anyhow::bail!("session not found: {path_or_id}")
+}
+
+fn load_jsonl_file(path: &PathBuf) -> Result<Vec<Message>> {
   let data = fs::read_to_string(path)?;
   data
     .lines()
@@ -88,8 +181,4 @@ pub fn timestamp() -> String {
     .unwrap_or_default()
     .as_secs()
     .to_string()
-}
-
-fn rand_suffix() -> String {
-  format!("{:04x}", COUNTER.fetch_add(1, Ordering::Relaxed))
 }

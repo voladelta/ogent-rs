@@ -1,4 +1,5 @@
 use crate::client::{Client, ClientError};
+use crate::session;
 use crate::task_tracker::{TaskTracker, is_tracking_tool_name};
 use crate::tools::{ToolContext, execute_tool, is_read_only_tool, remove_question};
 use crate::tui::{SteerEvent, TuiHandle};
@@ -68,6 +69,7 @@ pub struct Agent {
   pub workflow_state: Option<crate::workflow::WorkflowState>,
   pub complete_open_work_warned: bool,
   last_turn_budget_reminder_turn: Option<i32>,
+  pub meta: session::SessionMeta,
 }
 
 pub struct ToolResult {
@@ -84,6 +86,7 @@ impl Agent {
     compact: CompactState,
     task_tracker: Option<TaskTracker>,
     workflow_state: Option<crate::workflow::WorkflowState>,
+    meta: session::SessionMeta,
   ) -> Self {
     Self {
       client,
@@ -98,6 +101,7 @@ impl Agent {
       workflow_state,
       complete_open_work_warned: false,
       last_turn_budget_reminder_turn: None,
+      meta,
     }
   }
 
@@ -127,6 +131,7 @@ impl Agent {
   ) -> Result<Vec<Message>, AgentError> {
     let mut turn = 1;
     loop {
+      self.meta.turn = turn;
       if max_turns > 0 && turn > max_turns {
         self.report_tokens();
         eprintln!("\nReached max turns ({max_turns}). Session saved. Resume with ogent --resume.");
@@ -177,12 +182,17 @@ impl Agent {
     'outer: loop {
       let wait_baseline_len = self.messages.len();
       while let Ok(event) = tui.rx.try_recv() {
-        match self.apply_steer_event(event, &mut auto_continue, &tui).await? {
+        match self
+          .apply_steer_event(event, &mut auto_continue, &tui)
+          .await?
+        {
           SteerAction::Exit => return Ok(self.messages.clone()),
           SteerAction::Restart => {
             turn = 1;
             wait_for_input = true;
-            tui.log.push("[steer] commands: /auto /stop /complete /cancel /new /q");
+            tui
+              .log
+              .push("[steer] commands: /auto /stop /complete /cancel /new /q");
             tui.log.push("[steer] waiting for your first message");
             continue 'outer;
           }
@@ -199,12 +209,17 @@ impl Agent {
         let Some(event) = tui.rx.recv().await else {
           continue;
         };
-        match self.apply_steer_event(event, &mut auto_continue, &tui).await? {
+        match self
+          .apply_steer_event(event, &mut auto_continue, &tui)
+          .await?
+        {
           SteerAction::Exit => return Ok(self.messages.clone()),
           SteerAction::Restart => {
             turn = 1;
             wait_for_input = true;
-            tui.log.push("[steer] commands: /auto /stop /complete /cancel /new /q");
+            tui
+              .log
+              .push("[steer] commands: /auto /stop /complete /cancel /new /q");
             tui.log.push("[steer] waiting for your first message");
             continue 'outer;
           }
@@ -223,6 +238,7 @@ impl Agent {
         ));
         return Ok(self.messages.clone());
       }
+      self.meta.turn = turn;
       tui
         .status
         .set_turn_tokens(turn, self.total_prompt + self.total_completion);
@@ -338,7 +354,9 @@ impl Agent {
             return Ok(self.messages.clone());
           }
         }
-        tui.log.push("[steer] task complete; send a message to continue or /q to quit");
+        tui
+          .log
+          .push("[steer] task complete; send a message to continue or /q to quit");
         self.completion_summary = None;
         wait_for_input = true;
         continue;
@@ -613,6 +631,9 @@ impl Agent {
   async fn handle_handoff(&mut self) -> Result<bool, AgentError> {
     let path = std::mem::take(&mut self.compact.last_handoff_path);
     if self.compact.exit_after {
+      self.meta.usage.prompt_tokens = self.total_prompt;
+      self.meta.usage.completion_tokens = self.total_completion;
+      session::write_meta(&self.meta)?;
       eprintln!("\nHandoff written to {path}");
       return Ok(true);
     }
@@ -630,12 +651,26 @@ impl Agent {
       .filter(|m| m.role == "system")
       .map(|m| m.content.clone())
       .unwrap_or_default();
+    let old_messages = std::mem::take(&mut self.messages);
     self.messages = vec![
       system_msg(system),
       user_msg(format!(
         "## Previous Session Handoff\n\n{stripped}\n\nPlease process this handoff brief and continue the work."
       )),
     ];
+    self.meta.usage.prompt_tokens = self.total_prompt;
+    self.meta.usage.completion_tokens = self.total_completion;
+    session::write_meta(&self.meta)?;
+    session::persist_session(&old_messages, &self.meta.session_id)?;
+    let parent_id = self.meta.session_id.clone();
+    self.meta.session_id = session::generate_session_id();
+    self.meta.parent_session = Some(parent_id);
+    self.meta.turn = 0;
+    self.meta.usage = session::SessionUsage {
+      prompt_tokens: 0,
+      completion_tokens: 0,
+    };
+    session::write_meta(&self.meta)?;
     self.push_task_tracking_reminder();
     self.compact.compacting = false;
     self.compact.urgency = 0;
