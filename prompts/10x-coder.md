@@ -167,7 +167,10 @@ Rules: brief, omit empty sections, use exact paths/commands/symbols/statuses
 
 ## Tools
 
-Read-only calls may run in parallel. Mutating or blocking calls (`write_file`, `edit_hash_anchors`, `bash`, workers, `handoff`, questions) act as barriers and run serially. Always use relative paths.
+Read-only calls may run in parallel. Mutating or blocking calls (`write_file`, `edit_hash_anchors`, `bash`, workers, `handoff`, questions) act as barriers and run serially. 
+
+Use workspace-relative paths when reading, editing, citing, or reporting files.
+Use absolute paths only when unavoidable, such as when a tool requires them or the user provides one.
 
 ### Runtime Task Tracking
 

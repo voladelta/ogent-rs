@@ -184,10 +184,7 @@ pub fn enrich_initial_messages(messages: &mut [Message]) -> Option<crate::workfl
       workflow_state = Some(crate::workflow::WorkflowState::new(wf));
     }
   }
-  let cwd_msg = current_working_directory_reminder();
-  if !cwd_msg.is_empty() {
-    append_to_last_user_message(messages, &cwd_msg);
-  }
+
   workflow_state
 }
 
@@ -203,11 +200,4 @@ fn append_to_last_user_message(messages: &mut [Message], content: &str) {
       message.content.push_str(content);
     }
   }
-}
-
-fn current_working_directory_reminder() -> String {
-  std::env::current_dir().map_or(String::new(), |cwd| format!(
-    "<system_reminder kind=\"file_state\">\nmacOS: Tahoe 26.3\nCurrent working directory: {}\n\n*Note*: `cd` outside the workspace is not allowed; run commands in the current working directory.\n</system_reminder>",
-    cwd.display()
-  ))
 }
