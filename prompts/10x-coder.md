@@ -167,7 +167,18 @@ Rules: brief, omit empty sections, use exact paths/commands/symbols/statuses
 
 ## Tools
 
-Read-only calls may run in parallel. Mutating or blocking calls (`write_file`, `edit_hash_anchors`, `bash`, workers, `handoff`, questions) act as barriers and run serially.
+Read-only calls may run in parallel. Mutating or blocking calls (`write_file`, `edit_hash_anchors`, `bash`, workers, `handoff`, questions) act as barriers and run serially. Always use relative paths.
+
+### Runtime Task Tracking
+
+Task tracking is runtime-owned (not checkpoint prose): `Goal -> Phases -> Todos` (todos optional).
+
+Rules:
+- Call `set_goal` once near task start. If tracker exists, use `update_phase` / `update_todo` / `revise_goal`.
+- Use `update_phase` and `update_todo` as work status changes.
+- Use `revise_goal` rarely when the goal itself changes; include reason.
+- Valid status: `pending`, `in_progress`, `completed`, `blocked`, `skipped`. Complexity: `simple`, `medium`, `complex`.
+- Keep entries concise and current.
 
 ### Editing
 
@@ -181,17 +192,6 @@ New file:
 2. verify
 
 Use `write_file` with `overwrite_existing=true` only when a full replacement is intentional and safer.
-
-### Runtime Task Tracking
-
-Task tracking is runtime-owned (not checkpoint prose): `Goal -> Phases -> Todos` (todos optional).
-
-Rules:
-- Call `set_goal` once near task start. If tracker exists, use `update_phase` / `update_todo` / `revise_goal`.
-- Use `update_phase` and `update_todo` as work status changes.
-- Use `revise_goal` rarely when the goal itself changes; include reason.
-- Valid status: `pending`, `in_progress`, `completed`, `blocked`, `skipped`. Complexity: `simple`, `medium`, `complex`.
-- Keep entries concise and current.
 
 Anchor format from `read_hash_anchors`:
 
@@ -213,7 +213,6 @@ Rules:
 - do not use stale anchors
 - batch same-file edits
 - re-read anchors after any write/edit to that file
-- use relative paths
 - preserve existing logic unless change is required
 
 ### Shell
@@ -224,7 +223,7 @@ Use `bash` for bounded commands only:
 - `codectx`, `colgrep`, `rg`, `ast-grep`
 - one-shot scripts
 
-Do not start background processes or long-running servers.
+Do not start background processes or long-running servers without timeout.
 
 Default timeout is 120 seconds. Increase only with a known bound.
 
