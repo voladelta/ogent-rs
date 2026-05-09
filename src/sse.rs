@@ -39,9 +39,9 @@ struct DeltaToolCall {
 #[derive(Debug, Deserialize, Default)]
 struct DeltaFunctionCall {
   #[serde(default)]
-  name: String,
+  name: Option<String>,
   #[serde(default)]
-  arguments: String,
+  arguments: Option<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -152,10 +152,14 @@ fn process_line(line: &str, result: &mut ChatResponse, acc: &mut Vec<AccToolCall
       if !tc.kind.is_empty() {
         a.kind = tc.kind;
       }
-      if !tc.function.name.is_empty() {
-        a.name = tc.function.name;
+      if let Some(name) = tc.function.name {
+        if !name.is_empty() {
+          a.name = name;
+        }
       }
-      a.arguments.push_str(&tc.function.arguments);
+      if let Some(args) = tc.function.arguments {
+        a.arguments.push_str(&args);
+      }
     }
   }
 }
@@ -197,5 +201,30 @@ mod tests {
     );
     assert_eq!(resp.reasoning_content, "thinking");
     assert_eq!(resp.content, "hello");
+  }
+
+  #[test]
+  fn process_line_accepts_null_function_fields() {
+    let mut resp = ChatResponse::default();
+    let mut acc = Vec::new();
+    process_line(
+      r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"x","type":"function","function":{"name":"read_file","arguments":""}}]}}]}"#,
+      &mut resp,
+      &mut acc,
+    );
+    process_line(
+      r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":null,"arguments":"{\"path\": \"README.md"}}]}}]}"#,
+      &mut resp,
+      &mut acc,
+    );
+    process_line(
+      r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":null,"arguments":"\"}"}}]}}]}"#,
+      &mut resp,
+      &mut acc,
+    );
+    flush_tool_calls(&mut acc, &mut resp);
+    let tc = resp.tool_calls.first().unwrap();
+    assert_eq!(tc.function.name, "read_file");
+    assert_eq!(tc.function.arguments, "{\"path\": \"README.md\"}");
   }
 }
