@@ -34,6 +34,7 @@ struct KimiRequest<'a> {
   messages: &'a [Message],
   #[serde(skip_serializing_if = "<[Tool]>::is_empty")]
   tools: &'a [Tool],
+  tool_choice: &'static str,
   stream: bool,
   max_tokens: i32,
   chat_template_args: KimiThinking,
@@ -75,6 +76,7 @@ pub fn new_client(profile: &Profile, max_retries: usize) -> Result<Client> {
             model,
             messages,
             tools,
+            tool_choice: "auto",
             stream: true,
             max_tokens: 262_144,
             chat_template_args: KimiThinking {
