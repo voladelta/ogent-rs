@@ -215,11 +215,10 @@ impl Agent {
             .map(|(i, q)| format!("{}. {}", i + 1, q))
             .collect::<Vec<_>>()
             .join("\n");
-          eprintln!("\nClarification needed:\n{}\n", q_text);
+          eprintln!("\nClarification needed:\n{q_text}\n");
           self.push_msg(tool_msg(
             format!(
-              "Clarification needed:\n{}\n\nPlease resume with --resume to provide answers.",
-              q_text
+              "Clarification needed:\n{q_text}\n\nPlease resume with --resume to provide answers."
             ),
             first.id.clone(),
           ));
@@ -566,7 +565,7 @@ impl Agent {
               .questions
               .iter()
               .zip(answers.iter())
-              .map(|(q, a)| format!("**Q:** {}\n**A:** {}", q, a))
+              .map(|(q, a)| format!("**Q:** {q}\n**A:** {a}"))
               .collect::<Vec<_>>()
               .join("\n\n")
           );

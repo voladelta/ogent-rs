@@ -95,7 +95,7 @@ impl WorkflowState {
       Some(phase) => {
         let def = self.definition.phases.get(phase);
         let visits = self.visits.get(phase).unwrap_or(&0);
-        let mut s = format!("[Workflow] Phase: {}. Visits: {}.", phase, visits);
+        let mut s = format!("[Workflow] Phase: {phase}. Visits: {visits}.");
         if let Some(d) = def {
           if d.terminal {
             s.push_str(" Terminal. You may call complete.");

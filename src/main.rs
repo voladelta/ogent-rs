@@ -142,7 +142,7 @@ async fn main() -> Result<()> {
     )
   } else if is_resume {
     let path = if let Some(name) = args.resume_session {
-      format!(".ogent/sessions/{}.jsonl", name)
+      format!(".ogent/sessions/{name}.jsonl")
     } else {
       session::find_latest_session(".ogent/sessions").context("no session found")?
     };

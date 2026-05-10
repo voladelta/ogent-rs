@@ -354,8 +354,7 @@ fn check_bash_cds(command: &str) -> Result<()> {
       let in_tmp = norm.starts_with(Path::new("/tmp"));
       if !in_workspace && !in_tmp {
         bail!(
-          "cd to {} is not allowed. You cannot cd outside the workspace or /tmp. Use relative paths within the workspace (e.g., ./foo or foo).",
-          path
+          "cd to {path} is not allowed. You cannot cd outside the workspace or /tmp. Use relative paths within the workspace (e.g., ./foo or foo)."
         );
       }
     }
