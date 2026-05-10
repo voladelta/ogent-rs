@@ -162,79 +162,79 @@ impl Agent {
           .iter()
           .find(|tc| tc.function.name == "interview")
       {
-          self.push_msg(assistant_msg_full(
-            resp.content.clone(),
-            resp.reasoning_content.clone(),
-            resp.tool_calls.clone(),
-          ));
-          let other_calls: Vec<_> = resp
-            .tool_calls
-            .iter()
-            .filter(|tc| tc.function.name != "interview")
-            .collect();
-          if !other_calls.is_empty() {
-            let mut results = Vec::new();
-            let mut read_only_batch: Vec<&ToolCall> = Vec::new();
-            for tc in &other_calls {
-              if is_read_only_tool(&tc.function.name) {
-                read_only_batch.push(tc);
-                continue;
-              }
-              if !read_only_batch.is_empty() {
-                results.extend(run_read_only_batch(&read_only_batch).await?);
-                read_only_batch.clear();
-              }
-              let output = self.run_tool_call(tc).await;
-              results.push(ToolResult {
-                name: tc.function.name.clone(),
-                args: tc.function.arguments.clone(),
-                output,
-              });
+        self.push_msg(assistant_msg_full(
+          resp.content.clone(),
+          resp.reasoning_content.clone(),
+          resp.tool_calls.clone(),
+        ));
+        let other_calls: Vec<_> = resp
+          .tool_calls
+          .iter()
+          .filter(|tc| tc.function.name != "interview")
+          .collect();
+        if !other_calls.is_empty() {
+          let mut results = Vec::new();
+          let mut read_only_batch: Vec<&ToolCall> = Vec::new();
+          for tc in &other_calls {
+            if is_read_only_tool(&tc.function.name) {
+              read_only_batch.push(tc);
+              continue;
             }
             if !read_only_batch.is_empty() {
               results.extend(run_read_only_batch(&read_only_batch).await?);
+              read_only_batch.clear();
             }
-            for (tc, r) in other_calls.iter().zip(results.iter()) {
-              self.push_msg(tool_msg(r.output.clone(), tc.id.clone()));
-            }
+            let output = self.run_tool_call(tc).await;
+            results.push(ToolResult {
+              name: tc.function.name.clone(),
+              args: tc.function.arguments.clone(),
+              output,
+            });
           }
-          let args = match crate::tools::parse_args::<crate::tools::InterviewArgs>(
-            &first.function.arguments,
-          ) {
-            Ok(a) => a,
-            Err(e) => {
-              self.push_msg(tool_msg(format!("ERROR: {e}"), first.id.clone()));
-              turn += 1;
-              continue;
-            }
-          };
-          let q_text = args
-            .questions
-            .iter()
-            .enumerate()
-            .map(|(i, q)| format!("{}. {}", i + 1, q))
-            .collect::<Vec<_>>()
-            .join("\n");
-          eprintln!("\nClarification needed:\n{q_text}\n");
+          if !read_only_batch.is_empty() {
+            results.extend(run_read_only_batch(&read_only_batch).await?);
+          }
+          for (tc, r) in other_calls.iter().zip(results.iter()) {
+            self.push_msg(tool_msg(r.output.clone(), tc.id.clone()));
+          }
+        }
+        let args = match crate::tools::parse_args::<crate::tools::InterviewArgs>(
+          &first.function.arguments,
+        ) {
+          Ok(a) => a,
+          Err(e) => {
+            self.push_msg(tool_msg(format!("ERROR: {e}"), first.id.clone()));
+            turn += 1;
+            continue;
+          }
+        };
+        let q_text = args
+          .questions
+          .iter()
+          .enumerate()
+          .map(|(i, q)| format!("{}. {}", i + 1, q))
+          .collect::<Vec<_>>()
+          .join("\n");
+        eprintln!("\nClarification needed:\n{q_text}\n");
+        self.push_msg(tool_msg(
+          format!(
+            "Clarification needed:\n{q_text}\n\nPlease resume with --resume to provide answers."
+          ),
+          first.id.clone(),
+        ));
+        for tc in resp
+          .tool_calls
+          .iter()
+          .filter(|tc| tc.function.name == "interview")
+          .skip(1)
+        {
           self.push_msg(tool_msg(
-            format!(
-              "Clarification needed:\n{q_text}\n\nPlease resume with --resume to provide answers."
-            ),
-            first.id.clone(),
+            "ERROR: another interview is already in progress.".to_string(),
+            tc.id.clone(),
           ));
-          for tc in resp
-            .tool_calls
-            .iter()
-            .filter(|tc| tc.function.name == "interview")
-            .skip(1)
-          {
-            self.push_msg(tool_msg(
-              "ERROR: another interview is already in progress.".to_string(),
-              tc.id.clone(),
-            ));
-          }
-          self.report_tokens();
-          return Ok(self.messages.clone());
+        }
+        self.report_tokens();
+        return Ok(self.messages.clone());
       }
 
       let mut has_more = match self.handle_turn_response(resp).await {
