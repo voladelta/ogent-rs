@@ -268,7 +268,7 @@ impl Agent {
   ) -> Result<Vec<Message>, AgentError> {
     tui
       .log
-      .push("[steer] commands: /auto /stop /complete /cancel /new /q");
+      .push("[steer] commands: /auto /stop /complete /cancel /new /fork /q");
     if wait_for_input {
       tui.log.push("[steer] waiting for your first message");
     }
@@ -290,7 +290,7 @@ impl Agent {
             wait_for_input = true;
             tui
               .log
-              .push("[steer] commands: /auto /stop /complete /cancel /new /q");
+              .push("[steer] commands: /auto /stop /complete /cancel /new /fork /q");
             tui.log.push("[steer] waiting for your first message");
             continue 'outer;
           }
@@ -317,7 +317,7 @@ impl Agent {
             wait_for_input = true;
             tui
               .log
-              .push("[steer] commands: /auto /stop /complete /cancel /new /q");
+              .push("[steer] commands: /auto /stop /complete /cancel /new /fork /q");
             tui.log.push("[steer] waiting for your first message");
             continue 'outer;
           }
@@ -378,7 +378,7 @@ impl Agent {
                 chat.abort();
                 turn = 1;
                 wait_for_input = true;
-                tui.log.push("[steer] commands: /auto /stop /complete /cancel /new /q");
+                tui.log.push("[steer] commands: /auto /stop /complete /cancel /new /fork /q");
                 tui.log.push("[steer] waiting for your first message");
                 continue 'outer;
               }
@@ -399,7 +399,7 @@ impl Agent {
                     chat.abort();
                     turn = 1;
                     wait_for_input = true;
-                    tui.log.push("[steer] commands: /auto /stop /complete /cancel /new /q");
+                    tui.log.push("[steer] commands: /auto /stop /complete /cancel /new /fork /q");
                     tui.log.push("[steer] waiting for your first message");
                     continue 'outer;
                   }
@@ -541,7 +541,7 @@ impl Agent {
                   wait_for_input = true;
                   tui
                     .log
-                    .push("[steer] commands: /auto /stop /complete /cancel /new /q");
+                    .push("[steer] commands: /auto /stop /complete /cancel /new /fork /q");
                   tui.log.push("[steer] waiting for your first message");
                   continue 'outer;
                 }
