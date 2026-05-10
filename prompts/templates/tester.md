@@ -36,20 +36,33 @@ Do not modify production files. Only create or edit test files clearly required 
 
 ## Report Format
 
+Use this structured format so the orchestrator can diagnose failures programmatically:
+
 ```
+## Commands Run
+- `<command>` → exit `<code>`, output: `<relevant excerpt>`
+
 ## Test Results
+- Test file: `<path>` → `<pass|fail>` (`<n>/<m>` passed)
 
-### Commands Tested
-<list of commands and their results>
-
-### Bugs Found
+## Bugs Found
 | Severity | Description | Repro |
 |----------|-------------|-------|
 | ...      | ...         | ...   |
 
-### Suggestions
+## Suggestions
 <improvements>
 
-### Work Summary
+## Work Summary
 <what you tested, what you checked, blockers if any>
+```
+
+If the task includes validation contracts, also include:
+
+```
+## Contracts Satisfied
+- [x] C1: `<assertion>` ✓
+
+## Contracts Failed
+- [ ] C2: `<assertion>`. Got: `<actual>`. Evidence: `<excerpt>`
 ```

@@ -135,7 +135,7 @@ The 10x coder uses `dispatch_worker` when:
 
 **Golden rule:** Give the worker JUST ENOUGH context — but it must be the RIGHT context. A worker without file paths or commands will fail silently.
 
-**Worker prompt templates** in `prompts/templates/` (`generic`, `tester`, `reviewer`) are starting points for the worker `system_prompt`. The 10x coder customizes one of them for the worker's role, scope, constraints, and summary format, then puts the concrete assignment in the separate `task` argument. All `{{PLACEHOLDERS}}` must be filled before dispatch.
+**Worker prompt templates** in `prompts/templates/` (`generic`, `tester`, `reviewer`, `validator`) are starting points for the worker `system_prompt`. The 10x coder customizes one of them for the worker's role, scope, constraints, and summary format, then puts the concrete assignment in the separate `task` argument. All `{{PLACEHOLDERS}}` must be filled before dispatch.
 
 **Dispatch checklist:**
 - [ ] You actually need a worker (prefer direct action for <3 turns of work)
@@ -147,9 +147,9 @@ The 10x coder uses `dispatch_worker` when:
 
 The worker runs in isolation with your prompt. When done, it calls `worker_complete` with a structured Markdown summary. That summary is returned to the parent coder. You decide what to do next.
 
-### Question tool (turn 1 only)
+### Interview Tool
 
-The `question` tool is available **only on the first turn** of the 10x coder for initial requirement clarification. After turn 1, the agent makes decisions autonomously. Workers cannot ask the human directly; they use `worker_question` to ask the parent coder when blocked.
+The `interview` tool is available **only on the first turn** of the 10x coder. After turn 1, the agent makes decisions autonomously. In steer mode, the user answers clarifying questions interactively; in non-steer mode, the agent prints the questions and exits so you can resume with answers. Workers cannot ask the human directly; they use `worker_clarify` to ask the parent coder when blocked.
 
 ## Creating skills
 
@@ -282,7 +282,7 @@ Non-steer mode requires a prompt unless `--continue` or `--resume` is used.
 | `edit_hash_anchors` | Anchored edits via an `ops` array. Batch multiple edits to the same file in one call so anchors are resolved against one snapshot |
 | `bash` | Run a shell command in the workspace; returns combined stdout/stderr. Default timeout: 120s; max timeout: 600s |
 | `repo_map` | Display a tree map of the workspace or allowed config roots such as `~/.ogent`. Use instead of `bash` with `ls`/`eza` |
-| `question` | Ask the user for clarification. **Only available on turn 1 of the 10x coder.** Workers use `worker_question` to ask the parent coder |
+| `interview` | Ask the user 1-3 clarifying questions. **Only available on turn 1.** Workers use `worker_clarify` to ask the parent coder |
 | `web_search` | Search the web via Exa; returns titles, URLs, and highlights |
 | `web_read` | Read page content from URLs via Exa; returns full text as markdown |
 | `code_web_context` | Semantic code search across the web (GitHub, docs, Stack Overflow) |
@@ -299,9 +299,9 @@ Non-steer mode requires a prompt unless `--continue` or `--resume` is used.
 
 Web tools require `EXA_API_KEY`.
 
-Workers use the same toolset except `dispatch_worker`, `start_workers`, `check_workers`, `handoff`, `set_goal`, `revise_goal`, `update_phase`, `update_todo`, `complete`, and `question`. Instead, workers have `worker_question` to ask the parent 10x coder when blocked and `worker_complete` to return their final Markdown summary.
+Workers use the same toolset except `dispatch_worker`, `start_workers`, `check_workers`, `handoff`, `set_goal`, `revise_goal`, `update_phase`, `update_todo`, `complete`, and `interview`. Instead, workers have `worker_clarify` to ask the parent 10x coder when blocked and `worker_complete` to return their final Markdown summary.
 
-Tool calls are evaluated in order. Contiguous read-only calls (`read_file`, `read_hash_anchors`, `repo_map`, web tools, `load_skill`) may run in parallel. Mutating or blocking calls (`write_file`, `edit_hash_anchors`, `bash`, workers, `handoff`, questions) act as barriers and run serially.
+Tool calls are evaluated in order. Contiguous read-only calls (`read_file`, `read_hash_anchors`, `repo_map`, web tools, `load_skill`) may run in parallel. Mutating or blocking calls (`write_file`, `edit_hash_anchors`, `bash`, workers, `handoff`, `interview`) act as barriers and run serially.
 
 ## Hashline Editing
 
@@ -347,7 +347,7 @@ Hash is FNV-1a 64-bit truncated to 4 hex chars.
 
 ## Retry Behavior
 
-`--retry=5` is the default. Transient API errors retry with linear backoff (`1s, 2s, 3s...`).
+`--retry=5` is the default. Transient API errors retry with exponential backoff (`1s, 2s, 4s, 8s...` up to 60s max).
 
 HTTP `429 Rate Limit` is terminal and is not retried.
 
@@ -457,64 +457,26 @@ cargo run -- --steer
 
 When a steering message arrives during an LLM stream, the agent cancels the in-flight request, preserves any partial assistant content/tool calls already accumulated, appends your message, and starts the next turn.
 
-## Architecture
+## Development
 
-### Design Principles
+For the high-level architecture, module map, and design invariants, see [ARCHITECTURE.md](./ARCHITECTURE.md).
 
-1. **Focused modules**: each module owns one part of the agent loop, tool system, provider layer, or UI.
-2. **Simple behavior**: the control flow is explicit and avoids hidden orchestration.
-3. **Explicit contracts**: tool schemas, provider requests, and worker boundaries are spelled out in code.
-4. **Content-addressed edits**: hashline validation protects against stale file edits.
-5. **Graceful cancellation**: in-flight streaming requests can be cancelled, and partial responses are preserved.
-6. **TUI steering**: interactivity is local and terminal-native.
+```bash
+# Type-check without emitting
+cargo check
 
-### File Structure
+# Lint
+cargo clippy
 
-| File | Purpose |
-|---|---|
-| `src/main.rs` | CLI entry point, profile selection, session setup, loop selection |
-| `src/agent.rs` | Standard loop, steer loop, turn handling, compaction |
-| `src/client.rs` | HTTP streaming client and retry behavior |
-| `src/providers.rs` | DeepSeek, Kimi, and Z/GLM request builders |
-| `src/profiles.rs` | Named model profiles |
-| `src/types.rs` | Domain types for messages, tools, responses, and tool calls |
-| `src/sse.rs` | SSE parser and streamed response accumulation |
-| `src/tools.rs` | Tool registry and JSON schemas |
-| `src/toolimpl.rs` | Tool implementations |
-| `src/task_tracker.rs` | Runtime task tracker state, validation, reminders, handoff serialization |
-| `src/workflow.rs` | Workflow graph parsing and phase transition validation |
-| `src/workers.rs` | Worker subprocess execution and async worker manager |
-| `src/hashline.rs` | Hash anchors and validated anchored edits |
-| `src/prompts.rs` | Embedded prompts, skill discovery, skill loading |
-| `src/session.rs` | Sessions, handoffs, timestamps |
-| `src/tui.rs` | Ratatui/Crossterm steering UI |
-| `src/workspace.rs` | Workspace path validation and readable path rules |
+# Format check
+cargo fmt -- --check
 
-### Data Flow
+# Auto-format
+cargo fmt
 
-```text
-User prompt / TUI message
-    |
-    v
-main.rs
-    |
-    v
-agent.rs
-    |
-    +--> client.rs -> providers.rs -> SSE stream -> sse.rs
-    |
-    +--> tools.rs -> toolimpl.rs
-    |
-    +--> workers.rs -> child ogent --worker
-    |
-    +--> session.rs -> .ogent/sessions, .ogent/handoffs
+# Full check
+cargo test
 ```
-
-### Agent Loops
-
-`run_loop` is the standard non-steer loop used by the parent coder and workers. It processes assistant responses, executes tools, checks workers, handles handoffs/compaction, and repeats until the model returns a final response or the turn limit is reached.
-
-`steer_loop` is the interactive loop used by `--steer`. It starts `tui::start`, receives `SteerEvent`s from the UI, cancels in-flight requests when needed, preserves partial responses, and applies user steering messages as new turns.
 
 ## Examples
 

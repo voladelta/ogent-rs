@@ -57,6 +57,14 @@ pub struct TodoState {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ValidationContract {
+  pub id: String,
+  pub assertion: String,
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub command: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PhaseState {
   pub id: String,
   pub title: String,
@@ -64,6 +72,8 @@ pub struct PhaseState {
   pub complexity: Complexity,
   #[serde(default, skip_serializing_if = "String::is_empty")]
   pub notes: String,
+  #[serde(default, skip_serializing_if = "Vec::is_empty")]
+  pub contracts: Vec<ValidationContract>,
   #[serde(default, skip_serializing_if = "Vec::is_empty")]
   pub todos: Vec<TodoState>,
 }
@@ -76,6 +86,8 @@ pub struct PhaseUpdate {
   pub complexity: Complexity,
   #[serde(default)]
   pub notes: String,
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub contracts: Option<Vec<ValidationContract>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -152,6 +164,9 @@ impl TaskTracker {
       phase.status = update.status;
       phase.complexity = update.complexity;
       phase.notes = update.notes;
+      if let Some(contracts) = update.contracts {
+        phase.contracts = contracts;
+      }
     } else {
       self.phases.push(PhaseState {
         id: update.id,
@@ -159,6 +174,7 @@ impl TaskTracker {
         status: update.status,
         complexity: update.complexity,
         notes: update.notes,
+        contracts: update.contracts.unwrap_or_default(),
         todos: Vec::new(),
       });
     }
@@ -344,6 +360,11 @@ impl TaskTracker {
           format_complexity(phase.complexity),
           phase.title
         );
+        if !phase.contracts.is_empty() {
+          for c in phase.contracts.iter().take(6) {
+            let _ = writeln!(lines, "    contract {}: {}", c.id, c.assertion);
+          }
+        }
         emitted += 1;
       }
       for todo in &phase.todos {
@@ -453,6 +474,7 @@ mod tests {
       status: Status::InProgress,
       complexity: Complexity::Medium,
       notes: String::new(),
+      contracts: None,
     });
     assert!(tracker.open_work_exists());
     tracker.take_reminder();
@@ -486,6 +508,7 @@ mod tests {
       status: Status::InProgress,
       complexity: Complexity::Medium,
       notes: String::new(),
+      contracts: None,
     });
     tracker.update_phase(PhaseUpdate {
       id: "phase-2".into(),
@@ -493,6 +516,7 @@ mod tests {
       status: Status::InProgress,
       complexity: Complexity::Medium,
       notes: String::new(),
+      contracts: None,
     });
     assert_eq!(tracker.phases[0].status, Status::Pending);
     assert_eq!(tracker.phases[1].status, Status::InProgress);
@@ -507,6 +531,7 @@ mod tests {
       status: Status::Completed,
       complexity: Complexity::Medium,
       notes: String::new(),
+      contracts: None,
     });
     assert!(tracker.open_work_exists());
     assert!(!tracker.open_phase_or_todo_exists());
@@ -521,6 +546,7 @@ mod tests {
       status: Status::InProgress,
       complexity: Complexity::Medium,
       notes: String::new(),
+      contracts: None,
     });
     let mut handoff = String::from("User brief");
     handoff.push_str("\n\n");

@@ -90,20 +90,26 @@ pub fn new_client(profile: &Profile, max_retries: usize) -> Result<Client> {
     }
     "z" => {
       let model = profile.model;
-      make_client(Z_URL, "Z_API_KEY", max_retries, move |messages, tools| {
-        serde_json::to_value(ZRequest {
-          model,
-          messages,
-          tools,
-          stream: true,
-          max_tokens: 131_072,
-          thinking: ZThinking {
-            kind: "enabled",
-            clear_thinking: false,
-          },
-        })
-        .expect("serialize request")
-      }, 600)
+      make_client(
+        Z_URL,
+        "Z_API_KEY",
+        max_retries,
+        move |messages, tools| {
+          serde_json::to_value(ZRequest {
+            model,
+            messages,
+            tools,
+            stream: true,
+            max_tokens: 131_072,
+            thinking: ZThinking {
+              kind: "enabled",
+              clear_thinking: false,
+            },
+          })
+          .expect("serialize request")
+        },
+        600,
+      )
     }
     "deepseek" => {
       let model = profile.model;
@@ -131,11 +137,23 @@ pub fn new_client(profile: &Profile, max_retries: usize) -> Result<Client> {
   }
 }
 
-fn make_client<F>(url: &str, key_env: &str, max_retries: usize, build: F, timeout_secs: u64) -> Result<Client>
+fn make_client<F>(
+  url: &str,
+  key_env: &str,
+  max_retries: usize,
+  build: F,
+  timeout_secs: u64,
+) -> Result<Client>
 where
   F: Fn(&[Message], &[Tool]) -> serde_json::Value + Send + Sync + 'static,
 {
-  Ok(Client::new(url, env_key(key_env)?, max_retries, build, timeout_secs)?)
+  Ok(Client::new(
+    url,
+    env_key(key_env)?,
+    max_retries,
+    build,
+    timeout_secs,
+  )?)
 }
 
 fn env_key(name: &str) -> Result<String> {

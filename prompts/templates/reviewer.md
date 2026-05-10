@@ -41,7 +41,12 @@ Do not modify project files.
 
 ## Report Format
 
+Use this structured format so the orchestrator can diagnose findings programmatically:
+
 ```
+## Commands Run
+- `<command>` → exit `<code>`, output: `<relevant excerpt>`
+
 ## Code Review
 
 ### Summary
@@ -52,6 +57,16 @@ Do not modify project files.
 |----------|------|------|-------|------------|
 | ...      | ...  | ...  | ...   | ...        |
 
-### Work Summary
+## Work Summary
 <what you reviewed, key findings, blockers if any>
+```
+
+If the task includes validation contracts, also include:
+
+```
+## Contracts Satisfied
+- [x] C1: `<assertion>` ✓
+
+## Contracts Failed
+- [ ] C2: `<assertion>`. Got: `<actual>`. Evidence: `<excerpt>`
 ```

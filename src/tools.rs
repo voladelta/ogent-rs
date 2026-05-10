@@ -39,8 +39,8 @@ pub async fn execute_tool(mut ctx: ToolContext<'_>, name: &str, args: &str) -> R
     "dispatch_worker" => dispatch_worker(args).await,
     "start_workers" => start_workers(ctx.agent.as_deref_mut(), args).await,
     "check_workers" => check_workers(ctx.agent.as_deref_mut(), args).await,
-    "question" => bail!("interactive mode required"),
-    "worker_question" => worker_question(args),
+    "interview" => bail!("interactive mode required"),
+    "worker_clarify" => worker_clarify(args),
     "worker_complete" => worker_complete(ctx.agent.as_deref_mut(), args),
     "complete" => complete(ctx.agent.as_deref_mut(), args),
     _ => bail!("unknown tool: {name}"),
@@ -64,7 +64,7 @@ const WORKER_EXCLUDED: &[&str] = &[
   "check_workers",
   "handoff",
   "complete",
-  "question",
+  "interview",
   "set_goal",
   "revise_goal",
   "update_phase",
@@ -152,7 +152,7 @@ fn build_coder_tools() -> Vec<Tool> {
     schema(
       "update_phase",
       "Upsert one Phase under the current Goal.",
-      json!({"type":"object","properties":{"phase_id":{"type":"string"},"title":{"type":"string"},"status":{"type":"string","enum":["pending","in_progress","completed","blocked","skipped"]},"complexity":{"type":"string","enum":["simple","medium","complex"]},"notes":{"type":"string"}},"required":["phase_id","title","status","complexity"],"additionalProperties":false}),
+      json!({"type":"object","properties":{"phase_id":{"type":"string"},"title":{"type":"string"},"status":{"type":"string","enum":["pending","in_progress","completed","blocked","skipped"]},"complexity":{"type":"string","enum":["simple","medium","complex"]},"notes":{"type":"string"},"contracts":{"type":"array","description":"Optional validation contracts for this phase. Define behavioral assertions before implementing.","items":{"type":"object","properties":{"id":{"type":"string"},"assertion":{"type":"string"},"command":{"type":"string"}},"required":["id","assertion"],"additionalProperties":false}}},"required":["phase_id","title","status","complexity"],"additionalProperties":false}),
     ),
     schema(
       "update_todo",
@@ -166,8 +166,8 @@ fn build_coder_tools() -> Vec<Tool> {
     ),
     schema(
       "load_worker_template",
-      "Load a built-in worker template (generic, tester, reviewer). Returns the template content with placeholders. Fill placeholders before using as system_prompt.",
-      json!({"type":"object","properties":{"name":{"type":"string","enum":["generic","tester","reviewer"],"description":"Built-in worker template name"}},"required":["name"],"additionalProperties":false}),
+      "Load a built-in worker template (generic, tester, reviewer, validator). Returns the template content with placeholders. Fill placeholders before using as system_prompt.",
+      json!({"type":"object","properties":{"name":{"type":"string","enum":["generic","tester","reviewer","validator"],"description":"Built-in worker template name"}},"required":["name"],"additionalProperties":false}),
     ),
     schema(
       "complete",
@@ -175,9 +175,9 @@ fn build_coder_tools() -> Vec<Tool> {
       json!({"type":"object","properties":{"summary":{"type":"string"}},"required":["summary"],"additionalProperties":false}),
     ),
     schema(
-      "question",
-      "Ask the user a question. Only available on the first turn.",
-      json!({"type":"object","properties":{"question":{"type":"string"}},"required":["question"],"additionalProperties":false}),
+      "interview",
+      "Ask the user 1-3 clarifying questions before proceeding. Only available on turn 1. Prefer multiple choice.",
+      json!({"type":"object","properties":{"questions":{"type":"array","items":{"type":"string"},"minItems":1,"maxItems":3}},"required":["questions"],"additionalProperties":false}),
     ),
   ]
 }
@@ -187,13 +187,13 @@ fn build_worker_tools() -> Vec<Tool> {
     .into_iter()
     .filter(|t| !WORKER_EXCLUDED.contains(&t.function.name.as_str()))
     .collect();
-  tools.push(schema("worker_question", "Ask the parent coder agent a question when blocked.", json!({"type":"object","properties":{"question":{"type":"string"}},"required":["question"],"additionalProperties":false})));
+  tools.push(schema("worker_clarify", "Ask the parent coder agent a clarifying question when blocked.", json!({"type":"object","properties":{"question":{"type":"string"}},"required":["question"],"additionalProperties":false})));
   tools.push(schema("worker_complete", "Finish this worker subprocess and return a concise Markdown summary to the parent coder.", json!({"type":"object","properties":{"summary":{"type":"string","description":"Concise Markdown summary for the parent coder"}},"required":["summary"],"additionalProperties":false})));
   tools
 }
 
-pub fn remove_question(tools: &mut Vec<Tool>) {
-  tools.retain(|t| t.function.name != "question");
+pub fn remove_interview(tools: &mut Vec<Tool>) {
+  tools.retain(|t| t.function.name != "interview");
 }
 
 pub fn is_read_only_tool(name: &str) -> bool {
@@ -708,6 +708,11 @@ fn revise_goal(agent: Option<&mut crate::agent::Agent>, args: &str) -> Result<St
 }
 
 #[derive(Deserialize)]
+pub struct InterviewArgs {
+  pub questions: Vec<String>,
+}
+
+#[derive(Deserialize)]
 struct UpdatePhaseArgs {
   phase_id: String,
   title: String,
@@ -715,6 +720,8 @@ struct UpdatePhaseArgs {
   complexity: Complexity,
   #[serde(default)]
   notes: String,
+  #[serde(default)]
+  contracts: Option<Vec<crate::task_tracker::ValidationContract>>,
 }
 
 fn update_phase(agent: Option<&mut crate::agent::Agent>, args: &str) -> Result<String> {
@@ -742,6 +749,7 @@ fn update_phase(agent: Option<&mut crate::agent::Agent>, args: &str) -> Result<S
     status: args.status,
     complexity: args.complexity,
     notes: args.notes.trim().to_string(),
+    contracts: args.contracts,
   });
   Ok(tracker.render_tool_snapshot())
 }
@@ -806,7 +814,7 @@ fn load_worker_template(args: &str) -> Result<String> {
   require_nonempty(&args.name, "name")?;
   let template = crate::prompts::get_worker_template(&args.name).with_context(|| {
     format!(
-      "unknown worker template: {}. Use generic, tester, or reviewer.",
+      "unknown worker template: {}. Use generic, tester, reviewer, or validator.",
       args.name
     )
   })?;
@@ -858,7 +866,7 @@ struct QuestionArgs {
   question: String,
 }
 
-fn worker_question(args: &str) -> Result<String> {
+fn worker_clarify(args: &str) -> Result<String> {
   let args: QuestionArgs = parse_args(args)?;
   Ok(format!("[BLOCKER] Worker asks: {}", args.question))
 }

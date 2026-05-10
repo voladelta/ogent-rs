@@ -1,7 +1,7 @@
 use crate::client::{Client, ClientError};
 use crate::session;
 use crate::task_tracker::{TaskTracker, is_tracking_tool_name};
-use crate::tools::{ToolContext, execute_tool, is_read_only_tool, remove_question};
+use crate::tools::{ToolContext, execute_tool, is_read_only_tool, remove_interview};
 use crate::tui::{SteerEvent, TuiHandle};
 use crate::types::{ChatResponse, Message, Tool, ToolCall};
 use crate::workers::WorkerManager;
@@ -126,7 +126,7 @@ impl Agent {
   pub async fn run_loop(
     &mut self,
     max_turns: i32,
-    question_available_on_first_turn: bool,
+    interview_on_first_turn: bool,
     auto_continue: bool,
   ) -> Result<Vec<Message>, AgentError> {
     let mut turn = 1;
@@ -144,6 +144,95 @@ impl Agent {
       self.push_turn_budget_reminder(max_turns, turn);
       self.refresh_workflow_reminder();
       let resp = self.client.chat(&self.messages, &self.tools, None).await?;
+
+      // Interview handling on turn 1 in non-steer mode
+      if turn == 1 && interview_on_first_turn {
+        if let Some(first) = resp
+          .tool_calls
+          .iter()
+          .find(|tc| tc.function.name == "interview")
+        {
+          self.messages.push(assistant_msg_full(
+            resp.content.clone(),
+            resp.reasoning_content.clone(),
+            resp.tool_calls.clone(),
+          ));
+          let other_calls: Vec<_> = resp
+            .tool_calls
+            .iter()
+            .filter(|tc| tc.function.name != "interview")
+            .collect();
+          if !other_calls.is_empty() {
+            let mut results = Vec::new();
+            let mut read_only_batch: Vec<&ToolCall> = Vec::new();
+            for tc in &other_calls {
+              if is_read_only_tool(&tc.function.name) {
+                read_only_batch.push(tc);
+                continue;
+              }
+              if !read_only_batch.is_empty() {
+                results.extend(run_read_only_batch(&read_only_batch).await?);
+                read_only_batch.clear();
+              }
+              let output = self.run_tool_call(tc).await;
+              results.push(ToolResult {
+                name: tc.function.name.clone(),
+                args: tc.function.arguments.clone(),
+                output,
+              });
+            }
+            if !read_only_batch.is_empty() {
+              results.extend(run_read_only_batch(&read_only_batch).await?);
+            }
+            for (tc, r) in other_calls.iter().zip(results.iter()) {
+              self
+                .messages
+                .push(tool_msg(r.output.clone(), tc.id.clone()));
+            }
+          }
+          let args = match crate::tools::parse_args::<crate::tools::InterviewArgs>(
+            &first.function.arguments,
+          ) {
+            Ok(a) => a,
+            Err(e) => {
+              self
+                .messages
+                .push(tool_msg(format!("ERROR: {e}"), first.id.clone()));
+              turn += 1;
+              continue;
+            }
+          };
+          let q_text = args
+            .questions
+            .iter()
+            .enumerate()
+            .map(|(i, q)| format!("{}. {}", i + 1, q))
+            .collect::<Vec<_>>()
+            .join("\n");
+          eprintln!("\nClarification needed:\n{}\n", q_text);
+          self.messages.push(tool_msg(
+            format!(
+              "Clarification needed:\n{}\n\nPlease resume with --resume to provide answers.",
+              q_text
+            ),
+            first.id.clone(),
+          ));
+          for tc in resp
+            .tool_calls
+            .iter()
+            .filter(|tc| tc.function.name == "interview")
+            .skip(1)
+          {
+            self.messages.push(tool_msg(
+              "ERROR: another interview is already in progress.".to_string(),
+              tc.id.clone(),
+            ));
+          }
+          self.report_tokens();
+          return Ok(self.messages.clone());
+        }
+      }
+
       let mut has_more = match self.handle_turn_response(resp).await {
         Ok(hm) => hm,
         Err(AgentError::InteractiveRequired) => return Ok(self.messages.clone()),
@@ -155,8 +244,8 @@ impl Agent {
       {
         return Ok(self.messages.clone());
       }
-      if turn == 1 && question_available_on_first_turn {
-        remove_question(&mut self.tools);
+      if turn == 1 && interview_on_first_turn {
+        remove_interview(&mut self.tools);
       }
       if !has_more {
         return Ok(self.messages.clone());
@@ -344,9 +433,152 @@ impl Agent {
         Err(join_err) => return Err(AgentError::Other(join_err.into())),
       };
 
-      let mut has_more = self
-        .handle_turn_response_with_log(resp, Some(&tui.log))
-        .await?;
+      let mut has_more = if turn == 1
+        && resp
+          .tool_calls
+          .iter()
+          .any(|tc| tc.function.name == "interview")
+      {
+        self.total_prompt += resp.usage.prompt_tokens;
+        self.total_completion += resp.usage.completion_tokens;
+        self.messages.push(assistant_msg_full(
+          resp.content.clone(),
+          resp.reasoning_content.clone(),
+          resp.tool_calls.clone(),
+        ));
+
+        let interview_calls: Vec<_> = resp
+          .tool_calls
+          .iter()
+          .filter(|tc| tc.function.name == "interview")
+          .collect();
+        let other_calls: Vec<_> = resp
+          .tool_calls
+          .iter()
+          .filter(|tc| tc.function.name != "interview")
+          .collect();
+
+        if !other_calls.is_empty() {
+          let mut results = Vec::new();
+          let mut read_only_batch: Vec<&ToolCall> = Vec::new();
+          for tc in &other_calls {
+            if is_read_only_tool(&tc.function.name) {
+              read_only_batch.push(tc);
+              continue;
+            }
+            if !read_only_batch.is_empty() {
+              results.extend(run_read_only_batch(&read_only_batch).await?);
+              read_only_batch.clear();
+            }
+            let output = self.run_tool_call(tc).await;
+            results.push(ToolResult {
+              name: tc.function.name.clone(),
+              args: tc.function.arguments.clone(),
+              output,
+            });
+            if self.completion_summary.is_some() {
+              break;
+            }
+          }
+          if !read_only_batch.is_empty() {
+            results.extend(run_read_only_batch(&read_only_batch).await?);
+          }
+          for (tc, r) in other_calls.iter().zip(results.iter()) {
+            self
+              .messages
+              .push(tool_msg(r.output.clone(), tc.id.clone()));
+          }
+          self.record_task_tracking_turn(&results);
+        }
+
+        if self.completion_summary.is_some() {
+          true
+        } else {
+          let first = interview_calls[0];
+          let args = match crate::tools::parse_args::<crate::tools::InterviewArgs>(
+            &first.function.arguments,
+          ) {
+            Ok(a) => a,
+            Err(e) => {
+              self
+                .messages
+                .push(tool_msg(format!("ERROR: {e}"), first.id.clone()));
+              for ic in interview_calls.iter().skip(1) {
+                self.messages.push(tool_msg(
+                  "ERROR: another interview is already in progress.".to_string(),
+                  ic.id.clone(),
+                ));
+              }
+              turn += 1;
+              continue 'outer;
+            }
+          };
+          let mut answers = Vec::new();
+          for (i, question) in args.questions.iter().enumerate() {
+            tui.log.push(format!(
+              "[interview {}/{}] {}",
+              i + 1,
+              args.questions.len(),
+              question
+            ));
+            loop {
+              match tui.rx.recv().await {
+                Some(SteerEvent::Message(content)) => {
+                  answers.push(content);
+                  break;
+                }
+                Some(SteerEvent::Exit) => return Ok(self.messages.clone()),
+                Some(SteerEvent::New) => {
+                  self
+                    .apply_steer_event(SteerEvent::New, &mut auto_continue, &tui)
+                    .await?;
+                  turn = 1;
+                  wait_for_input = true;
+                  tui
+                    .log
+                    .push("[steer] commands: /auto /stop /complete /cancel /new /q");
+                  tui.log.push("[steer] waiting for your first message");
+                  continue 'outer;
+                }
+                Some(SteerEvent::Auto) => {
+                  auto_continue = true;
+                  tui.status.set_auto(true);
+                  tui.log.push("[steer] auto on");
+                }
+                Some(SteerEvent::Stop) => {
+                  auto_continue = false;
+                  tui.status.set_auto(false);
+                  tui.log.push("[steer] auto off");
+                }
+                _ => {}
+              }
+            }
+          }
+
+          let result = format!(
+            "## Interview Answers\n\n{}",
+            args
+              .questions
+              .iter()
+              .zip(answers.iter())
+              .map(|(q, a)| format!("**Q:** {}\n**A:** {}", q, a))
+              .collect::<Vec<_>>()
+              .join("\n\n")
+          );
+          self.messages.push(tool_msg(result, first.id.clone()));
+          for ic in interview_calls.iter().skip(1) {
+            self.messages.push(tool_msg(
+              "ERROR: another interview is already in progress.".to_string(),
+              ic.id.clone(),
+            ));
+          }
+          true
+        }
+      } else {
+        self
+          .handle_turn_response_with_log(resp, Some(&tui.log))
+          .await?
+      };
 
       if self.completion_summary.is_some() {
         if !self.compact.last_handoff_path.is_empty() {
@@ -376,9 +608,15 @@ impl Agent {
       }
       if !has_more && !auto_continue {
         tui.log.push("[steer] turn complete; waiting for input");
+        if turn == 1 {
+          remove_interview(&mut self.tools);
+        }
         turn += 1;
         wait_for_input = true;
         continue;
+      }
+      if turn == 1 {
+        remove_interview(&mut self.tools);
       }
       turn += 1;
     }
@@ -700,7 +938,7 @@ impl Agent {
       }
       if is_tracking_tool_name(&result.name) {
         saw_tracking_update = true;
-      } else if !matches!(result.name.as_str(), "question" | "worker_question") {
+      } else if !matches!(result.name.as_str(), "interview" | "worker_clarify") {
         saw_meaningful_non_tracking = true;
       }
     }
