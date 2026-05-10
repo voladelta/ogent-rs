@@ -210,16 +210,16 @@ fn run_ui(
   terminal.hide_cursor()?;
   let result = run_ui_loop(&mut terminal, tx, log, status, stop);
 
-  let _ = execute!(
+  let restore = execute!(
     terminal.backend_mut(),
     DisableMouseCapture,
     EnableLineWrap,
     LeaveAlternateScreen
   )
-  .and_then(|()| terminal.show_cursor());
-  let _ = disable_raw_mode();
+  .and_then(|()| terminal.show_cursor())
+  .and_then(|()| disable_raw_mode());
 
-  result
+  result.or(restore.map_err(Into::into))
 }
 
 fn run_ui_loop(
