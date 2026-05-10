@@ -95,19 +95,22 @@ async fn main() -> Result<()> {
       prompt_tokens: 0,
       completion_tokens: 0,
     },
+    prompt: None,
+    start_ts: None,
+    end_ts: None,
   };
   let mut old_session_id: Option<String> = None;
 
   let is_resume = args.resume;
+  let prompt = args.prompt.join(" ");
   let wait_for_steer_input =
-    args.steer && !args.worker && !args.continue_flag && !is_resume && args.prompt.is_empty();
+    args.steer && !args.worker && !args.continue_flag && !is_resume && prompt.is_empty();
 
   let (mut messages, tools, mut task_tracker, workflow_state) = if args.worker {
     let system_prompt = read_stdin().await?.trim().to_string();
     if system_prompt.is_empty() {
       bail!("--worker requires system prompt on stdin");
     }
-    let prompt = args.prompt.join(" ");
     (
       build_worker_messages(&system_prompt, &prompt, &session_id),
       tools::configured_worker_tools(),
@@ -152,11 +155,10 @@ async fn main() -> Result<()> {
     );
     eprintln!("[resume] loading {path}");
     let mut loaded = session::load_session(&path)?;
-    let prompt = args.prompt.join(" ");
     if !prompt.is_empty() {
       loaded.push(Message {
         role: "user".into(),
-        content: prompt,
+        content: prompt.clone(),
         ..Default::default()
       });
     }
@@ -167,10 +169,9 @@ async fn main() -> Result<()> {
       None,
     )
   } else {
-    if args.prompt.is_empty() && !args.steer {
+    if prompt.is_empty() && !args.steer {
       bail!("usage: ogent [--profile ...] [--steer] <prompt>");
     }
-    let prompt = args.prompt.join(" ");
     let mut messages = prompts::build_10x_coder_messages(&prompt);
     let workflow_state = prompts::enrich_initial_messages(&mut messages);
     (
@@ -180,6 +181,10 @@ async fn main() -> Result<()> {
       workflow_state,
     )
   };
+  if !prompt.is_empty() {
+    meta.prompt = Some(prompt.clone());
+    meta.start_ts = Some(session::timestamp_ms());
+  }
   if let Some(ref sid) = old_session_id {
     meta.parent_session = Some(sid.clone());
     if let Ok(old_meta) = session::read_meta(sid) {
@@ -189,7 +194,6 @@ async fn main() -> Result<()> {
       );
     }
   }
-  session::write_meta(&meta)?;
   if let Some(tracker) = task_tracker.as_mut()
     && let Some(reminder) = tracker.take_reminder()
   {
@@ -209,6 +213,9 @@ async fn main() -> Result<()> {
     workflow_state,
     meta,
   );
+  if args.worker || args.continue_flag || is_resume || !prompt.is_empty() {
+    agent.dirty = true;
+  }
   let loop_result = if args.steer {
     let tui = tui::start(args.profile.clone(), profile.model.to_string(), args.auto)?;
     agent
@@ -223,23 +230,27 @@ async fn main() -> Result<()> {
   let final_messages = match loop_result {
     Ok(msgs) => msgs,
     Err(e) => {
-      agent.meta.usage.prompt_tokens = agent.total_prompt;
-      agent.meta.usage.completion_tokens = agent.total_completion;
-      session::write_meta(&agent.meta)?;
-      session::persist_session(&agent.messages, &agent.meta.session_id)?;
+      if agent.dirty {
+        agent.meta.usage.prompt_tokens = agent.total_prompt;
+        agent.meta.usage.completion_tokens = agent.total_completion;
+        session::write_meta(&agent.meta)?;
+        session::persist_session(&agent.messages, &agent.meta.session_id)?;
+      }
       return Err(e.into());
     }
   };
-  agent.meta.usage.prompt_tokens = agent.total_prompt;
-  agent.meta.usage.completion_tokens = agent.total_completion;
-  session::write_meta(&agent.meta)?;
-  session::persist_session(&final_messages, &agent.meta.session_id)?;
-  if args.worker {
+  if agent.dirty {
+    agent.meta.usage.prompt_tokens = agent.total_prompt;
+    agent.meta.usage.completion_tokens = agent.total_completion;
+    session::write_meta(&agent.meta)?;
+    session::persist_session(&final_messages, &agent.meta.session_id)?;
     if let Some(summary) = agent.completion_summary.as_deref() {
-      print!("{summary}");
+      if args.worker {
+        print!("{summary}");
+      } else {
+        session::append_journal(&agent.meta.session_id, summary)?;
+      }
     }
-  } else if let Some(summary) = agent.completion_summary.as_deref() {
-    session::append_journal(&agent.meta.session_id, summary)?;
   }
   Ok(())
 }

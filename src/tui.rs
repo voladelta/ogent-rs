@@ -176,6 +176,18 @@ impl TuiHandle {
       let _ = thread.join();
     }
   }
+
+  #[cfg(test)]
+  pub fn test_handle() -> Self {
+    let (_tx, rx) = mpsc::unbounded_channel();
+    Self {
+      rx,
+      log: UiLog::default(),
+      status: UiStatus::new("test".into(), "test".into(), false),
+      stop: Arc::new(AtomicBool::new(false)),
+      thread: None,
+    }
+  }
 }
 
 fn run_ui(

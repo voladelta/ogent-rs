@@ -70,6 +70,7 @@ pub struct Agent {
   pub complete_open_work_warned: bool,
   last_turn_budget_reminder_turn: Option<i32>,
   pub meta: session::SessionMeta,
+  pub dirty: bool,
 }
 
 pub struct ToolResult {
@@ -102,7 +103,13 @@ impl Agent {
       complete_open_work_warned: false,
       last_turn_budget_reminder_turn: None,
       meta,
+      dirty: false,
     }
+  }
+
+  fn push_msg(&mut self, msg: Message) {
+    self.dirty = true;
+    self.messages.push(msg);
   }
 
   fn refresh_workflow_reminder(&mut self) {
@@ -152,7 +159,7 @@ impl Agent {
           .iter()
           .find(|tc| tc.function.name == "interview")
         {
-          self.messages.push(assistant_msg_full(
+          self.push_msg(assistant_msg_full(
             resp.content.clone(),
             resp.reasoning_content.clone(),
             resp.tool_calls.clone(),
@@ -185,9 +192,7 @@ impl Agent {
               results.extend(run_read_only_batch(&read_only_batch).await?);
             }
             for (tc, r) in other_calls.iter().zip(results.iter()) {
-              self
-                .messages
-                .push(tool_msg(r.output.clone(), tc.id.clone()));
+              self.push_msg(tool_msg(r.output.clone(), tc.id.clone()));
             }
           }
           let args = match crate::tools::parse_args::<crate::tools::InterviewArgs>(
@@ -195,9 +200,7 @@ impl Agent {
           ) {
             Ok(a) => a,
             Err(e) => {
-              self
-                .messages
-                .push(tool_msg(format!("ERROR: {e}"), first.id.clone()));
+              self.push_msg(tool_msg(format!("ERROR: {e}"), first.id.clone()));
               turn += 1;
               continue;
             }
@@ -210,7 +213,7 @@ impl Agent {
             .collect::<Vec<_>>()
             .join("\n");
           eprintln!("\nClarification needed:\n{}\n", q_text);
-          self.messages.push(tool_msg(
+          self.push_msg(tool_msg(
             format!(
               "Clarification needed:\n{}\n\nPlease resume with --resume to provide answers.",
               q_text
@@ -223,7 +226,7 @@ impl Agent {
             .filter(|tc| tc.function.name == "interview")
             .skip(1)
           {
-            self.messages.push(tool_msg(
+            self.push_msg(tool_msg(
               "ERROR: another interview is already in progress.".to_string(),
               tc.id.clone(),
             ));
@@ -411,7 +414,7 @@ impl Agent {
           {
             self.total_prompt += resp.usage.prompt_tokens;
             self.total_completion += resp.usage.completion_tokens;
-            self.messages.push(assistant_msg_full(
+            self.push_msg(assistant_msg_full(
               resp.content.clone(),
               resp.reasoning_content.clone(),
               resp.tool_calls.clone(),
@@ -422,7 +425,7 @@ impl Agent {
             continue;
           }
           if let Some(msg) = steer_msg {
-            self.messages.push(user_msg(msg.clone()));
+            self.push_msg(user_msg(msg.clone()));
             tui.log.push(format!("[steer] {}", truncate(&msg, 200)));
             turn += 1;
             continue;
@@ -441,7 +444,7 @@ impl Agent {
       {
         self.total_prompt += resp.usage.prompt_tokens;
         self.total_completion += resp.usage.completion_tokens;
-        self.messages.push(assistant_msg_full(
+        self.push_msg(assistant_msg_full(
           resp.content.clone(),
           resp.reasoning_content.clone(),
           resp.tool_calls.clone(),
@@ -484,9 +487,7 @@ impl Agent {
             results.extend(run_read_only_batch(&read_only_batch).await?);
           }
           for (tc, r) in other_calls.iter().zip(results.iter()) {
-            self
-              .messages
-              .push(tool_msg(r.output.clone(), tc.id.clone()));
+            self.push_msg(tool_msg(r.output.clone(), tc.id.clone()));
           }
           self.record_task_tracking_turn(&results);
         }
@@ -500,11 +501,9 @@ impl Agent {
           ) {
             Ok(a) => a,
             Err(e) => {
-              self
-                .messages
-                .push(tool_msg(format!("ERROR: {e}"), first.id.clone()));
+              self.push_msg(tool_msg(format!("ERROR: {e}"), first.id.clone()));
               for ic in interview_calls.iter().skip(1) {
-                self.messages.push(tool_msg(
+                self.push_msg(tool_msg(
                   "ERROR: another interview is already in progress.".to_string(),
                   ic.id.clone(),
                 ));
@@ -565,9 +564,9 @@ impl Agent {
               .collect::<Vec<_>>()
               .join("\n\n")
           );
-          self.messages.push(tool_msg(result, first.id.clone()));
+          self.push_msg(tool_msg(result, first.id.clone()));
           for ic in interview_calls.iter().skip(1) {
-            self.messages.push(tool_msg(
+            self.push_msg(tool_msg(
               "ERROR: another interview is already in progress.".to_string(),
               ic.id.clone(),
             ));
@@ -642,10 +641,10 @@ impl Agent {
     let mut pushed_worker_status = false;
     if let Some(msg) = self.worker_manager.status_message().await {
       if let Some(log) = ui_log {
-        self.messages.push(user_msg(msg.clone()));
+        self.push_msg(user_msg(msg.clone()));
         log.push(format!("[workers] {}", truncate(&msg, 200)));
       } else {
-        self.messages.push(user_msg(msg));
+        self.push_msg(user_msg(msg));
       }
       pushed_worker_status = true;
       *has_more = true;
@@ -655,9 +654,7 @@ impl Agent {
       self.push_task_tracking_reminder();
       self.push_turn_budget_reminder(max_turns, turn + 1);
       if auto_continue && !self.compact.compacting && !pushed_worker_status {
-        self
-          .messages
-          .push(user_msg(AUTO_CONTINUE_REMINDER.to_string()));
+        self.push_msg(user_msg(AUTO_CONTINUE_REMINDER.to_string()));
       }
     }
     Ok(false)
@@ -671,7 +668,13 @@ impl Agent {
   ) -> Result<SteerAction, AgentError> {
     match event {
       SteerEvent::Message(content) => {
-        self.messages.push(user_msg(content.clone()));
+        if self.meta.prompt.is_none() {
+          self.meta.prompt = Some(content.clone());
+        }
+        if self.meta.start_ts.is_none() {
+          self.meta.start_ts = Some(session::timestamp_ms());
+        }
+        self.push_msg(user_msg(content.clone()));
         tui.log.push(format!("[user] {}", truncate(&content, 200)));
       }
       SteerEvent::Auto => {
@@ -691,7 +694,7 @@ impl Agent {
         let has_assistant = self.messages.iter().any(|m| m.role == "assistant");
         if has_assistant {
           let content = MANUAL_COMPLETE_REMINDER.to_string();
-          self.messages.push(user_msg(content.clone()));
+          self.push_msg(user_msg(content.clone()));
           tui.log.push("[steer] complete requested");
         } else {
           tui
@@ -700,9 +703,27 @@ impl Agent {
         }
       }
       SteerEvent::New => {
+        if self.dirty {
+          self.meta.usage.prompt_tokens = self.total_prompt;
+          self.meta.usage.completion_tokens = self.total_completion;
+          session::write_meta(&self.meta)?;
+          session::persist_session(&self.messages, &self.meta.session_id)?;
+        }
+        let old_id = self.meta.session_id.clone();
+        self.meta.session_id = session::generate_session_id();
+        self.meta.parent_session = Some(old_id);
+        self.meta.turn = 0;
+        self.meta.usage = session::SessionUsage {
+          prompt_tokens: 0,
+          completion_tokens: 0,
+        };
+        self.meta.prompt = None;
+        self.meta.start_ts = None;
+        self.meta.end_ts = None;
         let mut messages = crate::prompts::build_10x_coder_messages("");
         let workflow_state = crate::prompts::enrich_initial_messages(&mut messages);
         self.messages = messages;
+        self.dirty = false;
         self.workflow_state = workflow_state;
         self.total_prompt = 0;
         self.total_completion = 0;
@@ -732,6 +753,7 @@ impl Agent {
     resp: ChatResponse,
     ui_log: Option<&crate::tui::UiLog>,
   ) -> Result<bool, AgentError> {
+    self.meta.end_ts = Some(session::timestamp_ms());
     self.total_prompt += resp.usage.prompt_tokens;
     self.total_completion += resp.usage.completion_tokens;
     if !resp.reasoning_content.is_empty() {
@@ -753,7 +775,7 @@ impl Agent {
     }
 
     if resp.tool_calls.is_empty() {
-      self.messages.push(assistant_msg_with_reasoning(
+      self.push_msg(assistant_msg_with_reasoning(
         resp.content.clone(),
         resp.reasoning_content,
       ));
@@ -781,7 +803,7 @@ impl Agent {
     &mut self,
     resp: &ChatResponse,
   ) -> Result<Vec<ToolResult>, AgentError> {
-    self.messages.push(assistant_msg_full(
+    self.push_msg(assistant_msg_full(
       resp.content.clone(),
       resp.reasoning_content.clone(),
       resp.tool_calls.clone(),
@@ -819,9 +841,7 @@ impl Agent {
     }
 
     for (tc, r) in resp.tool_calls.iter().zip(results.iter()) {
-      self
-        .messages
-        .push(tool_msg(r.output.clone(), tc.id.clone()));
+      self.push_msg(tool_msg(r.output.clone(), tc.id.clone()));
     }
     self.record_task_tracking_turn(&results);
     Ok(results)
@@ -867,7 +887,7 @@ impl Agent {
         "Context budget at {pct}%.\nEXHAUSTED.\nDo not write more files, delegate, or start new work.\nCall `handoff` IMMEDIATELY with completed files, current state, verification state, blockers, and next steps."
       ),
     };
-    self.messages.push(user_msg(format!(
+    self.push_msg(user_msg(format!(
       "<system_reminder urgency=\"{}\" kind=\"context_budget\">\n{body}\n</system_reminder>",
       self.compact.urgency
     )));
@@ -903,6 +923,7 @@ impl Agent {
         "## Previous Session Handoff\n\n{stripped}\n\nPlease process this handoff brief and continue the work."
       )),
     ];
+    self.dirty = false;
     self.meta.usage.prompt_tokens = self.total_prompt;
     self.meta.usage.completion_tokens = self.total_completion;
     session::write_meta(&self.meta)?;
@@ -956,7 +977,7 @@ impl Agent {
     if let Some(tracker) = self.task_tracker.as_mut()
       && let Some(reminder) = tracker.take_reminder()
     {
-      self.messages.push(user_msg(reminder));
+      self.push_msg(user_msg(reminder));
     }
   }
 
@@ -965,7 +986,7 @@ impl Agent {
       return;
     }
     if let Some(reminder) = turn_budget_reminder(max_turns, turn) {
-      self.messages.push(user_msg(reminder));
+      self.push_msg(user_msg(reminder));
       self.last_turn_budget_reminder_turn = Some(turn);
     }
   }
@@ -1214,5 +1235,262 @@ mod turn_budget_tests {
     assert!(turn_budget_reminder(8, 4).is_none()); // would be 50% at remaining=4
     assert!(turn_budget_reminder(8, 6).is_some()); // remaining=3
     assert!(turn_budget_reminder(8, 8).is_some()); // remaining=1
+  }
+}
+
+#[cfg(test)]
+mod dirty_state_machine_tests {
+  use super::*;
+
+  fn dummy_client() -> Client {
+    Client::new(
+      "http://localhost",
+      "dummy".into(),
+      0,
+      |_, _| serde_json::Value::Null,
+      30,
+    )
+    .unwrap()
+  }
+
+  fn dummy_meta() -> session::SessionMeta {
+    session::SessionMeta {
+      session_id: "test-session".into(),
+      parent_session: None,
+      profile: "test".into(),
+      mode: "steer".into(),
+      max_turns: -1,
+      turn: 0,
+      flags: session::SessionFlags {
+        steer: true,
+        auto: false,
+        worker: false,
+        autocompact: -1,
+        handoff: false,
+        retry: 0,
+        continue_flag: false,
+        resume: false,
+      },
+      usage: session::SessionUsage {
+        prompt_tokens: 0,
+        completion_tokens: 0,
+      },
+      prompt: None,
+      start_ts: None,
+      end_ts: None,
+    }
+  }
+
+  fn dummy_agent() -> Agent {
+    Agent::new(
+      dummy_client(),
+      crate::prompts::build_10x_coder_messages(""),
+      Vec::new(),
+      CompactState::disabled(),
+      None,
+      None,
+      dummy_meta(),
+    )
+  }
+
+  #[test]
+  fn agent_starts_clean() {
+    let agent = dummy_agent();
+    assert!(!agent.dirty);
+  }
+
+  #[test]
+  fn push_msg_sets_dirty() {
+    let mut agent = dummy_agent();
+    agent.push_msg(user_msg("hello"));
+    assert!(agent.dirty);
+    assert_eq!(agent.messages.len(), 3); // system + initial user + "hello"
+  }
+
+  #[tokio::test]
+  async fn first_message_sets_prompt_and_start_ts() {
+    let mut agent = dummy_agent();
+    let tui = crate::tui::TuiHandle::test_handle();
+    let action = agent
+      .apply_steer_event(SteerEvent::Message("fix bug".into()), &mut false, &tui)
+      .await
+      .unwrap();
+    assert!(matches!(action, SteerAction::Continue));
+    assert!(agent.dirty);
+    assert_eq!(agent.meta.prompt, Some("fix bug".into()));
+    assert!(agent.meta.start_ts.is_some());
+  }
+
+  #[tokio::test]
+  async fn second_message_preserves_prompt() {
+    let mut agent = dummy_agent();
+    let tui = crate::tui::TuiHandle::test_handle();
+    agent
+      .apply_steer_event(SteerEvent::Message("fix bug".into()), &mut false, &tui)
+      .await
+      .unwrap();
+    let start_ts = agent.meta.start_ts;
+    agent
+      .apply_steer_event(SteerEvent::Message("more context".into()), &mut false, &tui)
+      .await
+      .unwrap();
+    assert_eq!(agent.meta.prompt, Some("fix bug".into()));
+    assert_eq!(agent.meta.start_ts, start_ts);
+  }
+
+  #[tokio::test]
+  async fn auto_on_clean_stays_clean() {
+    let mut agent = dummy_agent();
+    let tui = crate::tui::TuiHandle::test_handle();
+    let mut auto = false;
+    let action = agent
+      .apply_steer_event(SteerEvent::Auto, &mut auto, &tui)
+      .await
+      .unwrap();
+    assert!(matches!(action, SteerAction::Continue));
+    assert!(!agent.dirty);
+    assert!(auto);
+  }
+
+  #[tokio::test]
+  async fn stop_on_dirty_stays_dirty() {
+    let mut agent = dummy_agent();
+    let tui = crate::tui::TuiHandle::test_handle();
+    let mut auto = true;
+    agent.push_msg(user_msg("hello"));
+    let action = agent
+      .apply_steer_event(SteerEvent::Stop, &mut auto, &tui)
+      .await
+      .unwrap();
+    assert!(matches!(action, SteerAction::Continue));
+    assert!(agent.dirty);
+    assert!(!auto);
+  }
+
+  #[tokio::test]
+  async fn cancel_does_not_change_dirty() {
+    let mut agent = dummy_agent();
+    let tui = crate::tui::TuiHandle::test_handle();
+    let action = agent
+      .apply_steer_event(SteerEvent::Cancel, &mut false, &tui)
+      .await
+      .unwrap();
+    assert!(matches!(action, SteerAction::Continue));
+    assert!(!agent.dirty);
+  }
+
+  #[tokio::test]
+  async fn complete_on_empty_session_stays_clean() {
+    let mut agent = dummy_agent();
+    let tui = crate::tui::TuiHandle::test_handle();
+    let action = agent
+      .apply_steer_event(SteerEvent::Complete, &mut false, &tui)
+      .await
+      .unwrap();
+    assert!(matches!(action, SteerAction::Continue));
+    assert!(!agent.dirty);
+    assert_eq!(agent.messages.len(), 2); // no extra message pushed
+  }
+
+  #[tokio::test]
+  async fn complete_with_assistant_makes_dirty() {
+    let mut agent = dummy_agent();
+    let tui = crate::tui::TuiHandle::test_handle();
+    agent.push_msg(assistant_msg_with_reasoning("ok", ""));
+    assert!(agent.dirty);
+    let action = agent
+      .apply_steer_event(SteerEvent::Complete, &mut false, &tui)
+      .await
+      .unwrap();
+    assert!(matches!(action, SteerAction::Continue));
+    assert!(agent.dirty);
+    assert_eq!(agent.messages.len(), 4); // system + user + assistant + complete reminder
+  }
+
+  #[tokio::test]
+  async fn exit_returns_exit_action() {
+    let mut agent = dummy_agent();
+    let tui = crate::tui::TuiHandle::test_handle();
+    let action = agent
+      .apply_steer_event(SteerEvent::Exit, &mut false, &tui)
+      .await
+      .unwrap();
+    assert!(matches!(action, SteerAction::Exit));
+  }
+
+  #[tokio::test]
+  async fn new_on_clean_resets_without_files() {
+    let mut agent = dummy_agent();
+    let tui = crate::tui::TuiHandle::test_handle();
+    let old_id = agent.meta.session_id.clone();
+    let action = agent
+      .apply_steer_event(SteerEvent::New, &mut false, &tui)
+      .await
+      .unwrap();
+    assert!(matches!(action, SteerAction::Restart));
+    assert!(!agent.dirty);
+    assert_eq!(agent.meta.prompt, None);
+    assert_eq!(agent.meta.start_ts, None);
+    assert_eq!(agent.meta.end_ts, None);
+    assert_eq!(agent.meta.parent_session, Some(old_id.clone()));
+    assert_ne!(agent.meta.session_id, old_id);
+  }
+
+  #[tokio::test]
+  async fn new_on_dirty_persists_old_then_resets() {
+    let mut agent = dummy_agent();
+    let tui = crate::tui::TuiHandle::test_handle();
+    agent.push_msg(user_msg("hello"));
+    let old_id = agent.meta.session_id.clone();
+
+    let action = agent
+      .apply_steer_event(SteerEvent::New, &mut false, &tui)
+      .await
+      .unwrap();
+    assert!(matches!(action, SteerAction::Restart));
+
+    // old session should have been persisted
+    let old_dir = session::session_dir(&old_id);
+    assert!(
+      old_dir.join("meta.json").exists(),
+      "old meta should be persisted"
+    );
+    assert!(
+      old_dir.join("messages.jsonl").exists(),
+      "old messages should be persisted"
+    );
+
+    // new session should be clean
+    assert!(!agent.dirty);
+    assert_eq!(agent.meta.prompt, None);
+    assert_eq!(agent.meta.start_ts, None);
+    assert_eq!(agent.meta.end_ts, None);
+    assert_eq!(agent.meta.parent_session, Some(old_id.clone()));
+    assert_ne!(agent.meta.session_id, old_id);
+
+    // clean up
+    let _ = std::fs::remove_dir_all(&old_dir);
+  }
+
+  #[test]
+  fn handle_turn_response_sets_end_ts() {
+    let mut agent = dummy_agent();
+    assert_eq!(agent.meta.end_ts, None);
+    let resp = ChatResponse {
+      content: "ok".into(),
+      reasoning_content: "".into(),
+      tool_calls: Vec::new(),
+      usage: crate::types::Usage {
+        prompt_tokens: 10,
+        completion_tokens: 5,
+        total_tokens: 15,
+      },
+    };
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(async {
+      agent.handle_turn_response(resp).await.unwrap();
+    });
+    assert!(agent.meta.end_ts.is_some());
+    assert!(agent.dirty);
   }
 }

@@ -16,6 +16,12 @@ pub struct SessionMeta {
   pub turn: i32,
   pub flags: SessionFlags,
   pub usage: SessionUsage,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub prompt: Option<String>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub start_ts: Option<u64>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub end_ts: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -181,4 +187,94 @@ pub fn timestamp() -> String {
     .unwrap_or_default()
     .as_secs()
     .to_string()
+}
+
+pub fn timestamp_ms() -> u64 {
+  use std::time::{SystemTime, UNIX_EPOCH};
+  SystemTime::now()
+    .duration_since(UNIX_EPOCH)
+    .unwrap_or_default()
+    .as_millis() as u64
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn meta_serializes_new_fields() {
+    let meta = SessionMeta {
+      session_id: "abc".into(),
+      parent_session: None,
+      profile: "ds-pro".into(),
+      mode: "steer".into(),
+      max_turns: 10,
+      turn: 1,
+      flags: SessionFlags {
+        steer: true,
+        auto: false,
+        worker: false,
+        autocompact: -1,
+        handoff: false,
+        retry: 5,
+        continue_flag: false,
+        resume: false,
+      },
+      usage: SessionUsage {
+        prompt_tokens: 100,
+        completion_tokens: 50,
+      },
+      prompt: Some("fix bug".into()),
+      start_ts: Some(1234567890),
+      end_ts: Some(1234567999),
+    };
+    let json = serde_json::to_string_pretty(&meta).unwrap();
+    assert!(json.contains("\"prompt\""));
+    assert!(json.contains("\"fix bug\""));
+    assert!(json.contains("\"start_ts\""));
+    assert!(json.contains("1234567890"));
+    assert!(json.contains("\"end_ts\""));
+    assert!(json.contains("1234567999"));
+  }
+
+  #[test]
+  fn meta_omits_none_fields() {
+    let meta = SessionMeta {
+      session_id: "abc".into(),
+      parent_session: None,
+      profile: "ds-pro".into(),
+      mode: "steer".into(),
+      max_turns: 10,
+      turn: 0,
+      flags: SessionFlags {
+        steer: true,
+        auto: false,
+        worker: false,
+        autocompact: -1,
+        handoff: false,
+        retry: 5,
+        continue_flag: false,
+        resume: false,
+      },
+      usage: SessionUsage {
+        prompt_tokens: 0,
+        completion_tokens: 0,
+      },
+      prompt: None,
+      start_ts: None,
+      end_ts: None,
+    };
+    let json = serde_json::to_string_pretty(&meta).unwrap();
+    assert!(!json.contains("\"prompt\""));
+    assert!(!json.contains("\"start_ts\""));
+    assert!(!json.contains("\"end_ts\""));
+  }
+
+  #[test]
+  fn timestamp_ms_increases() {
+    let a = timestamp_ms();
+    std::thread::sleep(std::time::Duration::from_millis(2));
+    let b = timestamp_ms();
+    assert!(b > a);
+  }
 }
