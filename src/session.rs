@@ -225,8 +225,8 @@ mod tests {
         completion_tokens: 50,
       },
       prompt: Some("fix bug".into()),
-      start_ts: Some(1234567890),
-      end_ts: Some(1234567999),
+      start_ts: Some(1_234_567_890),
+      end_ts: Some(1_234_567_999),
     };
     let json = serde_json::to_string_pretty(&meta).unwrap();
     assert!(json.contains("\"prompt\""));

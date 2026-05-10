@@ -24,8 +24,8 @@ pub enum ClientError {
 impl ClientError {
   pub fn is_retryable(&self) -> bool {
     match self {
-      ClientError::ApiError { status, .. } => matches!(status, 429 | 500 | 502 | 503 | 504),
-      ClientError::Http(e) => e.is_connect() || e.is_timeout(),
+      Self::ApiError { status, .. } => matches!(status, 429 | 500 | 502 | 503 | 504),
+      Self::Http(e) => e.is_connect() || e.is_timeout(),
       _ => false,
     }
   }

@@ -59,7 +59,7 @@ async fn main() -> Result<()> {
   let client = providers::new_client(profile, args.retry)?;
   let compact = if args.autocompact >= 0 {
     CompactState::new(
-      args.autocompact as f64 / 100.0,
+      f64::from(args.autocompact) / 100.0,
       args.handoff,
       profile.context_limit,
     )

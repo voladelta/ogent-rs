@@ -23,7 +23,7 @@ pub async fn execute_tool(mut ctx: ToolContext<'_>, name: &str, args: &str) -> R
     "read_file" => read_file(args),
     "write_file" => write_file(args),
     "bash" => bash(args).await,
-    "repo_map" => repo_map(args).await,
+    "repo_map" => repo_map(args),
     "read_hash_anchors" => read_hash_anchors(args),
     "edit_hash_anchors" => edit_hash_anchors(args),
     "web_search" => web_search(args).await,
@@ -404,7 +404,7 @@ struct RepoMapArgs {
   levels: usize,
 }
 
-async fn repo_map(args: &str) -> Result<String> {
+fn repo_map(args: &str) -> Result<String> {
   let args: RepoMapArgs = parse_args(args)?;
   let rel = if args.path.is_empty() {
     "."

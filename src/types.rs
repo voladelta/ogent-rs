@@ -37,7 +37,7 @@ pub struct Tool {
   pub function: ToolFunction,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ToolFunction {
   pub name: String,
   pub description: String,

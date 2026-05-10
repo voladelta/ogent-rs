@@ -385,10 +385,6 @@ fn run_ui_loop(
                   follow_bottom = true;
                 }
               }
-              KeyCode::Home | KeyCode::End => {
-                let input = key_event_to_input(&key);
-                textarea.input(input);
-              }
               _ => {
                 let input = key_event_to_input(&key);
                 textarea.input(input);
@@ -489,7 +485,7 @@ impl FileSelector {
       self.filtered_cache.clear();
       self
         .filtered_cache
-        .extend(matches.into_iter().map(|(s, _)| s.to_string()));
+        .extend(matches.into_iter().map(|(s, _)| s.clone()));
     }
   }
 
@@ -521,15 +517,13 @@ fn collect_files_recursive(root: &std::path::Path, dir: &std::path::Path, files:
       }
       if path.is_dir() {
         match name_str.as_ref() {
-          "target" | "node_modules" | "__pycache__" | "build" | "dist" | "out" => continue,
+          "target" | "node_modules" | "__pycache__" | "build" | "dist" | "out" => {}
           _ => collect_files_recursive(root, &path, files),
         }
-      } else {
-        if let Ok(rel) = path.strip_prefix(root) {
-          let rel_str = rel.to_string_lossy().replace('\\', "/");
-          if !rel_str.is_empty() {
-            files.push(rel_str);
-          }
+      } else if let Ok(rel) = path.strip_prefix(root) {
+        let rel_str = rel.to_string_lossy().replace('\\', "/");
+        if !rel_str.is_empty() {
+          files.push(rel_str);
         }
       }
     }

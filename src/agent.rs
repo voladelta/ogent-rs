@@ -279,10 +279,7 @@ impl Agent {
       }
       let wait_baseline_len = self.messages.len();
       while let Ok(event) = tui.rx.try_recv() {
-        match self
-          .apply_steer_event(event, &mut auto_continue, &tui)
-          .await?
-        {
+        match self.apply_steer_event(event, &mut auto_continue, &tui)? {
           SteerAction::Exit => return Ok(self.messages.clone()),
           SteerAction::Restart => {
             turn = 1;
@@ -306,10 +303,7 @@ impl Agent {
         let Some(event) = tui.rx.recv().await else {
           continue;
         };
-        match self
-          .apply_steer_event(event, &mut auto_continue, &tui)
-          .await?
-        {
+        match self.apply_steer_event(event, &mut auto_continue, &tui)? {
           SteerAction::Exit => return Ok(self.messages.clone()),
           SteerAction::Restart => {
             turn = 1;
@@ -373,7 +367,7 @@ impl Agent {
               }
               SteerEvent::New => {
                 cancel.cancel();
-                self.apply_steer_event(SteerEvent::New, &mut auto_continue, &tui).await?;
+                self.apply_steer_event(SteerEvent::New, &mut auto_continue, &tui)?;
                 chat.abort();
                 turn = 1;
                 wait_for_input = true;
@@ -387,7 +381,7 @@ impl Agent {
                 return Ok(self.messages.clone());
               }
               other => {
-                match self.apply_steer_event(other, &mut auto_continue, &tui).await? {
+                match self.apply_steer_event(other, &mut auto_continue, &tui)? {
                   SteerAction::Exit => {
                     cancel.cancel();
                     chat.abort();
@@ -533,9 +527,7 @@ impl Agent {
                 }
                 Some(SteerEvent::Exit) => return Ok(self.messages.clone()),
                 Some(SteerEvent::New) => {
-                  self
-                    .apply_steer_event(SteerEvent::New, &mut auto_continue, &tui)
-                    .await?;
+                  self.apply_steer_event(SteerEvent::New, &mut auto_continue, &tui)?;
                   turn = 1;
                   wait_for_input = true;
                   tui
@@ -666,7 +658,7 @@ impl Agent {
     Ok(false)
   }
 
-  async fn apply_steer_event(
+  fn apply_steer_event(
     &mut self,
     event: SteerEvent,
     auto_continue: &mut bool,
@@ -700,7 +692,7 @@ impl Agent {
         let has_assistant = self.messages.iter().any(|m| m.role == "assistant");
         if has_assistant {
           let content = MANUAL_COMPLETE_REMINDER.to_string();
-          self.push_msg(user_msg(content.clone()));
+          self.push_msg(user_msg(content));
           tui.log.push("[steer] complete requested");
         } else {
           tui
@@ -1514,7 +1506,7 @@ mod dirty_state_machine_tests {
     assert_eq!(agent.meta.end_ts, None);
     let resp = ChatResponse {
       content: "ok".into(),
-      reasoning_content: "".into(),
+      reasoning_content: String::new(),
       tool_calls: Vec::new(),
       usage: crate::types::Usage {
         prompt_tokens: 10,
