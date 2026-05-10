@@ -936,6 +936,9 @@ impl Agent {
       prompt_tokens: 0,
       completion_tokens: 0,
     };
+    self.meta.prompt = None;
+    self.meta.start_ts = None;
+    self.meta.end_ts = None;
     session::write_meta(&self.meta)?;
     self.push_task_tracking_reminder();
     self.compact.compacting = false;
@@ -1241,6 +1244,9 @@ mod turn_budget_tests {
 #[cfg(test)]
 mod dirty_state_machine_tests {
   use super::*;
+  use std::sync::atomic::{AtomicU64, Ordering};
+
+  static TEST_SESSION_COUNTER: AtomicU64 = AtomicU64::new(0);
 
   fn dummy_client() -> Client {
     Client::new(
@@ -1254,8 +1260,9 @@ mod dirty_state_machine_tests {
   }
 
   fn dummy_meta() -> session::SessionMeta {
+    let id = TEST_SESSION_COUNTER.fetch_add(1, Ordering::SeqCst);
     session::SessionMeta {
-      session_id: "test-session".into(),
+      session_id: format!("test-session-{id}"),
       parent_session: None,
       profile: "test".into(),
       mode: "steer".into(),
@@ -1492,5 +1499,76 @@ mod dirty_state_machine_tests {
     });
     assert!(agent.meta.end_ts.is_some());
     assert!(agent.dirty);
+  }
+
+  #[tokio::test]
+  async fn handoff_normal_persists_old_and_resets_meta() {
+    let mut agent = dummy_agent();
+    agent.push_msg(user_msg("hello"));
+    agent.meta.prompt = Some("test prompt".into());
+    agent.meta.start_ts = Some(1000);
+    agent.meta.end_ts = Some(2000);
+    let old_id = agent.meta.session_id.clone();
+
+    let handoff_path = ".ogent/handoffs/test-handoff.md";
+    std::fs::create_dir_all(".ogent/handoffs").ok();
+    std::fs::write(handoff_path, "# Handoff\n\nstate: done\n").unwrap();
+    agent.compact.last_handoff_path = handoff_path.into();
+    agent.compact.exit_after = false;
+
+    let should_exit = agent.handle_handoff().await.unwrap();
+    assert!(!should_exit);
+
+    // old session persisted
+    let old_dir = session::session_dir(&old_id);
+    assert!(old_dir.join("meta.json").exists());
+    assert!(old_dir.join("messages.jsonl").exists());
+
+    // new session is clean with reset meta
+    assert!(!agent.dirty);
+    assert_eq!(agent.meta.prompt, None);
+    assert_eq!(agent.meta.start_ts, None);
+    assert_eq!(agent.meta.end_ts, None);
+    assert_eq!(agent.meta.parent_session, Some(old_id.clone()));
+    assert_ne!(agent.meta.session_id, old_id);
+    assert_eq!(agent.messages.len(), 2); // system + handoff user
+
+    // clean up
+    let _ = std::fs::remove_dir_all(&old_dir);
+    let _ = std::fs::remove_file(handoff_path);
+  }
+
+  #[tokio::test]
+  async fn handoff_exit_after_writes_meta_and_returns_true() {
+    let mut agent = dummy_agent();
+    agent.push_msg(user_msg("hello"));
+    agent.total_prompt = 100;
+    agent.total_completion = 50;
+    let old_id = agent.meta.session_id.clone();
+
+    let handoff_path = ".ogent/handoffs/test-handoff-exit.md";
+    std::fs::create_dir_all(".ogent/handoffs").ok();
+    std::fs::write(handoff_path, "# Handoff\n").unwrap();
+    agent.compact.last_handoff_path = handoff_path.into();
+    agent.compact.exit_after = true;
+
+    let should_exit = agent.handle_handoff().await.unwrap();
+    assert!(should_exit);
+
+    // session persisted with updated usage
+    let dir = session::session_dir(&old_id);
+    assert!(dir.join("meta.json").exists());
+    let meta = session::read_meta(&old_id).unwrap();
+    assert_eq!(meta.usage.prompt_tokens, 100);
+    assert_eq!(meta.usage.completion_tokens, 50);
+
+    // meta fields preserved (not a new session)
+    assert_eq!(meta.prompt, None); // dummy_agent starts with None
+    assert_eq!(agent.meta.session_id, old_id);
+    assert!(agent.dirty); // still dirty from before
+
+    // clean up
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_file(handoff_path);
   }
 }
