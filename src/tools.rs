@@ -206,6 +206,7 @@ pub fn is_read_only_tool(name: &str) -> bool {
       | "web_read"
       | "code_web_context"
       | "load_worker_template"
+      | "load_skill"
   )
 }
 
@@ -393,23 +394,6 @@ async fn bash(args: &str) -> Result<String> {
       }
       Ok(combined)
     }
-  }
-}
-
-#[cfg(test)]
-mod tests {
-  use super::*;
-
-  #[tokio::test]
-  async fn bash_error_includes_stdout_and_stderr() {
-    let err = bash(r#"{"command":"printf stdout; printf stderr >&2; exit 7"}"#)
-      .await
-      .expect_err("command should fail");
-    let msg = err.to_string();
-
-    assert!(msg.contains("exit status: 7"));
-    assert!(msg.contains("stdout"));
-    assert!(msg.contains("stderr"));
   }
 }
 
@@ -944,8 +928,8 @@ fn clean_strings(values: Vec<String>) -> Vec<String> {
 }
 
 #[cfg(test)]
-mod complete_tests {
-  use super::summary_has_limitation_and_intent;
+mod tests {
+  use super::*;
 
   #[test]
   fn summary_requires_limitation_and_intent() {
@@ -954,5 +938,209 @@ mod complete_tests {
     ));
     assert!(!summary_has_limitation_and_intent("## Limitation\nx"));
     assert!(!summary_has_limitation_and_intent("## Intent\ny"));
+  }
+
+  #[test]
+  fn is_read_only_tool_classification() {
+    assert!(is_read_only_tool("read_file"));
+    assert!(is_read_only_tool("read_hash_anchors"));
+    assert!(is_read_only_tool("repo_map"));
+    assert!(is_read_only_tool("web_search"));
+    assert!(is_read_only_tool("web_read"));
+    assert!(is_read_only_tool("code_web_context"));
+    assert!(is_read_only_tool("load_worker_template"));
+    assert!(is_read_only_tool("load_skill"));
+    assert!(!is_read_only_tool("write_file"));
+    assert!(!is_read_only_tool("edit_hash_anchors"));
+    assert!(!is_read_only_tool("bash"));
+    assert!(!is_read_only_tool("complete"));
+    assert!(!is_read_only_tool("handoff"));
+  }
+
+  #[test]
+  fn configured_coder_tools_includes_expected() {
+    let tools = configured_coder_tools(false);
+    let names: Vec<_> = tools.iter().map(|t| t.function.name.as_str()).collect();
+    assert!(names.contains(&"read_file"));
+    assert!(names.contains(&"write_file"));
+    assert!(names.contains(&"bash"));
+    assert!(names.contains(&"complete"));
+    assert!(names.contains(&"set_goal"));
+    assert!(names.contains(&"update_phase"));
+    assert!(names.contains(&"update_todo"));
+    assert!(names.contains(&"interview"));
+  }
+
+  #[test]
+  fn configured_worker_tools_excludes_coder_only() {
+    let tools = configured_worker_tools();
+    let names: Vec<_> = tools.iter().map(|t| t.function.name.as_str()).collect();
+    assert!(!names.contains(&"dispatch_worker"));
+    assert!(!names.contains(&"start_workers"));
+    assert!(!names.contains(&"check_workers"));
+    assert!(!names.contains(&"handoff"));
+    assert!(!names.contains(&"complete"));
+    assert!(!names.contains(&"set_goal"));
+    assert!(!names.contains(&"interview"));
+    assert!(names.contains(&"worker_clarify"));
+    assert!(names.contains(&"worker_complete"));
+    assert!(names.contains(&"read_file"));
+  }
+
+  #[test]
+  fn tool_names_unique_within_coder_tools() {
+    let tools = configured_coder_tools(false);
+    let mut seen = std::collections::HashSet::new();
+    for t in &tools {
+      assert!(
+        seen.insert(t.function.name.clone()),
+        "duplicate coder tool: {}",
+        t.function.name
+      );
+    }
+  }
+
+  #[test]
+  fn tool_names_unique_within_worker_tools() {
+    let tools = configured_worker_tools();
+    let mut seen = std::collections::HashSet::new();
+    for t in &tools {
+      assert!(
+        seen.insert(t.function.name.clone()),
+        "duplicate worker tool: {}",
+        t.function.name
+      );
+    }
+  }
+
+  #[tokio::test]
+  async fn execute_tool_unknown_returns_error() {
+    let result = execute_tool(ToolContext { agent: None }, "nonexistent_tool", "{}").await;
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("unknown tool"));
+  }
+
+  #[tokio::test]
+  async fn worker_clarify_returns_blocker_prefix() {
+    let result = execute_tool(
+      ToolContext { agent: None },
+      "worker_clarify",
+      r#"{"question":"help"}"#,
+    )
+    .await;
+    assert!(result.unwrap().contains("[BLOCKER]"));
+  }
+
+  #[test]
+  fn read_file_schema_has_path_required() {
+    let tools = configured_coder_tools(false);
+    let t = tools
+      .iter()
+      .find(|t| t.function.name == "read_file")
+      .unwrap();
+    let params = &t.function.parameters;
+    assert_eq!(params["type"], "object");
+    assert!(params["properties"]["path"].is_object());
+    let required: Vec<String> = serde_json::from_value(params["required"].clone()).unwrap();
+    assert!(required.contains(&"path".to_string()));
+  }
+
+  #[test]
+  fn edit_hash_anchors_schema_has_ops_array() {
+    let tools = configured_coder_tools(false);
+    let t = tools
+      .iter()
+      .find(|t| t.function.name == "edit_hash_anchors")
+      .unwrap();
+    let params = &t.function.parameters;
+    assert_eq!(params["properties"]["ops"]["type"], "array");
+    assert!(params["properties"]["ops"]["items"]["properties"]["anchor"].is_object());
+    let action = &params["properties"]["ops"]["items"]["properties"]["action"];
+    let enum_vals: Vec<String> = serde_json::from_value(action["enum"].clone()).unwrap();
+    assert_eq!(enum_vals, vec!["replace", "before", "after"]);
+  }
+
+  #[test]
+  fn update_phase_schema_includes_contracts() {
+    let tools = configured_coder_tools(false);
+    let t = tools
+      .iter()
+      .find(|t| t.function.name == "update_phase")
+      .unwrap();
+    let params = &t.function.parameters;
+    assert!(params["properties"]["contracts"].is_object());
+    assert_eq!(params["properties"]["contracts"]["type"], "array");
+    let item = &params["properties"]["contracts"]["items"];
+    assert!(item["properties"]["id"].is_object());
+    assert!(item["properties"]["assertion"].is_object());
+    let required: Vec<String> = serde_json::from_value(item["required"].clone()).unwrap();
+    assert!(required.contains(&"id".to_string()));
+    assert!(required.contains(&"assertion".to_string()));
+  }
+
+  #[test]
+  fn bash_schema_has_command_and_timeout() {
+    let tools = configured_coder_tools(false);
+    let t = tools.iter().find(|t| t.function.name == "bash").unwrap();
+    let params = &t.function.parameters;
+    assert!(params["properties"]["command"].is_object());
+    assert!(params["properties"]["timeout_seconds"].is_object());
+    let required: Vec<String> = serde_json::from_value(params["required"].clone()).unwrap();
+    assert!(required.contains(&"command".to_string()));
+  }
+
+  #[test]
+  fn dispatch_worker_schema_has_system_prompt_and_task() {
+    let tools = configured_coder_tools(false);
+    let t = tools
+      .iter()
+      .find(|t| t.function.name == "dispatch_worker")
+      .unwrap();
+    let params = &t.function.parameters;
+    assert!(params["properties"]["system_prompt"].is_object());
+    assert!(params["properties"]["task"].is_object());
+    let required: Vec<String> = serde_json::from_value(params["required"].clone()).unwrap();
+    assert!(required.contains(&"system_prompt".to_string()));
+    assert!(required.contains(&"task".to_string()));
+  }
+
+  #[test]
+  fn complete_schema_has_summary_required() {
+    let tools = configured_coder_tools(false);
+    let t = tools
+      .iter()
+      .find(|t| t.function.name == "complete")
+      .unwrap();
+    let params = &t.function.parameters;
+    assert!(params["properties"]["summary"].is_object());
+    let required: Vec<String> = serde_json::from_value(params["required"].clone()).unwrap();
+    assert!(required.contains(&"summary".to_string()));
+  }
+
+  #[test]
+  fn interview_schema_has_questions_array() {
+    let tools = configured_coder_tools(false);
+    let t = tools
+      .iter()
+      .find(|t| t.function.name == "interview")
+      .unwrap();
+    let params = &t.function.parameters;
+    assert_eq!(params["properties"]["questions"]["type"], "array");
+    assert_eq!(params["properties"]["questions"]["items"]["type"], "string");
+    assert_eq!(params["properties"]["questions"]["minItems"], 1);
+    assert_eq!(params["properties"]["questions"]["maxItems"], 3);
+    let required: Vec<String> = serde_json::from_value(params["required"].clone()).unwrap();
+    assert!(required.contains(&"questions".to_string()));
+  }
+
+  #[tokio::test]
+  async fn bash_error_includes_stdout_and_stderr() {
+    let err = bash(r#"{"command":"printf stdout; printf stderr >&2; exit 7"}"#)
+      .await
+      .expect_err("command should fail");
+    let msg = err.to_string();
+    assert!(msg.contains("exit status: 7"));
+    assert!(msg.contains("stdout"));
+    assert!(msg.contains("stderr"));
   }
 }

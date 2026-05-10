@@ -557,4 +557,203 @@ mod tests {
     assert!(!stripped.contains(HANDOFF_STATE_START));
     assert!(stripped.contains("Runtime Task Tracking"));
   }
+
+  #[test]
+  fn update_phase_preserves_contracts_when_not_provided() {
+    let mut tracker = seed();
+    tracker.update_phase(PhaseUpdate {
+      id: "p1".into(),
+      title: "P1".into(),
+      status: Status::Pending,
+      complexity: Complexity::Simple,
+      notes: String::new(),
+      contracts: Some(vec![ValidationContract {
+        id: "c1".into(),
+        assertion: "a1".into(),
+        command: None,
+      }]),
+    });
+    tracker.update_phase(PhaseUpdate {
+      id: "p1".into(),
+      title: "P1".into(),
+      status: Status::InProgress,
+      complexity: Complexity::Simple,
+      notes: String::new(),
+      contracts: None,
+    });
+    assert_eq!(tracker.phases[0].contracts.len(), 1);
+    assert_eq!(tracker.phases[0].contracts[0].id, "c1");
+  }
+
+  #[test]
+  fn update_phase_overwrites_contracts_when_provided() {
+    let mut tracker = seed();
+    tracker.update_phase(PhaseUpdate {
+      id: "p1".into(),
+      title: "P1".into(),
+      status: Status::Pending,
+      complexity: Complexity::Simple,
+      notes: String::new(),
+      contracts: Some(vec![ValidationContract {
+        id: "c1".into(),
+        assertion: "a1".into(),
+        command: None,
+      }]),
+    });
+    tracker.update_phase(PhaseUpdate {
+      id: "p1".into(),
+      title: "P1".into(),
+      status: Status::Pending,
+      complexity: Complexity::Simple,
+      notes: String::new(),
+      contracts: Some(vec![ValidationContract {
+        id: "c2".into(),
+        assertion: "a2".into(),
+        command: None,
+      }]),
+    });
+    assert_eq!(tracker.phases[0].contracts.len(), 1);
+    assert_eq!(tracker.phases[0].contracts[0].id, "c2");
+  }
+
+  #[test]
+  fn update_todo_creates_and_updates_todo() {
+    let mut tracker = seed();
+    tracker.update_phase(PhaseUpdate {
+      id: "p1".into(),
+      title: "P1".into(),
+      status: Status::Pending,
+      complexity: Complexity::Simple,
+      notes: String::new(),
+      contracts: None,
+    });
+    tracker
+      .update_todo(TodoUpdate {
+        phase_id: "p1".into(),
+        id: "t1".into(),
+        title: "T1".into(),
+        status: Status::Pending,
+        complexity: Complexity::Simple,
+        notes: String::new(),
+      })
+      .unwrap();
+    assert_eq!(tracker.phases[0].todos.len(), 1);
+    assert_eq!(tracker.phases[0].todos[0].title, "T1");
+    tracker
+      .update_todo(TodoUpdate {
+        phase_id: "p1".into(),
+        id: "t1".into(),
+        title: "T1 Updated".into(),
+        status: Status::Completed,
+        complexity: Complexity::Medium,
+        notes: "done".into(),
+      })
+      .unwrap();
+    assert_eq!(tracker.phases[0].todos[0].title, "T1 Updated");
+    assert_eq!(tracker.phases[0].todos[0].status, Status::Completed);
+  }
+
+  #[test]
+  fn open_work_exists_with_open_phase() {
+    let mut tracker = seed();
+    tracker.goal.status = Status::Completed;
+    tracker.update_phase(PhaseUpdate {
+      id: "p1".into(),
+      title: "P1".into(),
+      status: Status::InProgress,
+      complexity: Complexity::Simple,
+      notes: String::new(),
+      contracts: None,
+    });
+    assert!(tracker.open_work_exists());
+    assert!(tracker.open_phase_or_todo_exists());
+  }
+
+  #[test]
+  fn open_work_exists_with_open_todo() {
+    let mut tracker = seed();
+    tracker.goal.status = Status::Completed;
+    tracker.update_phase(PhaseUpdate {
+      id: "p1".into(),
+      title: "P1".into(),
+      status: Status::Completed,
+      complexity: Complexity::Simple,
+      notes: String::new(),
+      contracts: None,
+    });
+    tracker
+      .update_todo(TodoUpdate {
+        phase_id: "p1".into(),
+        id: "t1".into(),
+        title: "T1".into(),
+        status: Status::Pending,
+        complexity: Complexity::Simple,
+        notes: String::new(),
+      })
+      .unwrap();
+    assert!(tracker.open_work_exists());
+    assert!(tracker.open_phase_or_todo_exists());
+  }
+
+  #[test]
+  fn open_work_exists_false_when_goal_skipped() {
+    let mut tracker = seed();
+    tracker.goal.status = Status::Skipped;
+    assert!(!tracker.open_work_exists());
+  }
+
+  #[test]
+  fn note_tool_turn_resets_stale_on_tracking_update() {
+    let mut tracker = seed();
+    tracker.note_tool_turn(false, true);
+    tracker.note_tool_turn(false, true);
+    tracker.note_tool_turn(true, false);
+    tracker.note_tool_turn(false, true);
+    let reminder = tracker.take_reminder().unwrap();
+    assert!(!reminder.contains("Stale"));
+  }
+
+  #[test]
+  fn take_reminder_returns_none_when_no_pending_and_not_stale() {
+    let mut tracker = seed();
+    tracker.take_reminder(); // consume initial
+    assert!(tracker.take_reminder().is_none());
+  }
+
+  #[test]
+  fn render_tool_snapshot_includes_goal_and_phases() {
+    let mut tracker = seed();
+    tracker.update_phase(PhaseUpdate {
+      id: "p1".into(),
+      title: "P1".into(),
+      status: Status::Pending,
+      complexity: Complexity::Simple,
+      notes: String::new(),
+      contracts: None,
+    });
+    let snapshot = tracker.render_tool_snapshot();
+    assert!(snapshot.contains("Ship runtime tracker"));
+    assert!(snapshot.contains("P1"));
+  }
+
+  #[test]
+  fn from_handoff_text_returns_none_when_no_state_block() {
+    assert!(TaskTracker::from_handoff_text("no state here").is_none());
+  }
+
+  #[test]
+  fn strip_handoff_state_block_returns_original_when_no_block() {
+    let text = "no state here";
+    assert_eq!(TaskTracker::strip_handoff_state_block(text), text);
+  }
+
+  #[test]
+  fn is_tracking_tool_name_matches() {
+    assert!(is_tracking_tool_name("set_goal"));
+    assert!(is_tracking_tool_name("revise_goal"));
+    assert!(is_tracking_tool_name("update_phase"));
+    assert!(is_tracking_tool_name("update_todo"));
+    assert!(!is_tracking_tool_name("read_file"));
+    assert!(!is_tracking_tool_name("interview"));
+  }
 }
