@@ -256,7 +256,12 @@ Anchor format from `read_hash_anchors`:
 <line-number>:<4-char-hash>|<line-content>
 ```
 
+The 4-char hash is derived from the line content, making anchors self-validating against stale reads.
+
 Pass only the `<line>:<hash>` portion. Valid: `15:af63`, `50:be01`. Invalid: `15`, `af63`.
+
+`end_anchor` turns a single-line `replace` into a range replacement (inclusive). `new_string` replaces the entire anchored line or range, not a substring.
+
 
 Rules:
 - do not edit unviewed files
@@ -265,7 +270,7 @@ Rules:
 - re-read anchors after any write/edit to that file
 - preserve existing logic unless change is required
 - never pass line content in the anchor
-- action is one of `replace`, `insert_before`, `insert_after`
+- action is one of `replace`, `insert_before`, `insert_after`; use `end_anchor` with `replace` for multi-line ranges
 
 ### Shell
 

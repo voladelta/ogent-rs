@@ -96,12 +96,12 @@ fn build_coder_tools() -> Vec<Tool> {
     ),
     schema(
       "read_hash_anchors",
-      "Read a file returning each line prefixed as line:hash|content.",
+      "Read a file returning each line prefixed as line:hash|content, where the 4-char hash is derived from the line content.",
       json!({"type":"object","properties":{"path":{"type":"string"},"start":{"type":"integer"},"end":{"type":"integer"}},"required":["path"],"additionalProperties":false}),
     ),
     schema(
       "edit_hash_anchors",
-      "Edit a file using hashline anchors from read_hash_anchors. Anchors MUST be in <line-number>:<4-char-hash> format (e.g., \"15:af63\"). Never pass just a line number or just a hash.",
+      "Edit a file using hashline anchors from read_hash_anchors. Anchors MUST be in <line-number>:<4-char-hash> format (e.g., \"15:af63\"). Never pass just a line number or just a hash. Use end_anchor for multi-line range replacement. new_string always replaces entire anchored line(s), not a substring.",
       json!({"type":"object","properties":{"path":{"type":"string"},"ops":{"type":"array","items":{"type":"object","properties":{"anchor":{"type":"string","description":"Anchor in <line-number>:<4-char-hash> format (e.g., 15:af63)"},"end_anchor":{"type":"string","description":"Optional end anchor in <line-number>:<4-char-hash> format for range replacement"},"action":{"type":"string","enum":["replace","insert_before","insert_after"]},"new_string":{"type":"string"}},"required":["anchor","action","new_string"]}}},"required":["path","ops"],"additionalProperties":false}),
     ),
     schema(
