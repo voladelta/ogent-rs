@@ -101,8 +101,8 @@ fn build_coder_tools() -> Vec<Tool> {
     ),
     schema(
       "edit_hash_anchors",
-      "Edit a file using hashline anchors from read_hash_anchors.",
-      json!({"type":"object","properties":{"path":{"type":"string"},"ops":{"type":"array","items":{"type":"object","properties":{"anchor":{"type":"string"},"end_anchor":{"type":"string"},"action":{"type":"string","enum":["replace","before","after"]},"new_string":{"type":"string"}},"required":["anchor","action","new_string"]}}},"required":["path","ops"],"additionalProperties":false}),
+      "Edit a file using hashline anchors from read_hash_anchors. Anchors MUST be in <line-number>:<4-char-hash> format (e.g., \"15:af63\"). Never pass just a line number or just a hash.",
+      json!({"type":"object","properties":{"path":{"type":"string"},"ops":{"type":"array","items":{"type":"object","properties":{"anchor":{"type":"string","description":"Anchor in <line-number>:<4-char-hash> format (e.g., 15:af63)"},"end_anchor":{"type":"string","description":"Optional end anchor in <line-number>:<4-char-hash> format for range replacement"},"action":{"type":"string","enum":["replace","before","after"]},"new_string":{"type":"string"}},"required":["anchor","action","new_string"]}}},"required":["path","ops"],"additionalProperties":false}),
     ),
     schema(
       "web_search",
@@ -320,7 +320,7 @@ fn check_bash_cds(command: &str) -> Result<()> {
   }
   let base = crate::workspace::workspace_root();
   for line in cmd.split('\n') {
-    let mut words = line.trim().split_whitespace();
+    let mut words = line.split_whitespace();
     if words.next() == Some("cd") {
       let path = words.next().unwrap_or("");
       if path.is_empty() {

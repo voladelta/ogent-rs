@@ -155,12 +155,13 @@ impl Agent {
       let resp = self.client.chat(&self.messages, &self.tools, None).await?;
 
       // Interview handling on turn 1 in non-steer mode
-      if turn == 1 && interview_on_first_turn {
-        if let Some(first) = resp
+      if turn == 1
+        && interview_on_first_turn
+        && let Some(first) = resp
           .tool_calls
           .iter()
           .find(|tc| tc.function.name == "interview")
-        {
+      {
           self.push_msg(assistant_msg_full(
             resp.content.clone(),
             resp.reasoning_content.clone(),
@@ -235,7 +236,6 @@ impl Agent {
           }
           self.report_tokens();
           return Ok(self.messages.clone());
-        }
       }
 
       let mut has_more = match self.handle_turn_response(resp).await {
@@ -585,12 +585,13 @@ impl Agent {
           .await?
       };
 
+      if self.completion_summary.is_some()
+        && !self.compact.last_handoff_path.is_empty()
+        && self.handle_handoff().await?
+      {
+        return Ok(self.messages.clone());
+      }
       if self.completion_summary.is_some() {
-        if !self.compact.last_handoff_path.is_empty() {
-          if self.handle_handoff().await? {
-            return Ok(self.messages.clone());
-          }
-        }
         tui
           .log
           .push("[steer] task complete; send a message to continue or /q to quit");

@@ -216,7 +216,7 @@ fn run_ui(
     EnableLineWrap,
     LeaveAlternateScreen
   )
-  .and_then(|_| terminal.show_cursor());
+  .and_then(|()| terminal.show_cursor());
   let _ = disable_raw_mode();
 
   result
@@ -322,11 +322,11 @@ fn run_ui_loop(
           } else {
             match key.code {
               KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                let _ = tx.send(SteerEvent::Exit);
+                tx.send(SteerEvent::Exit).ok();
                 break;
               }
               KeyCode::Esc => {
-                let _ = tx.send(SteerEvent::Exit);
+                tx.send(SteerEvent::Exit).ok();
                 break;
               }
               KeyCode::Char('@') => {
@@ -348,8 +348,7 @@ fn run_ui_loop(
                     follow_bottom = true;
                     let event = parse_steer_event(&text);
                     let exit = matches!(event, SteerEvent::Exit);
-                    let _ = tx.send(event);
-                    if exit {
+                    if tx.send(event).is_err() || exit {
                       break;
                     }
                   }

@@ -152,10 +152,10 @@ fn process_line(line: &str, result: &mut ChatResponse, acc: &mut Vec<AccToolCall
       if !tc.kind.is_empty() {
         a.kind = tc.kind;
       }
-      if let Some(name) = tc.function.name {
-        if !name.is_empty() {
-          a.name = name;
-        }
+      if let Some(name) = tc.function.name
+        && !name.is_empty()
+      {
+        a.name = name;
       }
       if let Some(args) = tc.function.arguments {
         a.arguments.push_str(&args);
