@@ -99,7 +99,7 @@ fn resolve_edit(lines: &[String], op: &EditOp) -> Result<ResolvedEdit> {
   let replacement = source_lines(&op.new_string);
   let start_idx = start.line - 1;
   Ok(match op.action.as_str() {
-    "before" | "insert_before" => {
+    "insert_before" => {
       if end.is_some() {
         bail!("insert edits cannot use end");
       }
@@ -110,7 +110,7 @@ fn resolve_edit(lines: &[String], op: &EditOp) -> Result<ResolvedEdit> {
         insert_mode: "before",
       }
     }
-    "after" | "insert_after" => {
+    "insert_after" => {
       if end.is_some() {
         bail!("insert edits cannot use end");
       }
@@ -127,7 +127,7 @@ fn resolve_edit(lines: &[String], op: &EditOp) -> Result<ResolvedEdit> {
       replacement,
       insert_mode: "",
     },
-    other => bail!("action must be replace, before, or after, got: {other}"),
+    other => bail!("action must be replace, insert_before, or insert_after, got: {other}"),
   })
 }
 
@@ -212,7 +212,7 @@ mod tests {
   #[test]
   fn edit_op_allows_missing_end_anchor_for_inserts() {
     let op: EditOp =
-      serde_json::from_str(r#"{"anchor":"1:a430","action":"after","new_string":"world"}"#)
+      serde_json::from_str(r#"{"anchor":"1:a430","action":"insert_after","new_string":"world"}"#)
         .expect("missing end_anchor should default to empty");
 
     assert!(op.end_anchor.is_empty());
