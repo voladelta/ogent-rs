@@ -688,9 +688,16 @@ impl Agent {
         tui.log.push("[steer] no in-flight request to cancel");
       }
       SteerEvent::Complete => {
-        let content = MANUAL_COMPLETE_REMINDER.to_string();
-        self.messages.push(user_msg(content.clone()));
-        tui.log.push("[steer] complete requested");
+        let has_assistant = self.messages.iter().any(|m| m.role == "assistant");
+        if has_assistant {
+          let content = MANUAL_COMPLETE_REMINDER.to_string();
+          self.messages.push(user_msg(content.clone()));
+          tui.log.push("[steer] complete requested");
+        } else {
+          tui
+            .log
+            .push("[steer] nothing to complete; session is empty");
+        }
       }
       SteerEvent::New => {
         let mut messages = crate::prompts::build_10x_coder_messages("");
