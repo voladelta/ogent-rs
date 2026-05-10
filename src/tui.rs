@@ -37,6 +37,7 @@ pub enum SteerEvent {
   Cancel,
   Complete,
   New,
+  Fork,
   Exit,
 }
 
@@ -444,6 +445,7 @@ pub fn parse_steer_event(line: &str) -> SteerEvent {
     "/cancel" => SteerEvent::Cancel,
     "/complete" => SteerEvent::Complete,
     "/new" => SteerEvent::New,
+    "/fork" => SteerEvent::Fork,
     "/q" | "/quit" | "quit" | "exit" => SteerEvent::Exit,
     other => SteerEvent::Message(other.to_string()),
   }
@@ -836,6 +838,7 @@ mod tests {
     assert_eq!(parse_steer_event("/cancel"), SteerEvent::Cancel);
     assert_eq!(parse_steer_event("/complete"), SteerEvent::Complete);
     assert_eq!(parse_steer_event("/new"), SteerEvent::New);
+    assert_eq!(parse_steer_event("/fork"), SteerEvent::Fork);
     assert_eq!(parse_steer_event("/q"), SteerEvent::Exit);
     assert_eq!(parse_steer_event("/quit"), SteerEvent::Exit);
     assert_eq!(parse_steer_event("quit"), SteerEvent::Exit);

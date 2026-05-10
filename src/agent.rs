@@ -71,6 +71,7 @@ pub struct Agent {
   last_turn_budget_reminder_turn: Option<i32>,
   pub meta: session::SessionMeta,
   pub dirty: bool,
+  pub next_turn_reset: bool,
 }
 
 pub struct ToolResult {
@@ -104,6 +105,7 @@ impl Agent {
       last_turn_budget_reminder_turn: None,
       meta,
       dirty: false,
+      next_turn_reset: false,
     }
   }
 
@@ -272,6 +274,10 @@ impl Agent {
     }
     let mut turn = 1;
     'outer: loop {
+      if self.next_turn_reset {
+        turn = 1;
+        self.next_turn_reset = false;
+      }
       let wait_baseline_len = self.messages.len();
       while let Ok(event) = tui.rx.try_recv() {
         match self
@@ -738,6 +744,29 @@ impl Agent {
         tui.status.set_turn_tokens(0, 0);
         tui.log.push("[steer] new session started");
         return Ok(SteerAction::Restart);
+      }
+      SteerEvent::Fork => {
+        if !self.dirty {
+          tui.log.push("[steer] nothing to fork; session is empty");
+        } else {
+          self.meta.usage.prompt_tokens = self.total_prompt;
+          self.meta.usage.completion_tokens = self.total_completion;
+          session::write_meta(&self.meta)?;
+          session::persist_session(&self.messages, &self.meta.session_id)?;
+          let parent_id = self.meta.session_id.clone();
+          self.meta.session_id = session::generate_session_id();
+          self.meta.parent_session = Some(parent_id.clone());
+          self.meta.start_ts = Some(session::timestamp_ms());
+          self.meta.end_ts = None;
+          self.next_turn_reset = true;
+          self.dirty = true;
+          session::write_meta(&self.meta)?;
+          session::persist_session(&self.messages, &self.meta.session_id)?;
+          tui.log.push(format!(
+            "[steer] forked to {}; parent is {}. Resume parent with --resume-session {}",
+            self.meta.session_id, parent_id, parent_id
+          ));
+        }
       }
       SteerEvent::Exit => return Ok(SteerAction::Exit),
     }
@@ -1570,5 +1599,62 @@ mod dirty_state_machine_tests {
     // clean up
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::remove_file(handoff_path);
+  }
+
+  #[tokio::test]
+  async fn fork_on_empty_is_noop() {
+    let mut agent = dummy_agent();
+    let tui = crate::tui::TuiHandle::test_handle();
+    let old_id = agent.meta.session_id.clone();
+    let action = agent
+      .apply_steer_event(SteerEvent::Fork, &mut false, &tui)
+      .await
+      .unwrap();
+    assert!(matches!(action, SteerAction::Continue));
+    assert!(!agent.dirty);
+    assert_eq!(agent.meta.session_id, old_id);
+    assert_eq!(agent.meta.parent_session, None);
+    assert!(!agent.next_turn_reset);
+  }
+
+  #[tokio::test]
+  async fn fork_persists_parent_and_creates_fork() {
+    let mut agent = dummy_agent();
+    let tui = crate::tui::TuiHandle::test_handle();
+    agent.push_msg(user_msg("hello"));
+    agent.meta.prompt = Some("test prompt".into());
+    agent.meta.start_ts = Some(1000);
+    agent.meta.end_ts = Some(2000);
+    let parent_id = agent.meta.session_id.clone();
+
+    let action = agent
+      .apply_steer_event(SteerEvent::Fork, &mut false, &tui)
+      .await
+      .unwrap();
+    assert!(matches!(action, SteerAction::Continue));
+
+    // parent persisted
+    let parent_dir = session::session_dir(&parent_id);
+    assert!(parent_dir.join("meta.json").exists());
+    assert!(parent_dir.join("messages.jsonl").exists());
+
+    // fork has new identity
+    assert!(agent.dirty);
+    assert!(agent.next_turn_reset);
+    assert_ne!(agent.meta.session_id, parent_id);
+    assert_eq!(agent.meta.parent_session, Some(parent_id.clone()));
+    assert_eq!(agent.meta.prompt, Some("test prompt".into()));
+    assert!(agent.meta.start_ts.unwrap() >= 1000); // fork time >= original start
+    assert_eq!(agent.meta.end_ts, None);
+    assert_eq!(agent.messages.len(), 3); // system + initial user + "hello"
+
+    // fork persisted immediately
+    let fork_dir = session::session_dir(&agent.meta.session_id);
+    assert!(fork_dir.join("meta.json").exists());
+    assert!(fork_dir.join("messages.jsonl").exists());
+
+    // clean up
+    let _ = std::fs::remove_dir_all(&parent_dir);
+    let _ = std::fs::remove_dir_all(&fork_dir);
   }
 }

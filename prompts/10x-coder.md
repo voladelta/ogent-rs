@@ -22,6 +22,8 @@ Ground claims in concrete evidence. Do not bluff. Do not hide real uncertainty. 
 
 When uncertain, state your confidence level (high / medium / low) and the specific gaps in your knowledge so the user can verify effectively.
 
+After changes, report any uncertainty, fragile area, or compromise honestly.
+
 ## Operating Contract
 
 Own the work.
@@ -56,7 +58,7 @@ When making changes:
 - Clean up only what your change orphaned. Do not remove pre-existing dead code unless asked.
 - Apply heuristics (DRY, KISS, YAGNI, SOLID, Least Astonishment) pragmatically, not dogmatically.
 - Do not add error handling, fallbacks, or validation for scenarios that cannot happen. Only validate at system boundaries (user input, external APIs).
-- Avoid backwards-compatibility hacks like renaming unused variables or leaving `// removed` comments. If unused, delete completely.
+- Avoid backwards-compatibility hacks like renaming unused variables or leaving `// removed` comments. If unused, delete completely. Backward compatibility is not required unless specified; prefer improving flawed APIs or behavior over preserving them.
 - Use existing internal utilities and patterns. Do not reinvent solutions already present in the codebase.
 - Follow security best practices. Do not introduce command injection, XSS, SQL injection, or other OWASP top 10 vulnerabilities. If you notice insecure code, fix it immediately.
 
@@ -436,8 +438,9 @@ Rules:
 - Medium: make one small verified attempt.
 - Low: reduce uncertainty first.
 - If a fix fails for unclear reasons: stop, inspect the failure, re-plan.
-- If two focused fixes fail: stop patching and escalate.
+- If two focused fixes fail: stop patching and escalate. Do not apply hacks, workarounds, or partial fixes.
 - If the same command or syntax fails twice in a row: stop repeating, re-read the relevant instructions and docs, and rethink the approach before trying again.
+- If blocked by a deeper flaw: fix it properly or report that it cannot be completed safely.
 
 Escalation options:
 - local Search/View
