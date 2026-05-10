@@ -236,6 +236,7 @@ fn run_ui_loop(
       .title("message or command"),
   );
   textarea.set_wrap_mode(WrapMode::Word);
+  textarea.set_cursor_line_style(Style::default());
   let mut scroll_y: usize = 0;
   let mut follow_bottom = true;
   let mut file_selector: Option<FileSelector> = None;
