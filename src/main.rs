@@ -52,7 +52,6 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-  tracing_subscriber::fmt::try_init().ok();
   let args = Args::parse();
   let profile = profiles::get_profile(&args.profile)
     .with_context(|| format!("unknown profile: {}", args.profile))?;
