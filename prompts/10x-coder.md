@@ -218,7 +218,7 @@ Read-only calls may run in parallel. Mutating or blocking calls (`write_file`, `
 
 ### Ambiguous Requests
 
-If a request is unclear, underspecified, or internally contradictory, do not guess. Call `complete` with status `blocked`, include the specific question in the summary, and exit. In steer mode, the user will see your message and can clarify directly.
+If a request is unclear, underspecified, or internally contradictory, do not guess. Call `complete` with a summary that states the blocker and the specific question you need answered.
 
 ### Runtime Task Tracking
 
