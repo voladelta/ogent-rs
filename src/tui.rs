@@ -39,6 +39,7 @@ pub enum SteerEvent {
   New,
   Fork,
   Exit,
+  Profile(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -186,6 +187,12 @@ impl UiStatus {
 
   pub fn set_auto(&self, auto: bool) {
     self.inner.lock().expect("ui status poisoned").auto = auto;
+  }
+
+  pub fn set_profile(&self, profile: String, model: String) {
+    let mut s = self.inner.lock().expect("ui status poisoned");
+    s.profile = profile;
+    s.model = model;
   }
 
   pub fn set_state(&self, state: AgentState) {
@@ -524,6 +531,9 @@ pub fn parse_steer_event(line: &str) -> SteerEvent {
     "/new" => SteerEvent::New,
     "/fork" => SteerEvent::Fork,
     "/q" | "/quit" | "quit" | "exit" => SteerEvent::Exit,
+    s if s.starts_with("/profile ") => {
+      SteerEvent::Profile(s.strip_prefix("/profile ").unwrap().trim().to_string())
+    }
     other => SteerEvent::Message(other.to_string()),
   }
 }

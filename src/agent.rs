@@ -653,6 +653,20 @@ impl Agent {
           ));
         }
       }
+      SteerEvent::Profile(name) => {
+        match crate::profiles::get_profile(&name) {
+          Some(p) => {
+            self.client = crate::providers::new_client(p, self.meta.flags.retry)?;
+            self.meta.profile = name.clone();
+            self.compact.context_limit = p.context_limit;
+            tui.status.set_profile(name, p.model.to_string());
+            tui.log.push(format!("[steer] profile → {}", self.meta.profile));
+          }
+          None => {
+            tui.log.push(format!("[steer] unknown profile: {name}"));
+          }
+        }
+      }
       SteerEvent::Exit => return Ok(SteerAction::Exit),
     }
     Ok(SteerAction::Continue)

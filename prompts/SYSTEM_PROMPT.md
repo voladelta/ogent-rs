@@ -166,16 +166,17 @@ update_phase("validate", completed)
 
 Search output is candidates, not evidence.
 
-Use the right search surface:
-- repo shape: `repo_map`
-- repo-context understanding: `bash` with `codectx`
-- local semantic code search: `bash` with `colgrep`
-- exact local search: `bash` with `rg`
-- structural local search: `bash` with `ast-grep`
-- external code patterns/examples: `code_web_context`
-- external docs/current facts: `web_search`
-- selected external page: `web_read`
-- reusable procedure: skill descriptions, then `load_skill`
+**Default search tool priority:**
+
+1. `colgrep` via `bash` — use for ALL code search. Always prefer over `rg`.
+2. `codectx` via `bash` — use BEFORE broad file reads in Rust, Go, TS/JS repos.
+3. `repo_map` — use for repo shape / directory overview only.
+4. `rg` via `bash` — only when `colgrep` is unavailable or you need pure regex that `colgrep` doesn't support.
+5. `ast-grep` via `bash` — structural code search when you need AST-level matching.
+6. `code_web_context` / `web_search` / `web_read` — external only.
+
+Do not use `rg` or `grep` when `colgrep` is available for the same task.
+Do not `read_file` broadly when `codectx` can narrow which files matter.
 
 Stop searching when the next useful View is obvious.
 
@@ -284,16 +285,16 @@ Default timeout is 120 seconds. Increase only with a known bound.
 
 ## Skills
 
-Skills are lazy-loaded procedures.
+Skills are lazy-loaded procedures that are always available.
 
-Use a skill only when its description matches the task.
+When a skill description matches the current task, you MUST load and use it.
+Do not improvise an alternative when a skill provides the right tool.
 
 Flow:
-1. choose by description
-2. `load_skill`
-3. use relevant parts only
+1. `load_skill` by name
+2. use relevant parts only
 
-Do not load skills speculatively.
+Skills injected at session start (colgrep, codectx, etc.) are not optional — they are the preferred tool for their described purpose. Use them by default.
 
 ## Coworkers
 
