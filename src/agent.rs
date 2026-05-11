@@ -1,7 +1,7 @@
 use crate::client::{Client, ClientError};
 use crate::session;
 use crate::task_tracker::{TaskTracker, is_tracking_tool_name};
-use crate::tools::{ToolContext, execute_tool, is_read_only_tool, remove_interview};
+use crate::tools::{ToolContext, execute_tool, is_read_only_tool};
 use crate::tui::{SteerEvent, TuiHandle};
 use crate::types::{ChatResponse, Message, Tool, ToolCall};
 use crate::workers::WorkerManager;
@@ -20,6 +20,282 @@ enum SteerAction {
   Continue,
   Exit,
   Restart,
+}
+
+enum SteerState {
+  Idle {
+    wait_for_input: bool,
+  },
+  StartTurn,
+  InFlight {
+    chat: tokio::task::JoinHandle<std::result::Result<ChatResponse, ClientError>>,
+    cancel: tokio_util::sync::CancellationToken,
+    cancelled: bool,
+    steer_msg: Option<String>,
+  },
+  ProcessResult(ChatResponse),
+  FinishTurn {
+    has_more: bool,
+  },
+  Exit(Vec<Message>),
+}
+
+struct SteerCtx {
+  turn: i32,
+  max_turns: i32,
+  auto_continue: bool,
+}
+
+impl SteerState {
+  async fn step(
+    self,
+    agent: &mut Agent,
+    tui: &mut TuiHandle,
+    ctx: &mut SteerCtx,
+  ) -> Result<Self, AgentError> {
+    match self {
+      Self::Exit(msgs) => Ok(Self::Exit(msgs)),
+
+      Self::Idle { wait_for_input } => {
+        if agent.next_turn_reset {
+          ctx.turn = 1;
+          agent.next_turn_reset = false;
+        }
+
+        let wait_baseline_len = agent.messages.len();
+        let mut wait = wait_for_input;
+
+        while let Ok(event) = tui.rx.try_recv() {
+          match agent.apply_steer_event(event, &mut ctx.auto_continue, tui)? {
+            SteerAction::Exit => {
+              return Ok(Self::Exit(agent.messages.clone()));
+            }
+            SteerAction::Restart => {
+              ctx.turn = 1;
+              tui
+                .log
+                .push("[steer] commands: /auto /stop /complete /cancel /new /fork /q".to_string());
+              return Ok(Self::Idle {
+                wait_for_input: true,
+              });
+            }
+            SteerAction::Continue => {}
+          }
+          if agent.messages.len() > wait_baseline_len
+            && matches!(agent.messages.last().map(|m| m.role.as_str()), Some("user"))
+          {
+            wait = false;
+          }
+        }
+
+        if wait {
+          loop {
+            let Some(event) = tui.rx.recv().await else {
+              continue;
+            };
+            match agent.apply_steer_event(event, &mut ctx.auto_continue, tui)? {
+              SteerAction::Exit => {
+                return Ok(Self::Exit(agent.messages.clone()));
+              }
+              SteerAction::Restart => {
+                ctx.turn = 1;
+                tui.log.push(
+                  "[steer] commands: /auto /stop /complete /cancel /new /fork /q".to_string(),
+                );
+                return Ok(Self::Idle {
+                  wait_for_input: true,
+                });
+              }
+              SteerAction::Continue => {}
+            }
+            if agent.messages.len() > wait_baseline_len
+              && matches!(agent.messages.last().map(|m| m.role.as_str()), Some("user"))
+            {
+              break;
+            }
+          }
+        }
+
+        Ok(Self::StartTurn)
+      }
+
+      Self::StartTurn => {
+        if ctx.max_turns > 0 && ctx.turn > ctx.max_turns {
+          tui.log.push(format!(
+            "[steer] reached max turns ({}); exiting cleanly. Resume with ogent --resume.",
+            ctx.max_turns
+          ));
+          return Ok(Self::Exit(agent.messages.clone()));
+        }
+
+        agent.meta.turn = ctx.turn;
+        tui
+          .status
+          .set_turn_tokens(ctx.turn, agent.total_prompt + agent.total_completion);
+        tui.log.push(format!("--- turn {} ---", ctx.turn));
+        agent.push_turn_budget_reminder(ctx.max_turns, ctx.turn);
+        agent.refresh_workflow_reminder();
+
+        let cancel = tokio_util::sync::CancellationToken::new();
+        let cancel_clone = cancel.clone();
+        let client = agent.client.clone();
+        let messages = agent.messages.clone();
+        let tools = agent.tools.clone();
+        let chat =
+          tokio::spawn(async move { client.chat(&messages, &tools, Some(&cancel_clone)).await });
+
+        Ok(Self::InFlight {
+          chat,
+          cancel,
+          cancelled: false,
+          steer_msg: None,
+        })
+      }
+
+      Self::InFlight {
+        mut chat,
+        cancel,
+        mut cancelled,
+        mut steer_msg,
+      } => {
+        let chat_result = 'select: loop {
+          tokio::select! {
+            r = &mut chat => break 'select r,
+            maybe_event = tui.rx.recv(), if !cancelled && steer_msg.is_none() => {
+              let Some(event) = maybe_event else { continue; };
+              match event {
+                SteerEvent::Cancel => {
+                  cancel.cancel();
+                  cancelled = true;
+                }
+                SteerEvent::Message(content) => {
+                  cancel.cancel();
+                  steer_msg = Some(content);
+                }
+                SteerEvent::Complete => {
+                  cancel.cancel();
+                  steer_msg = Some(MANUAL_COMPLETE_REMINDER.to_string());
+                }
+                SteerEvent::New => {
+                  cancel.cancel();
+                  agent.apply_steer_event(SteerEvent::New, &mut ctx.auto_continue, tui)?;
+                  chat.abort();
+                  ctx.turn = 1;
+                  tui.log.push("[steer] commands: /auto /stop /complete /cancel /new /fork /q".to_string());
+                  return Ok(Self::Idle { wait_for_input: true });
+                }
+                SteerEvent::Exit => {
+                  cancel.cancel();
+                  chat.abort();
+                  return Ok(Self::Exit(agent.messages.clone()));
+                }
+                other => {
+                  match agent.apply_steer_event(other, &mut ctx.auto_continue, tui)? {
+                    SteerAction::Exit => {
+                      cancel.cancel();
+                      chat.abort();
+                      return Ok(Self::Exit(agent.messages.clone()));
+                    }
+                    SteerAction::Restart => {
+                      cancel.cancel();
+                      chat.abort();
+                      ctx.turn = 1;
+                      tui.log.push("[steer] commands: /auto /stop /complete /cancel /new /fork /q".to_string());
+                      return Ok(Self::Idle { wait_for_input: true });
+                    }
+                    SteerAction::Continue => {}
+                  }
+                }
+              }
+            }
+          }
+        };
+
+        let resp = match chat_result {
+          Ok(Ok(resp)) => resp,
+          Ok(Err(ClientError::Aborted { resp })) => {
+            if !resp.content.is_empty()
+              || !resp.reasoning_content.is_empty()
+              || !resp.tool_calls.is_empty()
+            {
+              agent.total_prompt += resp.usage.prompt_tokens;
+              agent.total_completion += resp.usage.completion_tokens;
+              agent.push_msg(assistant_msg_full(
+                resp.content.clone(),
+                resp.reasoning_content.clone(),
+                resp.tool_calls.clone(),
+              ));
+            }
+            if cancelled {
+              return Ok(Self::Idle {
+                wait_for_input: true,
+              });
+            }
+            if let Some(msg) = steer_msg {
+              agent.push_msg(user_msg(msg.clone()));
+              tui.log.push(format!("[steer] {}", truncate(&msg, 200)));
+              ctx.turn += 1;
+              return Ok(Self::StartTurn);
+            }
+            return Ok(Self::Exit(agent.messages.clone()));
+          }
+          Ok(Err(e)) => return Err(AgentError::Client(e)),
+          Err(join_err) => return Err(AgentError::Other(join_err.into())),
+        };
+
+        Ok(Self::ProcessResult(resp))
+      }
+
+      Self::ProcessResult(resp) => {
+        let has_more = agent
+          .handle_turn_response_with_log(resp, Some(&tui.log))
+          .await?;
+        Ok(Self::FinishTurn { has_more })
+      }
+
+      Self::FinishTurn { mut has_more } => {
+        if agent.completion_summary.is_some()
+          && !agent.compact.last_handoff_path.is_empty()
+          && agent.handle_handoff().await?
+        {
+          return Ok(Self::Exit(agent.messages.clone()));
+        }
+        if agent.completion_summary.is_some() {
+          tui
+            .log
+            .push("[steer] task complete; send a message to continue or /q to quit".to_string());
+          agent.completion_summary = None;
+          return Ok(Self::Idle {
+            wait_for_input: true,
+          });
+        }
+
+        let should_exit = agent
+          .finish_turn(
+            &mut has_more,
+            ctx.auto_continue,
+            Some(&tui.log),
+            ctx.max_turns,
+            ctx.turn,
+          )
+          .await?;
+
+        if should_exit {
+          return Ok(Self::Exit(agent.messages.clone()));
+        }
+
+        if !has_more && !ctx.auto_continue {
+          ctx.turn += 1;
+          return Ok(Self::Idle {
+            wait_for_input: true,
+          });
+        }
+
+        ctx.turn += 1;
+        Ok(Self::StartTurn)
+      }
+    }
+  }
 }
 
 #[derive(Debug, Clone)]
@@ -136,7 +412,6 @@ impl Agent {
   pub async fn run_loop(
     &mut self,
     max_turns: i32,
-    interview_on_first_turn: bool,
     auto_continue: bool,
   ) -> Result<Vec<Message>, AgentError> {
     let mut turn = 1;
@@ -155,90 +430,6 @@ impl Agent {
       self.refresh_workflow_reminder();
       let resp = self.client.chat(&self.messages, &self.tools, None).await?;
 
-      // Interview handling on turn 1 in non-steer mode
-      if turn == 1
-        && interview_on_first_turn
-        && let Some(first) = resp
-          .tool_calls
-          .iter()
-          .find(|tc| tc.function.name == "interview")
-      {
-        self.push_msg(assistant_msg_full(
-          resp.content.clone(),
-          resp.reasoning_content.clone(),
-          resp.tool_calls.clone(),
-        ));
-        let other_calls: Vec<_> = resp
-          .tool_calls
-          .iter()
-          .filter(|tc| tc.function.name != "interview")
-          .collect();
-        if !other_calls.is_empty() {
-          let mut results = Vec::new();
-          let mut read_only_batch: Vec<&ToolCall> = Vec::new();
-          for tc in &other_calls {
-            if is_read_only_tool(&tc.function.name) {
-              read_only_batch.push(tc);
-              continue;
-            }
-            if !read_only_batch.is_empty() {
-              results.extend(run_read_only_batch(&read_only_batch).await?);
-              read_only_batch.clear();
-            }
-            let (output, success) = self.run_tool_call(tc).await;
-            results.push(ToolResult {
-              name: tc.function.name.clone(),
-              args: tc.function.arguments.clone(),
-              output,
-              success,
-            });
-          }
-          if !read_only_batch.is_empty() {
-            results.extend(run_read_only_batch(&read_only_batch).await?);
-          }
-          for (tc, r) in other_calls.iter().zip(results.iter()) {
-            self.push_msg(tool_msg(r.output.clone(), tc.id.clone()));
-          }
-        }
-        let args = match crate::tools::parse_args::<crate::tools::InterviewArgs>(
-          &first.function.arguments,
-        ) {
-          Ok(a) => a,
-          Err(e) => {
-            self.push_msg(tool_msg(format!("ERROR: {e}"), first.id.clone()));
-            turn += 1;
-            continue;
-          }
-        };
-        let q_text = args
-          .questions
-          .iter()
-          .enumerate()
-          .map(|(i, q)| format!("{}. {}", i + 1, q))
-          .collect::<Vec<_>>()
-          .join("\n");
-        eprintln!("\nClarification needed:\n{q_text}\n");
-        self.push_msg(tool_msg(
-          format!(
-            "Clarification needed:\n{q_text}\n\nPlease resume with --resume to provide answers."
-          ),
-          first.id.clone(),
-        ));
-        for tc in resp
-          .tool_calls
-          .iter()
-          .filter(|tc| tc.function.name == "interview")
-          .skip(1)
-        {
-          self.push_msg(tool_msg(
-            "ERROR: another interview is already in progress.".to_string(),
-            tc.id.clone(),
-          ));
-        }
-        self.report_tokens();
-        return Ok(self.messages.clone());
-      }
-
       let mut has_more = match self.handle_turn_response(resp).await {
         Ok(hm) => hm,
         Err(AgentError::InteractiveRequired) => return Ok(self.messages.clone()),
@@ -250,9 +441,6 @@ impl Agent {
       {
         return Ok(self.messages.clone());
       }
-      if turn == 1 && interview_on_first_turn {
-        remove_interview(&mut self.tools);
-      }
       if !has_more {
         return Ok(self.messages.clone());
       }
@@ -263,353 +451,25 @@ impl Agent {
   pub async fn steer_loop(
     &mut self,
     max_turns: i32,
-    mut auto_continue: bool,
+    auto_continue: bool,
     mut tui: TuiHandle,
-    mut wait_for_input: bool,
+    wait_for_input: bool,
   ) -> Result<Vec<Message>, AgentError> {
     tui
       .log
       .push("[steer] commands: /auto /stop /complete /cancel /new /fork /q");
-    let mut turn = 1;
-    'outer: loop {
-      if self.next_turn_reset {
-        turn = 1;
-        self.next_turn_reset = false;
-      }
-      let wait_baseline_len = self.messages.len();
-      while let Ok(event) = tui.rx.try_recv() {
-        match self.apply_steer_event(event, &mut auto_continue, &tui)? {
-          SteerAction::Exit => return Ok(self.messages.clone()),
-          SteerAction::Restart => {
-            turn = 1;
-            wait_for_input = true;
-            tui
-              .log
-              .push("[steer] commands: /auto /stop /complete /cancel /new /fork /q");
-            continue 'outer;
-          }
-          SteerAction::Continue => {}
-        }
-        if self.messages.len() > wait_baseline_len
-          && matches!(self.messages.last().map(|m| m.role.as_str()), Some("user"))
-        {
-          wait_for_input = false;
-        }
-      }
+    let mut state = SteerState::Idle { wait_for_input };
+    let mut ctx = SteerCtx {
+      turn: 1,
+      max_turns,
+      auto_continue,
+    };
 
-      while wait_for_input {
-        let Some(event) = tui.rx.recv().await else {
-          continue;
-        };
-        match self.apply_steer_event(event, &mut auto_continue, &tui)? {
-          SteerAction::Exit => return Ok(self.messages.clone()),
-          SteerAction::Restart => {
-            turn = 1;
-            wait_for_input = true;
-            tui
-              .log
-              .push("[steer] commands: /auto /stop /complete /cancel /new /fork /q");
-            continue 'outer;
-          }
-          SteerAction::Continue => {}
-        }
-        if self.messages.len() > wait_baseline_len
-          && matches!(self.messages.last().map(|m| m.role.as_str()), Some("user"))
-        {
-          wait_for_input = false;
-        }
-      }
-
-      if max_turns > 0 && turn > max_turns {
-        tui.log.push(format!(
-          "[steer] reached max turns ({max_turns}); exiting cleanly. Resume with ogent --resume."
-        ));
-        return Ok(self.messages.clone());
-      }
-      self.meta.turn = turn;
-      tui
-        .status
-        .set_turn_tokens(turn, self.total_prompt + self.total_completion);
-      tui.log.push(format!("--- turn {turn} ---"));
-      self.push_turn_budget_reminder(max_turns, turn);
-      self.refresh_workflow_reminder();
-
-      let cancel = tokio_util::sync::CancellationToken::new();
-      let client = self.client.clone();
-      let messages = self.messages.clone();
-      let tools = self.tools.clone();
-      let chat_cancel = cancel.clone();
-      let mut chat =
-        tokio::spawn(async move { client.chat(&messages, &tools, Some(&chat_cancel)).await });
-      let mut cancelled_turn = false;
-      let mut steer_msg: Option<String> = None;
-
-      let chat_result = 'chat: loop {
-        tokio::select! {
-          r = &mut chat => break 'chat r,
-          maybe_event = tui.rx.recv(), if !cancelled_turn && steer_msg.is_none() => {
-            let Some(event) = maybe_event else { continue; };
-            match event {
-              SteerEvent::Cancel => {
-                cancel.cancel();
-                cancelled_turn = true;
-              }
-              SteerEvent::Message(content) => {
-                cancel.cancel();
-                steer_msg = Some(content);
-              }
-              SteerEvent::Complete => {
-                cancel.cancel();
-                steer_msg = Some(MANUAL_COMPLETE_REMINDER.to_string());
-              }
-              SteerEvent::New => {
-                cancel.cancel();
-                self.apply_steer_event(SteerEvent::New, &mut auto_continue, &tui)?;
-                chat.abort();
-                turn = 1;
-                wait_for_input = true;
-                tui.log.push("[steer] commands: /auto /stop /complete /cancel /new /fork /q");
-                continue 'outer;
-              }
-              SteerEvent::Exit => {
-                cancel.cancel();
-                chat.abort();
-                return Ok(self.messages.clone());
-              }
-              other => {
-                match self.apply_steer_event(other, &mut auto_continue, &tui)? {
-                  SteerAction::Exit => {
-                    cancel.cancel();
-                    chat.abort();
-                    return Ok(self.messages.clone());
-                  }
-                  SteerAction::Restart => {
-                    cancel.cancel();
-                    chat.abort();
-                    turn = 1;
-                    wait_for_input = true;
-                    tui.log.push("[steer] commands: /auto /stop /complete /cancel /new /fork /q");
-                    continue 'outer;
-                  }
-                  SteerAction::Continue => {}
-                }
-              }
-            }
-          }
-        }
+    loop {
+      state = match state.step(self, &mut tui, &mut ctx).await? {
+        SteerState::Exit(msgs) => return Ok(msgs),
+        next => next,
       };
-
-      let resp = match chat_result {
-        Ok(Ok(resp)) => resp,
-        Ok(Err(ClientError::Aborted { resp })) => {
-          if !resp.content.is_empty()
-            || !resp.reasoning_content.is_empty()
-            || !resp.tool_calls.is_empty()
-          {
-            self.total_prompt += resp.usage.prompt_tokens;
-            self.total_completion += resp.usage.completion_tokens;
-            self.push_msg(assistant_msg_full(
-              resp.content.clone(),
-              resp.reasoning_content.clone(),
-              resp.tool_calls.clone(),
-            ));
-          }
-          if cancelled_turn {
-            wait_for_input = true;
-            continue;
-          }
-          if let Some(msg) = steer_msg {
-            self.push_msg(user_msg(msg.clone()));
-            tui.log.push(format!("[steer] {}", truncate(&msg, 200)));
-            turn += 1;
-            continue;
-          }
-          return Ok(self.messages.clone());
-        }
-        Ok(Err(e)) => return Err(AgentError::Client(e)),
-        Err(join_err) => return Err(AgentError::Other(join_err.into())),
-      };
-
-      let mut has_more = if turn == 1
-        && resp
-          .tool_calls
-          .iter()
-          .any(|tc| tc.function.name == "interview")
-      {
-        self.total_prompt += resp.usage.prompt_tokens;
-        self.total_completion += resp.usage.completion_tokens;
-        self.push_msg(assistant_msg_full(
-          resp.content.clone(),
-          resp.reasoning_content.clone(),
-          resp.tool_calls.clone(),
-        ));
-
-        let interview_calls: Vec<_> = resp
-          .tool_calls
-          .iter()
-          .filter(|tc| tc.function.name == "interview")
-          .collect();
-        let other_calls: Vec<_> = resp
-          .tool_calls
-          .iter()
-          .filter(|tc| tc.function.name != "interview")
-          .collect();
-
-        if !other_calls.is_empty() {
-          let mut results = Vec::new();
-          let mut read_only_batch: Vec<&ToolCall> = Vec::new();
-          for tc in &other_calls {
-            if is_read_only_tool(&tc.function.name) {
-              read_only_batch.push(tc);
-              continue;
-            }
-            if !read_only_batch.is_empty() {
-              results.extend(run_read_only_batch(&read_only_batch).await?);
-              read_only_batch.clear();
-            }
-            let (output, success) = self.run_tool_call(tc).await;
-            results.push(ToolResult {
-              name: tc.function.name.clone(),
-              args: tc.function.arguments.clone(),
-              output,
-              success,
-            });
-            if self.completion_summary.is_some() {
-              break;
-            }
-          }
-          if !read_only_batch.is_empty() {
-            results.extend(run_read_only_batch(&read_only_batch).await?);
-          }
-          for (tc, r) in other_calls.iter().zip(results.iter()) {
-            self.push_msg(tool_msg(r.output.clone(), tc.id.clone()));
-          }
-          self.record_task_tracking_turn(&results);
-        }
-
-        if self.completion_summary.is_some() {
-          true
-        } else {
-          let first = interview_calls[0];
-          let args = match crate::tools::parse_args::<crate::tools::InterviewArgs>(
-            &first.function.arguments,
-          ) {
-            Ok(a) => a,
-            Err(e) => {
-              self.push_msg(tool_msg(format!("ERROR: {e}"), first.id.clone()));
-              for ic in interview_calls.iter().skip(1) {
-                self.push_msg(tool_msg(
-                  "ERROR: another interview is already in progress.".to_string(),
-                  ic.id.clone(),
-                ));
-              }
-              turn += 1;
-              continue 'outer;
-            }
-          };
-          let mut answers = Vec::new();
-          for (i, question) in args.questions.iter().enumerate() {
-            tui.log.push(format!(
-              "[interview {}/{}] {}",
-              i + 1,
-              args.questions.len(),
-              question
-            ));
-            loop {
-              match tui.rx.recv().await {
-                Some(SteerEvent::Message(content)) => {
-                  answers.push(content);
-                  break;
-                }
-                Some(SteerEvent::Exit) => return Ok(self.messages.clone()),
-                Some(SteerEvent::New) => {
-                  self.apply_steer_event(SteerEvent::New, &mut auto_continue, &tui)?;
-                  turn = 1;
-                  wait_for_input = true;
-                  tui
-                    .log
-                    .push("[steer] commands: /auto /stop /complete /cancel /new /fork /q");
-                  continue 'outer;
-                }
-                Some(SteerEvent::Auto) => {
-                  auto_continue = true;
-                  tui.status.set_auto(true);
-                  tui.log.push("[steer] auto on");
-                }
-                Some(SteerEvent::Stop) => {
-                  auto_continue = false;
-                  tui.status.set_auto(false);
-                  tui.log.push("[steer] auto off");
-                }
-                _ => {}
-              }
-            }
-          }
-
-          let result = format!(
-            "## Interview Answers\n\n{}",
-            args
-              .questions
-              .iter()
-              .zip(answers.iter())
-              .map(|(q, a)| format!("**Q:** {q}\n**A:** {a}"))
-              .collect::<Vec<_>>()
-              .join("\n\n")
-          );
-          self.push_msg(tool_msg(result, first.id.clone()));
-          for ic in interview_calls.iter().skip(1) {
-            self.push_msg(tool_msg(
-              "ERROR: another interview is already in progress.".to_string(),
-              ic.id.clone(),
-            ));
-          }
-          true
-        }
-      } else {
-        self
-          .handle_turn_response_with_log(resp, Some(&tui.log))
-          .await?
-      };
-
-      if self.completion_summary.is_some()
-        && !self.compact.last_handoff_path.is_empty()
-        && self.handle_handoff().await?
-      {
-        return Ok(self.messages.clone());
-      }
-      if self.completion_summary.is_some() {
-        tui
-          .log
-          .push("[steer] task complete; send a message to continue or /q to quit");
-        self.completion_summary = None;
-        wait_for_input = true;
-        continue;
-      }
-
-      if self
-        .finish_turn(
-          &mut has_more,
-          auto_continue,
-          Some(&tui.log),
-          max_turns,
-          turn,
-        )
-        .await?
-      {
-        return Ok(self.messages.clone());
-      }
-      if !has_more && !auto_continue {
-        if turn == 1 {
-          remove_interview(&mut self.tools);
-        }
-        turn += 1;
-        wait_for_input = true;
-        continue;
-      }
-      if turn == 1 {
-        remove_interview(&mut self.tools);
-      }
-      turn += 1;
     }
   }
 
@@ -1000,7 +860,7 @@ impl Agent {
       }
       if is_tracking_tool_name(&result.name) {
         saw_tracking_update = true;
-      } else if !matches!(result.name.as_str(), "interview" | "worker_clarify") {
+      } else {
         saw_meaningful_non_tracking = true;
       }
     }

@@ -754,6 +754,5 @@ mod tests {
     assert!(is_tracking_tool_name("update_phase"));
     assert!(is_tracking_tool_name("update_todo"));
     assert!(!is_tracking_tool_name("read_file"));
-    assert!(!is_tracking_tool_name("interview"));
   }
 }

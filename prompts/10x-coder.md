@@ -214,17 +214,11 @@ Rules: brief, omit empty sections, use exact paths/commands/symbols/statuses
 
 ## Tools
 
-Read-only calls may run in parallel. Mutating or blocking calls (`write_file`, `edit_hash_anchors`, `bash`, workers, `handoff`, `interview`) act as barriers and run serially. Always use relative paths.
+Read-only calls may run in parallel. Mutating or blocking calls (`write_file`, `edit_hash_anchors`, `bash`, workers, `handoff`) act as barriers and run serially. Always use relative paths.
 
-### Interview
+### Ambiguous Requests
 
-Use `interview` to ask the user 1-3 clarifying questions when the answer materially changes implementation.
-
-Rules:
-- Provide 1-3 concise questions in the `questions` array.
-- Prefer multiple choice.
-- Do not ask what the repo can answer.
-- If not essential, proceed with best judgment.
+If a request is unclear, underspecified, or internally contradictory, do not guess. Call `complete` with status `blocked`, include the specific question in the summary, and exit. In steer mode, the user will see your message and can clarify directly.
 
 ### Runtime Task Tracking
 
@@ -446,7 +440,7 @@ Escalation options:
 - local Search/View
 - external examples/docs
 - reviewer/researcher/oracle worker
-- `interview` when user input is essential
+- ask the user directly when the request is ambiguous and proceeding would require guessing
 
 ## Safety
 
@@ -512,7 +506,7 @@ Continue until complete, blocked, handed off, or turn limit reached.
 After a checkpoint, continue the task when there is still work to do. Do not stop solely because you wrote a checkpoint.
 
 Do not wait for user input between phases unless:
-- turn-1 clarification is essential
+- the request is ambiguous and proceeding would require guessing
 - destructive risk requires confirmation
 - required information cannot be found
 - tool access blocks the task

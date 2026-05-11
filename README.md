@@ -147,10 +147,6 @@ The 10x coder uses `dispatch_worker` when:
 
 The worker runs in isolation with your prompt. When done, it calls `worker_complete` with a structured Markdown summary. That summary is returned to the parent coder. You decide what to do next.
 
-### Interview Tool
-
-The `interview` tool is available **only on the first turn** of the 10x coder. After turn 1, the agent makes decisions autonomously. In steer mode, the user answers clarifying questions interactively; in non-steer mode, the agent prints the questions and exits so you can resume with answers. Workers cannot ask the human directly; they use `worker_clarify` to ask the parent coder when blocked.
-
 ## Creating skills
 
 Skills are **domain knowledge packages** stored as `.ogent/skills/<name>/SKILL.md`:
@@ -282,7 +278,6 @@ Non-steer mode requires a prompt unless `--continue` or `--resume` is used.
 | `edit_hash_anchors` | Anchored edits via an `ops` array. Batch multiple edits to the same file in one call so anchors are resolved against one snapshot |
 | `bash` | Run a shell command in the workspace; returns combined stdout/stderr. Default timeout: 120s; max timeout: 600s |
 | `repo_map` | Display a tree map of the workspace or allowed config roots such as `~/.ogent`. Use instead of `bash` with `ls`/`eza` |
-| `interview` | Ask the user 1-3 clarifying questions. **Only available on turn 1.** Workers use `worker_clarify` to ask the parent coder |
 | `web_search` | Search the web via Exa; returns titles, URLs, and highlights |
 | `web_read` | Read page content from URLs via Exa; returns full text as markdown |
 | `code_web_context` | Semantic code search across the web (GitHub, docs, Stack Overflow) |
@@ -299,9 +294,9 @@ Non-steer mode requires a prompt unless `--continue` or `--resume` is used.
 
 Web tools require `EXA_API_KEY`.
 
-Workers use the same toolset except `dispatch_worker`, `start_workers`, `check_workers`, `handoff`, `set_goal`, `revise_goal`, `update_phase`, `update_todo`, `complete`, and `interview`. Instead, workers have `worker_clarify` to ask the parent 10x coder when blocked and `worker_complete` to return their final Markdown summary.
+Workers use the same toolset except `dispatch_worker`, `start_workers`, `check_workers`, `handoff`, `set_goal`, `revise_goal`, `update_phase`, `update_todo`, and `complete`. Workers have `worker_complete` to return their final Markdown summary.
 
-Tool calls are evaluated in order. Contiguous read-only calls (`read_file`, `read_hash_anchors`, `repo_map`, web tools, `load_skill`) may run in parallel. Mutating or blocking calls (`write_file`, `edit_hash_anchors`, `bash`, workers, `handoff`, `interview`) act as barriers and run serially.
+Tool calls are evaluated in order. Contiguous read-only calls (`read_file`, `read_hash_anchors`, `repo_map`, web tools, `load_skill`) may run in parallel. Mutating or blocking calls (`write_file`, `edit_hash_anchors`, `bash`, workers, `handoff`) act as barriers and run serially.
 
 ## Hashline Editing
 

@@ -39,8 +39,6 @@ pub async fn execute_tool(mut ctx: ToolContext<'_>, name: &str, args: &str) -> R
     "dispatch_worker" => dispatch_worker(args).await,
     "start_workers" => start_workers(ctx.agent.as_deref_mut(), args).await,
     "check_workers" => check_workers(ctx.agent.as_deref_mut(), args).await,
-    "interview" => bail!("interactive mode required"),
-    "worker_clarify" => worker_clarify(args),
     "worker_complete" => worker_complete(ctx.agent.as_deref_mut(), args),
     "complete" => complete(ctx.agent.as_deref_mut(), args),
     _ => bail!("unknown tool: {name}"),
@@ -64,7 +62,6 @@ const WORKER_EXCLUDED: &[&str] = &[
   "check_workers",
   "handoff",
   "complete",
-  "interview",
   "set_goal",
   "revise_goal",
   "update_phase",
@@ -174,11 +171,6 @@ fn build_coder_tools() -> Vec<Tool> {
       "Mark the current task complete and provide a retrospective structured Markdown session summary.",
       json!({"type":"object","properties":{"summary":{"type":"string"}},"required":["summary"],"additionalProperties":false}),
     ),
-    schema(
-      "interview",
-      "Ask the user 1-3 clarifying questions before proceeding. Only available on turn 1. Prefer multiple choice.",
-      json!({"type":"object","properties":{"questions":{"type":"array","items":{"type":"string"},"minItems":1,"maxItems":3}},"required":["questions"],"additionalProperties":false}),
-    ),
   ]
 }
 
@@ -187,13 +179,8 @@ fn build_worker_tools() -> Vec<Tool> {
     .into_iter()
     .filter(|t| !WORKER_EXCLUDED.contains(&t.function.name.as_str()))
     .collect();
-  tools.push(schema("worker_clarify", "Ask the parent coder agent a clarifying question when blocked.", json!({"type":"object","properties":{"question":{"type":"string"}},"required":["question"],"additionalProperties":false})));
   tools.push(schema("worker_complete", "Finish this worker subprocess and return a concise Markdown summary to the parent coder.", json!({"type":"object","properties":{"summary":{"type":"string","description":"Concise Markdown summary for the parent coder"}},"required":["summary"],"additionalProperties":false})));
   tools
-}
-
-pub fn remove_interview(tools: &mut Vec<Tool>) {
-  tools.retain(|t| t.function.name != "interview");
 }
 
 pub fn is_read_only_tool(name: &str) -> bool {
@@ -691,11 +678,6 @@ fn revise_goal(agent: Option<&mut crate::agent::Agent>, args: &str) -> Result<St
 }
 
 #[derive(Deserialize)]
-pub struct InterviewArgs {
-  pub questions: Vec<String>,
-}
-
-#[derive(Deserialize)]
 struct UpdatePhaseArgs {
   phase_id: String,
   title: String,
@@ -845,16 +827,6 @@ async fn check_workers(agent: Option<&mut crate::agent::Agent>, _args: &str) -> 
 }
 
 #[derive(Deserialize)]
-struct QuestionArgs {
-  question: String,
-}
-
-fn worker_clarify(args: &str) -> Result<String> {
-  let args: QuestionArgs = parse_args(args)?;
-  Ok(format!("[BLOCKER] Worker asks: {}", args.question))
-}
-
-#[derive(Deserialize)]
 struct CompleteArgs {
   summary: String,
 }
@@ -967,7 +939,6 @@ mod tests {
     assert!(names.contains(&"set_goal"));
     assert!(names.contains(&"update_phase"));
     assert!(names.contains(&"update_todo"));
-    assert!(names.contains(&"interview"));
   }
 
   #[test]
@@ -980,8 +951,6 @@ mod tests {
     assert!(!names.contains(&"handoff"));
     assert!(!names.contains(&"complete"));
     assert!(!names.contains(&"set_goal"));
-    assert!(!names.contains(&"interview"));
-    assert!(names.contains(&"worker_clarify"));
     assert!(names.contains(&"worker_complete"));
     assert!(names.contains(&"read_file"));
   }
@@ -1017,17 +986,6 @@ mod tests {
     let result = execute_tool(ToolContext { agent: None }, "nonexistent_tool", "{}").await;
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("unknown tool"));
-  }
-
-  #[tokio::test]
-  async fn worker_clarify_returns_blocker_prefix() {
-    let result = execute_tool(
-      ToolContext { agent: None },
-      "worker_clarify",
-      r#"{"question":"help"}"#,
-    )
-    .await;
-    assert!(result.unwrap().contains("[BLOCKER]"));
   }
 
   #[test]
@@ -1114,22 +1072,6 @@ mod tests {
     assert!(params["properties"]["summary"].is_object());
     let required: Vec<String> = serde_json::from_value(params["required"].clone()).unwrap();
     assert!(required.contains(&"summary".to_string()));
-  }
-
-  #[test]
-  fn interview_schema_has_questions_array() {
-    let tools = configured_coder_tools(false);
-    let t = tools
-      .iter()
-      .find(|t| t.function.name == "interview")
-      .unwrap();
-    let params = &t.function.parameters;
-    assert_eq!(params["properties"]["questions"]["type"], "array");
-    assert_eq!(params["properties"]["questions"]["items"]["type"], "string");
-    assert_eq!(params["properties"]["questions"]["minItems"], 1);
-    assert_eq!(params["properties"]["questions"]["maxItems"], 3);
-    let required: Vec<String> = serde_json::from_value(params["required"].clone()).unwrap();
-    assert!(required.contains(&"questions".to_string()));
   }
 
   #[tokio::test]

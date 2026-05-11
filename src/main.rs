@@ -220,10 +220,8 @@ async fn main() -> Result<()> {
     agent
       .steer_loop(args.max_turns, args.auto, tui, wait_for_steer_input)
       .await
-  } else if args.worker {
-    agent.run_loop(args.max_turns, false, true).await
   } else {
-    agent.run_loop(args.max_turns, true, true).await
+    agent.run_loop(args.max_turns, true).await
   };
 
   let final_messages = match loop_result {
