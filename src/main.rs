@@ -217,7 +217,9 @@ async fn main() -> Result<()> {
   }
   let loop_result = if args.steer {
     let tui = tui::start(args.profile.clone(), profile.model.to_string(), args.auto)?;
-    agent.steer_loop(args.max_turns, args.auto, tui, wait_for_steer_input).await
+    agent
+      .steer_loop(args.max_turns, args.auto, tui, wait_for_steer_input)
+      .await
   } else if args.worker {
     agent.run_loop(args.max_turns, false, true).await
   } else {
