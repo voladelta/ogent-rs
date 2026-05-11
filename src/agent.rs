@@ -572,7 +572,7 @@ impl Agent {
         self.meta.prompt = None;
         self.meta.start_ts = None;
         self.meta.end_ts = None;
-        let mut messages = crate::prompts::build_10x_coder_messages("");
+        let mut messages = crate::prompts::build_messages("");
         let workflow_state = crate::prompts::enrich_initial_messages(&mut messages);
         self.messages = messages;
         self.dirty = false;
@@ -1185,7 +1185,7 @@ mod dirty_state_machine_tests {
   fn dummy_agent() -> Agent {
     Agent::new(
       dummy_client(),
-      crate::prompts::build_10x_coder_messages(""),
+      crate::prompts::build_messages(""),
       Vec::new(),
       CompactState::disabled(),
       None,

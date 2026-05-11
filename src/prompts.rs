@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use crate::types::Message;
 
-pub const TENX_CODER_SYSTEM_PROMPT: &str = include_str!("../prompts/10x-coder.md");
+pub const TENX_CODER_SYSTEM_PROMPT: &str = include_str!("../prompts/SYSTEM_PROMPT.md");
 
 pub const WORKER_SUMMARY_PROMPT: &str = "\n\n## Worker Report Protocol\n\nWhen done, call `worker_complete` with a concise Markdown summary:\n\n```json\n{\"summary\":\"...\"}\n```\n\nInclude in the summary:\n- What you accomplished\n- Files inspected, commands run, results\n- Decisions made\n- Files modified (list)\n- Blockers (omit if none)\n\nRules:\n- Concise fragments are preferred.\n- Never fabricate or embellish results. Report only what you actually observed or did.\n- Do not write intermediate analysis, planning, or decision documents to the repo.";
 
@@ -150,7 +150,7 @@ fn xml_escape(s: &str) -> String {
   out
 }
 
-pub fn build_10x_coder_messages(prompt: &str) -> Vec<Message> {
+pub fn build_messages(prompt: &str) -> Vec<Message> {
   vec![
     Message {
       role: "system".into(),

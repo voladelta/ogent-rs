@@ -127,7 +127,7 @@ async fn main() -> Result<()> {
     let stripped = crate::task_tracker::TaskTracker::strip_handoff_state_block(&data);
     let content =
       format!("## Previous Session Handoff\n\n{stripped}\n\nPlease continue from this handoff.");
-    let mut messages = prompts::build_10x_coder_messages("");
+    let mut messages = prompts::build_messages("");
     messages.push(Message {
       role: "user".into(),
       content,
@@ -171,7 +171,7 @@ async fn main() -> Result<()> {
     if prompt.is_empty() && !args.steer {
       bail!("usage: ogent [--profile ...] [--steer] <prompt>");
     }
-    let mut messages = prompts::build_10x_coder_messages(&prompt);
+    let mut messages = prompts::build_messages(&prompt);
     let workflow_state = prompts::enrich_initial_messages(&mut messages);
     (
       messages,
