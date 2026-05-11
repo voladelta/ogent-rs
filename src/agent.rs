@@ -34,6 +34,7 @@ enum SteerState {
     cancelled: bool,
     steer_msg: Option<String>,
     stream_rx: tokio::sync::mpsc::Receiver<StreamEvent>,
+    tool_calling: bool,
   },
   ProcessResult(ChatResponse),
   FinishTurn {
@@ -159,6 +160,7 @@ impl SteerState {
           cancelled: false,
           steer_msg: None,
           stream_rx,
+          tool_calling: false,
         })
       }
 
@@ -168,6 +170,7 @@ impl SteerState {
         mut cancelled,
         mut steer_msg,
         mut stream_rx,
+        mut tool_calling,
       } => {
         let chat_result = 'select: loop {
           tokio::select! {
@@ -176,13 +179,18 @@ impl SteerState {
               match ev {
                 StreamEvent::Content(chunk) => {
                   tui.log.append_stream_chunk(&chunk);
-                  tui.status.set_state(AgentState::Replying);
+                  if !tool_calling {
+                    tui.status.set_state(AgentState::Replying);
+                  }
                 }
                 StreamEvent::Reasoning(chunk) => {
                   tui.log.append_reasoning_chunk(&chunk);
-                  tui.status.set_state(AgentState::Reasoning);
+                  if !tool_calling {
+                    tui.status.set_state(AgentState::Reasoning);
+                  }
                 }
                 StreamEvent::ToolCalling => {
+                  tool_calling = true;
                   tui.status.set_state(AgentState::Working);
                 }
               }
