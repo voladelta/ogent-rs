@@ -35,6 +35,7 @@ pub struct SessionFlags {
   #[serde(rename = "continue")]
   pub continue_flag: bool,
   pub resume: bool,
+  pub temp: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -219,6 +220,7 @@ mod tests {
         retry: 5,
         continue_flag: false,
         resume: false,
+        temp: false,
       },
       usage: SessionUsage {
         prompt_tokens: 100,
@@ -255,6 +257,7 @@ mod tests {
         retry: 5,
         continue_flag: false,
         resume: false,
+        temp: false,
       },
       usage: SessionUsage {
         prompt_tokens: 0,

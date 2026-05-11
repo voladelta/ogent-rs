@@ -110,6 +110,9 @@ cargo run -- --autocompact 10 --handoff "Large refactoring task"
 # Auto-compact context at 5% and continue automatically
 cargo run -- --autocompact 5 "Large refactoring task"
 
+# Ephemeral session (no session state written to disk)
+cargo run -- --temp "Quick one-off query"
+
 # Try different backends
 cargo run -- --profile kimi "Explain the fnv1a hashline logic"
 cargo run -- --profile glm "Summarize this repository"

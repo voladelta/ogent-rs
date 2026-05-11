@@ -23,6 +23,7 @@ Common options:
 | `--resume` | Resume from the latest non-worker session (`.ogent/sessions/*.jsonl`) |
 | `--resume-session <name>` | Resume from a specific session file by name (without `.jsonl`) |
 | `--worker` | Internal worker mode. Reads system prompt from stdin |
+| `--temp` | Ephemeral mode: run without persisting session state to disk |
 
 Non-steer mode requires a prompt unless `--continue` or `--resume` is used.
 

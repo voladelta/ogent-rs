@@ -45,6 +45,8 @@ struct Args {
   continue_flag: bool,
   #[arg(long, default_value_t = false)]
   resume: bool,
+  #[arg(long, default_value_t = false)]
+  temp: bool,
   #[arg(long, value_name = "SESSION")]
   resume_session: Option<String>,
   prompt: Vec<String>,
@@ -89,6 +91,7 @@ async fn main() -> Result<()> {
       retry: args.retry,
       continue_flag: args.continue_flag,
       resume: args.resume,
+      temp: args.temp,
     },
     usage: session::SessionUsage {
       prompt_tokens: 0,
@@ -227,7 +230,7 @@ async fn main() -> Result<()> {
   let final_messages = match loop_result {
     Ok(msgs) => msgs,
     Err(e) => {
-      if agent.dirty {
+      if agent.dirty && !agent.meta.flags.temp {
         agent.meta.usage.prompt_tokens = agent.total_prompt;
         agent.meta.usage.completion_tokens = agent.total_completion;
         session::write_meta(&agent.meta)?;
@@ -236,7 +239,7 @@ async fn main() -> Result<()> {
       return Err(e.into());
     }
   };
-  if agent.dirty {
+  if agent.dirty && !agent.meta.flags.temp {
     agent.meta.usage.prompt_tokens = agent.total_prompt;
     agent.meta.usage.completion_tokens = agent.total_completion;
     session::write_meta(&agent.meta)?;

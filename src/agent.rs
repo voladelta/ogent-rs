@@ -603,7 +603,7 @@ impl Agent {
         }
       }
       SteerEvent::New => {
-        if self.dirty {
+        if self.dirty && !self.meta.flags.temp {
           self.meta.usage.prompt_tokens = self.total_prompt;
           self.meta.usage.completion_tokens = self.total_completion;
           session::write_meta(&self.meta)?;
@@ -643,10 +643,12 @@ impl Agent {
         if !self.dirty {
           tui.log.push("[steer] nothing to fork; session is empty");
         } else {
-          self.meta.usage.prompt_tokens = self.total_prompt;
-          self.meta.usage.completion_tokens = self.total_completion;
-          session::write_meta(&self.meta)?;
-          session::persist_session(&self.messages, &self.meta.session_id)?;
+          if !self.meta.flags.temp {
+            self.meta.usage.prompt_tokens = self.total_prompt;
+            self.meta.usage.completion_tokens = self.total_completion;
+            session::write_meta(&self.meta)?;
+            session::persist_session(&self.messages, &self.meta.session_id)?;
+          }
           let parent_id = self.meta.session_id.clone();
           self.meta.session_id = session::generate_session_id();
           self.meta.parent_session = Some(parent_id.clone());
@@ -654,8 +656,10 @@ impl Agent {
           self.meta.end_ts = None;
           self.next_turn_reset = true;
           self.dirty = true;
-          session::write_meta(&self.meta)?;
-          session::persist_session(&self.messages, &self.meta.session_id)?;
+          if !self.meta.flags.temp {
+            session::write_meta(&self.meta)?;
+            session::persist_session(&self.messages, &self.meta.session_id)?;
+          }
           tui.log.push(format!(
             "[steer] forked to {}; parent is {}. Resume parent with --resume-session {}",
             self.meta.session_id, parent_id, parent_id
@@ -836,9 +840,11 @@ impl Agent {
   async fn handle_handoff(&mut self) -> Result<bool, AgentError> {
     let path = std::mem::take(&mut self.compact.last_handoff_path);
     if self.compact.exit_after {
-      self.meta.usage.prompt_tokens = self.total_prompt;
-      self.meta.usage.completion_tokens = self.total_completion;
-      session::write_meta(&self.meta)?;
+      if !self.meta.flags.temp {
+        self.meta.usage.prompt_tokens = self.total_prompt;
+        self.meta.usage.completion_tokens = self.total_completion;
+        session::write_meta(&self.meta)?;
+      }
       eprintln!("\nHandoff written to {path}");
       return Ok(true);
     }
@@ -864,10 +870,12 @@ impl Agent {
       )),
     ];
     self.dirty = false;
-    self.meta.usage.prompt_tokens = self.total_prompt;
-    self.meta.usage.completion_tokens = self.total_completion;
-    session::write_meta(&self.meta)?;
-    session::persist_session(&old_messages, &self.meta.session_id)?;
+    if !self.meta.flags.temp {
+      self.meta.usage.prompt_tokens = self.total_prompt;
+      self.meta.usage.completion_tokens = self.total_completion;
+      session::write_meta(&self.meta)?;
+      session::persist_session(&old_messages, &self.meta.session_id)?;
+    }
     let parent_id = self.meta.session_id.clone();
     self.meta.session_id = session::generate_session_id();
     self.meta.parent_session = Some(parent_id);
@@ -879,7 +887,9 @@ impl Agent {
     self.meta.prompt = None;
     self.meta.start_ts = None;
     self.meta.end_ts = None;
-    session::write_meta(&self.meta)?;
+    if !self.meta.flags.temp {
+      session::write_meta(&self.meta)?;
+    }
     self.push_task_tracking_reminder();
     self.compact.compacting = false;
     self.compact.urgency = 0;
@@ -1220,6 +1230,7 @@ mod dirty_state_machine_tests {
         retry: 0,
         continue_flag: false,
         resume: false,
+        temp: false,
       },
       usage: session::SessionUsage {
         prompt_tokens: 0,
