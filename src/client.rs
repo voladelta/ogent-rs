@@ -71,6 +71,7 @@ impl Client {
     messages: &[Message],
     tools: &[Tool],
     cancel: Option<&tokio_util::sync::CancellationToken>,
+    stream_tx: Option<tokio::sync::mpsc::Sender<crate::sse::StreamEvent>>,
   ) -> Result<ChatResponse, ClientError> {
     let req_body = (self.build_req)(messages, tools);
     let mut last_err = None;
@@ -79,7 +80,7 @@ impl Client {
         let delay_secs = 2u64.saturating_pow((attempt - 1) as u32).min(60);
         sleep(Duration::from_secs(delay_secs)).await;
       }
-      match self.chat_once(&req_body, cancel).await {
+      match self.chat_once(&req_body, cancel, stream_tx.clone()).await {
         Ok(resp) => return Ok(resp),
         Err(err) if !err.is_retryable() => return Err(err),
         Err(err) => last_err = Some(err),
@@ -92,6 +93,7 @@ impl Client {
     &self,
     req_body: &Value,
     cancel: Option<&tokio_util::sync::CancellationToken>,
+    stream_tx: Option<tokio::sync::mpsc::Sender<crate::sse::StreamEvent>>,
   ) -> Result<ChatResponse, ClientError> {
     if cancel.is_some_and(tokio_util::sync::CancellationToken::is_cancelled) {
       return Err(ClientError::Aborted {
@@ -119,6 +121,8 @@ impl Client {
         body: body.trim().to_string(),
       });
     }
-    parse_sse_response(resp, cancel).await.map_err(Into::into)
+    parse_sse_response(resp, cancel, stream_tx)
+      .await
+      .map_err(Into::into)
   }
 }

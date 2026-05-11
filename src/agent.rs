@@ -1,8 +1,9 @@
 use crate::client::{Client, ClientError};
 use crate::session;
+use crate::sse::StreamEvent;
 use crate::task_tracker::{TaskTracker, is_tracking_tool_name};
 use crate::tools::{ToolContext, execute_tool, is_read_only_tool};
-use crate::tui::{SteerEvent, TuiHandle};
+use crate::tui::{AgentState, SteerEvent, TuiHandle};
 use crate::types::{ChatResponse, Message, Tool, ToolCall};
 use crate::workers::WorkerManager;
 
@@ -32,6 +33,7 @@ enum SteerState {
     cancel: tokio_util::sync::CancellationToken,
     cancelled: bool,
     steer_msg: Option<String>,
+    stream_rx: tokio::sync::mpsc::Receiver<StreamEvent>,
   },
   ProcessResult(ChatResponse),
   FinishTurn {
@@ -57,6 +59,7 @@ impl SteerState {
       Self::Exit(msgs) => Ok(Self::Exit(msgs)),
 
       Self::Idle { wait_for_input } => {
+        tui.status.set_state(AgentState::Idle);
         if agent.next_turn_reset {
           ctx.turn = 1;
           agent.next_turn_reset = false;
@@ -141,14 +144,21 @@ impl SteerState {
         let client = agent.client.clone();
         let messages = agent.messages.clone();
         let tools = agent.tools.clone();
-        let chat =
-          tokio::spawn(async move { client.chat(&messages, &tools, Some(&cancel_clone)).await });
+        let (stream_tx, stream_rx) = tokio::sync::mpsc::channel::<StreamEvent>(1);
+        let chat = tokio::spawn(async move {
+          client
+            .chat(&messages, &tools, Some(&cancel_clone), Some(stream_tx))
+            .await
+        });
+
+        tui.log.start_stream();
 
         Ok(Self::InFlight {
           chat,
           cancel,
           cancelled: false,
           steer_msg: None,
+          stream_rx,
         })
       }
 
@@ -157,10 +167,26 @@ impl SteerState {
         cancel,
         mut cancelled,
         mut steer_msg,
+        mut stream_rx,
       } => {
         let chat_result = 'select: loop {
           tokio::select! {
             r = &mut chat => break 'select r,
+            Some(ev) = stream_rx.recv() => {
+              match ev {
+                StreamEvent::Content(chunk) => {
+                  tui.log.append_stream_chunk(&chunk);
+                  tui.status.set_state(AgentState::Replying);
+                }
+                StreamEvent::Reasoning(chunk) => {
+                  tui.log.append_reasoning_chunk(&chunk);
+                  tui.status.set_state(AgentState::Reasoning);
+                }
+                StreamEvent::ToolCalling => {
+                  tui.status.set_state(AgentState::Working);
+                }
+              }
+            }
             maybe_event = tui.rx.recv(), if !cancelled && steer_msg.is_none() => {
               let Some(event) = maybe_event else { continue; };
               match event {
@@ -211,6 +237,14 @@ impl SteerState {
           }
         };
 
+        while let Ok(ev) = stream_rx.try_recv() {
+          match ev {
+            StreamEvent::Content(chunk) => tui.log.append_stream_chunk(&chunk),
+            StreamEvent::Reasoning(chunk) => tui.log.append_reasoning_chunk(&chunk),
+            StreamEvent::ToolCalling => {}
+          }
+        }
+
         let resp = match chat_result {
           Ok(Ok(resp)) => resp,
           Ok(Err(ClientError::Aborted { resp })) => {
@@ -248,8 +282,10 @@ impl SteerState {
 
       Self::ProcessResult(resp) => {
         let has_more = agent
-          .handle_turn_response_with_log(resp, Some(&tui.log))
+          .handle_turn_response_with_log(resp, Some(&tui.log), true)
           .await?;
+        tui.log.end_stream();
+        tui.status.set_state(AgentState::Idle);
         Ok(Self::FinishTurn { has_more })
       }
 
@@ -428,7 +464,10 @@ impl Agent {
       );
       self.push_turn_budget_reminder(max_turns, turn);
       self.refresh_workflow_reminder();
-      let resp = self.client.chat(&self.messages, &self.tools, None).await?;
+      let resp = self
+        .client
+        .chat(&self.messages, &self.tools, None, None)
+        .await?;
 
       let mut has_more = match self.handle_turn_response(resp).await {
         Ok(hm) => hm,
@@ -620,18 +659,19 @@ impl Agent {
   }
 
   async fn handle_turn_response(&mut self, resp: ChatResponse) -> Result<bool, AgentError> {
-    self.handle_turn_response_with_log(resp, None).await
+    self.handle_turn_response_with_log(resp, None, false).await
   }
 
   async fn handle_turn_response_with_log(
     &mut self,
     resp: ChatResponse,
     ui_log: Option<&crate::tui::UiLog>,
+    streamed: bool,
   ) -> Result<bool, AgentError> {
     self.meta.end_ts = Some(session::timestamp_ms());
     self.total_prompt += resp.usage.prompt_tokens;
     self.total_completion += resp.usage.completion_tokens;
-    if !resp.reasoning_content.is_empty() {
+    if !resp.reasoning_content.is_empty() && !streamed {
       if let Some(log) = ui_log {
         log.push(format!(
           "reasoning: {}",
@@ -641,7 +681,7 @@ impl Agent {
         eprintln!("reasoning: {}", truncate(&resp.reasoning_content, 300));
       }
     }
-    if !resp.content.is_empty() {
+    if !resp.content.is_empty() && !streamed {
       if let Some(log) = ui_log {
         log.push_assistant_markdown(&resp.content);
       } else {

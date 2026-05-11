@@ -41,11 +41,20 @@ pub enum SteerEvent {
   Exit,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentState {
+  Idle,
+  Reasoning,
+  Replying,
+  Working,
+}
+
 #[derive(Clone)]
 pub struct UiLog {
   lines: Arc<Mutex<Vec<String>>>,
   len: Arc<AtomicUsize>,
   generation: Arc<AtomicU64>,
+  streaming: Arc<AtomicBool>,
 }
 
 impl Default for UiLog {
@@ -54,6 +63,7 @@ impl Default for UiLog {
       lines: Arc::new(Mutex::new(Vec::new())),
       len: Arc::new(AtomicUsize::new(0)),
       generation: Arc::new(AtomicU64::new(0)),
+      streaming: Arc::new(AtomicBool::new(false)),
     }
   }
 }
@@ -84,6 +94,48 @@ impl UiLog {
     self.generation.fetch_add(1, Ordering::Relaxed);
   }
 
+  pub fn start_stream(&self) {
+    let mut lines = self.lines.lock().expect("ui log poisoned");
+    lines.push("ogent: ".to_string());
+    self.len.fetch_add(1, Ordering::Relaxed);
+    drop(lines);
+    self.streaming.store(true, Ordering::Relaxed);
+  }
+
+  fn append_chunk_prefixed(&self, chunk: &str, prefix: &str) {
+    if !self.streaming.load(Ordering::Relaxed) {
+      return;
+    }
+    let mut lines = self.lines.lock().expect("ui log poisoned");
+    let mut current = lines
+      .pop()
+      .filter(|l| l.starts_with(prefix))
+      .unwrap_or_else(|| prefix.to_string());
+    for (i, part) in chunk.split('\n').enumerate() {
+      if i > 0 {
+        lines.push(current);
+        current = prefix.to_string();
+      }
+      current.push_str(part);
+    }
+    lines.push(current);
+    self.len.store(lines.len(), Ordering::Relaxed);
+    drop(lines);
+    self.generation.fetch_add(1, Ordering::Relaxed);
+  }
+
+  pub fn append_stream_chunk(&self, chunk: &str) {
+    self.append_chunk_prefixed(chunk, "ogent: ");
+  }
+
+  pub fn append_reasoning_chunk(&self, chunk: &str) {
+    self.append_chunk_prefixed(chunk, "reasoning: ");
+  }
+
+  pub fn end_stream(&self) {
+    self.streaming.store(false, Ordering::Relaxed);
+  }
+
   fn snapshot(&self) -> Vec<String> {
     self.lines.lock().expect("ui log poisoned").clone()
   }
@@ -104,6 +156,7 @@ struct StatusInner {
   turn: i32,
   tokens: i32,
   auto: bool,
+  state: AgentState,
 }
 
 impl UiStatus {
@@ -115,6 +168,7 @@ impl UiStatus {
         turn: 0,
         tokens: 0,
         auto,
+        state: AgentState::Idle,
       })),
     }
   }
@@ -127,6 +181,14 @@ impl UiStatus {
 
   pub fn set_auto(&self, auto: bool) {
     self.inner.lock().expect("ui status poisoned").auto = auto;
+  }
+
+  pub fn set_state(&self, state: AgentState) {
+    self.inner.lock().expect("ui status poisoned").state = state;
+  }
+
+  pub fn state(&self) -> AgentState {
+    self.inner.lock().expect("ui status poisoned").state
   }
 
   fn snapshot(&self) -> StatusInner {
@@ -249,6 +311,7 @@ fn run_ui_loop(
   let mut prev_generation = log.generation().wrapping_sub(1);
   let mut log_height = 0u16;
   let mut max_scroll_y = 0usize;
+  let mut prev_state = status.state();
   while !stop.load(Ordering::Relaxed) {
     let has_selector = file_selector.is_some();
     if has_selector != cursor_visible {
@@ -421,6 +484,17 @@ fn run_ui_loop(
       }
     }
     if log_changed || has_event {
+      let state = status.state();
+      if state != prev_state {
+        prev_state = state;
+        let title = match state {
+          AgentState::Reasoning => "reasoning...",
+          AgentState::Replying => "replying...",
+          AgentState::Working => "working...",
+          AgentState::Idle => "message or command",
+        };
+        textarea.set_block(Block::default().borders(Borders::ALL).title(title));
+      }
       (log_height, max_scroll_y) = draw(
         terminal,
         &log,
@@ -744,6 +818,25 @@ fn render_log_line(value: &str) -> Line<'static> {
       Style::default()
         .fg(Color::Cyan)
         .add_modifier(Modifier::BOLD),
+    )]);
+  }
+  if let Some(reasoning) = value.strip_prefix("reasoning: ") {
+    return Line::from(vec![
+      Span::styled(
+        "reasoning: ",
+        Style::default()
+          .fg(Color::Magenta)
+          .add_modifier(Modifier::ITALIC),
+      ),
+      Span::raw(reasoning.to_string()),
+    ]);
+  }
+  if value == "reasoning:" {
+    return Line::from(vec![Span::styled(
+      "reasoning:",
+      Style::default()
+        .fg(Color::Magenta)
+        .add_modifier(Modifier::ITALIC),
     )]);
   }
   Line::from(Span::raw(value.to_string()))

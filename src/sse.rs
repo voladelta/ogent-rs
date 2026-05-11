@@ -3,6 +3,13 @@ use serde::Deserialize;
 
 use crate::types::{ChatResponse, FunctionCall, ToolCall, Usage};
 
+#[derive(Debug, Clone)]
+pub enum StreamEvent {
+  Content(String),
+  Reasoning(String),
+  ToolCalling,
+}
+
 #[derive(Debug, Deserialize)]
 struct StreamChunk {
   #[serde(default)]
@@ -81,12 +88,22 @@ fn flush_tool_calls(acc: &mut Vec<AccToolCall>, result: &mut ChatResponse) {
   );
 }
 
+async fn send_event(tx: &mut Option<tokio::sync::mpsc::Sender<StreamEvent>>, ev: StreamEvent) {
+  if let Some(t) = tx {
+    if t.send(ev).await.is_err() {
+      *tx = None;
+    }
+  }
+}
+
 pub async fn parse_sse_response(
   resp: reqwest::Response,
   cancel: Option<&tokio_util::sync::CancellationToken>,
+  mut stream_tx: Option<tokio::sync::mpsc::Sender<StreamEvent>>,
 ) -> Result<ChatResponse, SseError> {
   let mut result = ChatResponse::default();
   let mut acc: Vec<AccToolCall> = Vec::new();
+  let mut tool_calling = false;
   let mut stream = resp.bytes_stream();
   let mut buf = String::new();
   let mut consumed = 0;
@@ -101,7 +118,14 @@ pub async fn parse_sse_response(
     while let Some(pos) = buf[consumed..].find('\n') {
       let abs_pos = consumed + pos;
       let line = buf[consumed..abs_pos].trim_end_matches('\r');
-      process_line(line, &mut result, &mut acc);
+      process_line(
+        line,
+        &mut result,
+        &mut acc,
+        &mut stream_tx,
+        &mut tool_calling,
+      )
+      .await;
       consumed = abs_pos + 1;
     }
     if consumed > 0 {
@@ -114,13 +138,22 @@ pub async fn parse_sse_response(
       buf[consumed..].trim_end_matches('\r'),
       &mut result,
       &mut acc,
-    );
+      &mut stream_tx,
+      &mut tool_calling,
+    )
+    .await;
   }
   flush_tool_calls(&mut acc, &mut result);
   Ok(result)
 }
 
-fn process_line(line: &str, result: &mut ChatResponse, acc: &mut Vec<AccToolCall>) {
+async fn process_line(
+  line: &str,
+  result: &mut ChatResponse,
+  acc: &mut Vec<AccToolCall>,
+  stream_tx: &mut Option<tokio::sync::mpsc::Sender<StreamEvent>>,
+  tool_calling: &mut bool,
+) {
   let Some(data) = line.strip_prefix("data:") else {
     return;
   };
@@ -136,10 +169,16 @@ fn process_line(line: &str, result: &mut ChatResponse, acc: &mut Vec<AccToolCall
   }
   for choice in chunk.choices {
     if let Some(reasoning_content) = choice.delta.reasoning_content {
+      send_event(stream_tx, StreamEvent::Reasoning(reasoning_content.clone())).await;
       result.reasoning_content.push_str(&reasoning_content);
     }
     if let Some(content) = choice.delta.content {
+      send_event(stream_tx, StreamEvent::Content(content.clone())).await;
       result.content.push_str(&content);
+    }
+    if !choice.delta.tool_calls.is_empty() && !*tool_calling {
+      *tool_calling = true;
+      send_event(stream_tx, StreamEvent::ToolCalling).await;
     }
     for tc in choice.delta.tool_calls {
       if tc.index >= acc.len() {
@@ -168,60 +207,79 @@ fn process_line(line: &str, result: &mut ChatResponse, acc: &mut Vec<AccToolCall
 mod tests {
   use super::*;
 
-  #[test]
-  fn process_line_accumulates_tool_args() {
+  #[tokio::test]
+  async fn process_line_accumulates_tool_args() {
     let mut resp = ChatResponse::default();
     let mut acc = Vec::new();
+    let mut tc = false;
     process_line(
       r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"x","type":"function","function":{"name":"bash","arguments":"{\"command\""}}]}}]}"#,
       &mut resp,
       &mut acc,
-    );
+      &mut None,
+      &mut tc,
+    ).await;
     process_line(
       r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":":\"ls\""}}]}}]}"#,
       &mut resp,
       &mut acc,
-    );
+      &mut None,
+      &mut tc,
+    ).await;
     assert_eq!(acc.first().unwrap().arguments, "{\"command\":\"ls\"");
   }
 
-  #[test]
-  fn process_line_accepts_null_content_chunks() {
+  #[tokio::test]
+  async fn process_line_accepts_null_content_chunks() {
     let mut resp = ChatResponse::default();
     let mut acc = Vec::new();
+    let mut tc = false;
     process_line(
       r#"data: {"choices":[{"delta":{"content":null,"reasoning_content":"thinking"}}]}"#,
       &mut resp,
       &mut acc,
-    );
+      &mut None,
+      &mut tc,
+    )
+    .await;
     process_line(
       r#"data: {"choices":[{"delta":{"content":"hello","reasoning_content":null}}]}"#,
       &mut resp,
       &mut acc,
-    );
+      &mut None,
+      &mut tc,
+    )
+    .await;
     assert_eq!(resp.reasoning_content, "thinking");
     assert_eq!(resp.content, "hello");
   }
 
-  #[test]
-  fn process_line_accepts_null_function_fields() {
+  #[tokio::test]
+  async fn process_line_accepts_null_function_fields() {
     let mut resp = ChatResponse::default();
     let mut acc = Vec::new();
+    let mut tc = false;
     process_line(
       r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"x","type":"function","function":{"name":"read_file","arguments":""}}]}}]}"#,
       &mut resp,
       &mut acc,
-    );
+      &mut None,
+      &mut tc,
+    ).await;
     process_line(
       r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":null,"arguments":"{\"path\": \"README.md"}}]}}]}"#,
       &mut resp,
       &mut acc,
-    );
+      &mut None,
+      &mut tc,
+    ).await;
     process_line(
       r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":null,"arguments":"\"}"}}]}}]}"#,
       &mut resp,
       &mut acc,
-    );
+      &mut None,
+      &mut tc,
+    ).await;
     flush_tool_calls(&mut acc, &mut resp);
     let tc = resp.tool_calls.first().unwrap();
     assert_eq!(tc.function.name, "read_file");
