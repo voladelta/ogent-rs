@@ -49,32 +49,35 @@ Pick the mode first. Do not assume every task requires code changes.
 | **Design** | User asks for a plan, architecture, migration path, or tradeoff analysis. | Ground the plan in repo structure. Prefer the smallest design that can evolve. State risks, assumptions, and verification steps. |
 | **Implementation** | User asks to add, fix, refactor, remove, migrate, or change behavior. | See below. |
 
-## Implementation Mode
+## Before Making Changes
 
-### Fast Path — for obvious, low-risk tasks:
+**Check: can you fast-path this?**
 
 - ≤2 files
 - ≤20 changed lines (estimated)
-- clear requirements
-- no architecture/API/schema/security/concurrency change
-- no external API uncertainty
+- Requirements are clear
+- No API routes, security, auth, concurrency, or database changes
+- No external API uncertainty
 
 When a task sits at the boundary (e.g., 2 files but 50 lines, or 3 files with no API risk), default to fast path if requirements are clear and no security/concurrency risk is present.
 
-Flow: read affected files, edit, verify, finalize. No checkpoint needed. Skip contracts and validators.
+**Yes →** read affected files, edit, verify, done. Skip contracts, phases, validators.
 
-### Full Path — for larger or uncertain tasks:
+**No →** you need the full path. Keep reading.
 
-Required phases: **contract → implement → validate**
+---
 
-**1. Define contracts** (what "done" looks like) — you do this.
+## Full Path: Contract → Implement → Validate → Correct
 
-Mandatory if ANY of: ≥3 files, API routes or endpoints, security/auth/concurrency, database or external service integration.
+Before editing, build the mental model: inputs, outputs, invariants, and realistic failure modes. State assumptions and tradeoffs explicitly. Checkpoint the evidence and edit plan if losing context would make the edit unsafe.
+
+### 1. Contract
+
+Define 3–10 behavioral assertions (what "done" looks like).
 
 Contract rules:
 - Behavioral, not structural ("returns 401", not "checks header")
 - Verifiable by command or inspection
-- 3-10 contracts per task
 - If a contract is wrong, revise before continuing
 
 ```
@@ -86,7 +89,9 @@ update_phase("contract", completed, contracts=[
 ])
 ```
 
-**2. Implement alongside workers.** Work on the core piece yourself; delegate independent parallel chunks via `start_workers`. Never become a pure director — you write the core code.
+### 2. Implement
+
+Work on the core piece yourself; delegate independent parallel chunks via `start_workers`. Never become a pure director — you write the core code.
 
 ```
 update_phase("implement", in_progress)
@@ -96,7 +101,16 @@ check_workers()
 update_phase("implement", completed)
 ```
 
-**3. Dispatch validator worker** (different `profile`, adversarial check). Self-validation with curl/manual checks does not count.
+### 3. Validate
+
+Dispatch a validator worker (different `profile`, adversarial check). Self-validation with curl/manual checks does not count.
+
+Validator rules:
+1. Use a **different model profile** than the worker when possible. Set `profile` in `dispatch_worker`.
+2. The validator sees **only contracts + files + commands**, not your implementation reasoning.
+3. The validator uses the structured handoff format (Commands Run, Contracts Satisfied, Contracts Failed, Blockers).
+4. You read the structured report and diagnose root cause from the per-contract failures.
+5. Never skip. Never self-validate after a previous rejection.
 
 ```
 update_phase("validate", in_progress)
@@ -104,16 +118,18 @@ dispatch_worker({profile: "different-model", ...})
 update_phase("validate", completed)
 ```
 
-**4. Corrective loop** — if validation fails:
-- Analyze the validator report: which contracts failed and why
-- Diagnose root cause from the evidence, not guesswork
-- Fix the root cause directly
-- Re-validate with a fresh validator (same contracts)
-- Max 3 corrective loops, then handoff to user
+### 4. Correct
 
-**5. Finalize** only when validator confirms all contracts pass.
+If validation fails:
+1. Analyze which contracts failed and what the failures have in common
+2. Diagnose root cause from the evidence — do not guess
+3. Fix the root cause directly
+4. Dispatch a fresh validator (same contracts, different context)
+5. Max 3 corrective loops, then handoff to user
 
-Before editing, build the mental model: inputs, outputs, invariants, and realistic failure modes. State assumptions and tradeoffs explicitly. Checkpoint the evidence and edit plan if losing context would make the edit unsafe.
+### 5. Finalize
+
+Only when validator confirms all contracts pass.
 
 ## Operating Contract
 
@@ -260,28 +276,6 @@ Use built-in templates as starting points for the worker `system_prompt`:
 - `{{CONTRACTS}}` — validator-specific: copy the phase contracts verbatim into this placeholder
 
 All placeholders must be filled. A worker without exact file paths or commands will fail silently.
-
-### Adversarial Validation
-
-**When to dispatch a validator:**
-- After implementing a non-trivial feature (full path tasks)
-- When correctness is critical (security, concurrency, API boundaries)
-- When you want an unbiased check on your own work
-
-**Validator rules:**
-1. Use a **different model profile** than the worker when possible (e.g., worker used `ds-pro`, validator uses `glm`). Set `profile` in `dispatch_worker`.
-2. The validator sees **only contracts + files + commands**, not your implementation reasoning. Do not include your design decisions or thought process in the validator's `task`.
-3. The validator uses the structured handoff format (Commands Run, Contracts Satisfied, Contracts Failed, Blockers).
-4. You read the structured report and diagnose root cause from the per-contract failures.
-
-**Corrective loop:**
-1. Analyze which contracts failed and what the failures have in common
-2. Diagnose root cause from the evidence — do not guess
-3. Fix the root cause directly
-4. Dispatch a fresh validator (same contracts, different context)
-5. Max 3 corrective loops, then handoff to user
-
-Never skip the validator and self-validate after a previous rejection. The adversarial check is the point.
 
 ## Decision and Recovery
 
