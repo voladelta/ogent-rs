@@ -103,6 +103,8 @@ async fn main() -> Result<()> {
 
   let is_resume = args.resume;
   let prompt = args.prompt.join(" ");
+  let wait_for_steer_input =
+    args.steer && !args.worker && !args.continue_flag && !is_resume && prompt.is_empty();
 
   let (mut messages, tools, mut task_tracker, workflow_state) = if args.worker {
     let system_prompt = read_stdin().await?.trim().to_string();
@@ -216,7 +218,7 @@ async fn main() -> Result<()> {
   }
   let loop_result = if args.steer {
     let tui = tui::start(args.profile.clone(), profile.model.to_string(), args.auto)?;
-    agent.steer_loop(args.max_turns, args.auto, tui).await
+    agent.steer_loop(args.max_turns, args.auto, tui, wait_for_steer_input).await
   } else if args.worker {
     agent.run_loop(args.max_turns, false, true).await
   } else {

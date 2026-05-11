@@ -265,6 +265,7 @@ impl Agent {
     max_turns: i32,
     mut auto_continue: bool,
     mut tui: TuiHandle,
+    mut wait_for_input: bool,
   ) -> Result<Vec<Message>, AgentError> {
     tui
       .log
@@ -281,6 +282,7 @@ impl Agent {
           SteerAction::Exit => return Ok(self.messages.clone()),
           SteerAction::Restart => {
             turn = 1;
+            wait_for_input = true;
             tui
               .log
               .push("[steer] commands: /auto /stop /complete /cancel /new /fork /q");
@@ -290,7 +292,32 @@ impl Agent {
         }
         if self.messages.len() > wait_baseline_len
           && matches!(self.messages.last().map(|m| m.role.as_str()), Some("user"))
-        {}
+        {
+          wait_for_input = false;
+        }
+      }
+
+      while wait_for_input {
+        let Some(event) = tui.rx.recv().await else {
+          continue;
+        };
+        match self.apply_steer_event(event, &mut auto_continue, &tui)? {
+          SteerAction::Exit => return Ok(self.messages.clone()),
+          SteerAction::Restart => {
+            turn = 1;
+            wait_for_input = true;
+            tui
+              .log
+              .push("[steer] commands: /auto /stop /complete /cancel /new /fork /q");
+            continue 'outer;
+          }
+          SteerAction::Continue => {}
+        }
+        if self.messages.len() > wait_baseline_len
+          && matches!(self.messages.last().map(|m| m.role.as_str()), Some("user"))
+        {
+          wait_for_input = false;
+        }
       }
 
       if max_turns > 0 && turn > max_turns {
@@ -340,6 +367,7 @@ impl Agent {
                 self.apply_steer_event(SteerEvent::New, &mut auto_continue, &tui)?;
                 chat.abort();
                 turn = 1;
+                wait_for_input = true;
                 tui.log.push("[steer] commands: /auto /stop /complete /cancel /new /fork /q");
                 continue 'outer;
               }
@@ -359,6 +387,7 @@ impl Agent {
                     cancel.cancel();
                     chat.abort();
                     turn = 1;
+                    wait_for_input = true;
                     tui.log.push("[steer] commands: /auto /stop /complete /cancel /new /fork /q");
                     continue 'outer;
                   }
@@ -386,6 +415,7 @@ impl Agent {
             ));
           }
           if cancelled_turn {
+            wait_for_input = true;
             continue;
           }
           if let Some(msg) = steer_msg {
@@ -495,6 +525,7 @@ impl Agent {
                 Some(SteerEvent::New) => {
                   self.apply_steer_event(SteerEvent::New, &mut auto_continue, &tui)?;
                   turn = 1;
+                  wait_for_input = true;
                   tui
                     .log
                     .push("[steer] commands: /auto /stop /complete /cancel /new /fork /q");
@@ -551,6 +582,7 @@ impl Agent {
           .log
           .push("[steer] task complete; send a message to continue or /q to quit");
         self.completion_summary = None;
+        wait_for_input = true;
         continue;
       }
 
@@ -571,6 +603,7 @@ impl Agent {
           remove_interview(&mut self.tools);
         }
         turn += 1;
+        wait_for_input = true;
         continue;
       }
       if turn == 1 {
