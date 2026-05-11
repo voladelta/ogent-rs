@@ -40,8 +40,7 @@ pub struct SessionFlags {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionUsage {
-  pub prompt_tokens: i32,
-  pub completion_tokens: i32,
+  pub total_tokens: i32,
 }
 
 pub fn generate_session_id() -> String {
@@ -222,10 +221,7 @@ mod tests {
         resume: false,
         temp: false,
       },
-      usage: SessionUsage {
-        prompt_tokens: 100,
-        completion_tokens: 50,
-      },
+      usage: SessionUsage { total_tokens: 150 },
       prompt: Some("fix bug".into()),
       start_ts: Some(1_234_567_890),
       end_ts: Some(1_234_567_999),
@@ -259,10 +255,7 @@ mod tests {
         resume: false,
         temp: false,
       },
-      usage: SessionUsage {
-        prompt_tokens: 0,
-        completion_tokens: 0,
-      },
+      usage: SessionUsage { total_tokens: 0 },
       prompt: None,
       start_ts: None,
       end_ts: None,

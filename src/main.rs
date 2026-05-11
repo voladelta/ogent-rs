@@ -93,10 +93,7 @@ async fn main() -> Result<()> {
       resume: args.resume,
       temp: args.temp,
     },
-    usage: session::SessionUsage {
-      prompt_tokens: 0,
-      completion_tokens: 0,
-    },
+    usage: session::SessionUsage { total_tokens: 0 },
     prompt: None,
     start_ts: None,
     end_ts: None,
@@ -231,8 +228,7 @@ async fn main() -> Result<()> {
     Ok(msgs) => msgs,
     Err(e) => {
       if agent.dirty && !agent.meta.flags.temp {
-        agent.meta.usage.prompt_tokens = agent.total_prompt;
-        agent.meta.usage.completion_tokens = agent.total_completion;
+        agent.meta.usage.total_tokens = agent.total_tokens;
         session::write_meta(&agent.meta)?;
         session::persist_session(&agent.messages, &agent.meta.session_id)?;
       }
@@ -240,8 +236,7 @@ async fn main() -> Result<()> {
     }
   };
   if agent.dirty && !agent.meta.flags.temp {
-    agent.meta.usage.prompt_tokens = agent.total_prompt;
-    agent.meta.usage.completion_tokens = agent.total_completion;
+    agent.meta.usage.total_tokens = agent.total_tokens;
     session::write_meta(&agent.meta)?;
     session::persist_session(&final_messages, &agent.meta.session_id)?;
     if let Some(summary) = agent.completion_summary.as_deref() {

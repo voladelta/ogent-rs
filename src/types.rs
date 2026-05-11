@@ -47,10 +47,6 @@ pub struct ToolFunction {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct Usage {
   #[serde(default)]
-  pub prompt_tokens: i32,
-  #[serde(default)]
-  pub completion_tokens: i32,
-  #[serde(default)]
   pub total_tokens: i32,
 }
 

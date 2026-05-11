@@ -133,9 +133,7 @@ impl SteerState {
         }
 
         agent.meta.turn = ctx.turn;
-        tui
-          .status
-          .set_turn_tokens(ctx.turn, agent.total_prompt + agent.total_completion);
+        tui.status.set_turn_tokens(ctx.turn, agent.total_tokens);
         tui.log.push(format!("--- turn {} ---", ctx.turn));
         agent.push_turn_budget_reminder(ctx.max_turns, ctx.turn);
         agent.refresh_workflow_reminder();
@@ -261,8 +259,7 @@ impl SteerState {
               || !resp.reasoning_content.is_empty()
               || !resp.tool_calls.is_empty()
             {
-              agent.total_prompt += resp.usage.prompt_tokens;
-              agent.total_completion += resp.usage.completion_tokens;
+              agent.total_tokens = resp.usage.total_tokens;
               agent.push_msg(assistant_msg_full(
                 resp.content.clone(),
                 resp.reasoning_content.clone(),
@@ -295,6 +292,7 @@ impl SteerState {
           .await?;
         tui.log.end_stream();
         tui.status.set_state(AgentState::Idle);
+        tui.status.set_turn_tokens(ctx.turn, agent.total_tokens);
         Ok(Self::FinishTurn { has_more })
       }
 
@@ -382,8 +380,7 @@ pub struct Agent {
   pub messages: Vec<Message>,
   pub tools: Vec<Tool>,
   pub worker_manager: WorkerManager,
-  pub total_prompt: i32,
-  pub total_completion: i32,
+  pub total_tokens: i32,
   pub compact: CompactState,
   pub completion_summary: Option<String>,
   pub task_tracker: Option<TaskTracker>,
@@ -417,8 +414,7 @@ impl Agent {
       messages,
       tools,
       worker_manager: WorkerManager::new(),
-      total_prompt: 0,
-      total_completion: 0,
+      total_tokens: 0,
       compact,
       completion_summary: None,
       task_tracker,
@@ -467,10 +463,7 @@ impl Agent {
         eprintln!("\nReached max turns ({max_turns}). Session saved. Resume with ogent --resume.");
         return Ok(self.messages.clone());
       }
-      eprintln!(
-        "\n--- turn {turn} | tokens: {} ---",
-        self.total_prompt + self.total_completion
-      );
+      eprintln!("\n--- turn {turn} | tokens: {} ---", self.total_tokens);
       self.push_turn_budget_reminder(max_turns, turn);
       self.refresh_workflow_reminder();
       let resp = self
@@ -604,8 +597,7 @@ impl Agent {
       }
       SteerEvent::New => {
         if self.dirty && !self.meta.flags.temp {
-          self.meta.usage.prompt_tokens = self.total_prompt;
-          self.meta.usage.completion_tokens = self.total_completion;
+          self.meta.usage.total_tokens = self.total_tokens;
           session::write_meta(&self.meta)?;
           session::persist_session(&self.messages, &self.meta.session_id)?;
         }
@@ -613,10 +605,7 @@ impl Agent {
         self.meta.session_id = session::generate_session_id();
         self.meta.parent_session = Some(old_id);
         self.meta.turn = 0;
-        self.meta.usage = session::SessionUsage {
-          prompt_tokens: 0,
-          completion_tokens: 0,
-        };
+        self.meta.usage = session::SessionUsage { total_tokens: 0 };
         self.meta.prompt = None;
         self.meta.start_ts = None;
         self.meta.end_ts = None;
@@ -625,8 +614,7 @@ impl Agent {
         self.messages = messages;
         self.dirty = false;
         self.workflow_state = workflow_state;
-        self.total_prompt = 0;
-        self.total_completion = 0;
+        self.total_tokens = 0;
         self.worker_manager = WorkerManager::new();
         self.completion_summary = None;
         self.complete_open_work_warned = false;
@@ -644,8 +632,7 @@ impl Agent {
           tui.log.push("[steer] nothing to fork; session is empty");
         } else {
           if !self.meta.flags.temp {
-            self.meta.usage.prompt_tokens = self.total_prompt;
-            self.meta.usage.completion_tokens = self.total_completion;
+            self.meta.usage.total_tokens = self.total_tokens;
             session::write_meta(&self.meta)?;
             session::persist_session(&self.messages, &self.meta.session_id)?;
           }
@@ -682,8 +669,7 @@ impl Agent {
     streamed: bool,
   ) -> Result<bool, AgentError> {
     self.meta.end_ts = Some(session::timestamp_ms());
-    self.total_prompt += resp.usage.prompt_tokens;
-    self.total_completion += resp.usage.completion_tokens;
+    self.total_tokens = resp.usage.total_tokens;
     if !resp.reasoning_content.is_empty() && !streamed {
       if let Some(log) = ui_log {
         log.push(format!(
@@ -810,7 +796,7 @@ impl Agent {
     if self.compact.threshold < 0.0 || self.compact.context_limit == 0 {
       return;
     }
-    let total = (self.total_prompt + self.total_completion) as usize;
+    let total = self.total_tokens as usize;
     let ratio = total as f64 / self.compact.context_limit as f64;
     if ratio < self.compact.threshold {
       self.compact.compacting = false;
@@ -841,8 +827,7 @@ impl Agent {
     let path = std::mem::take(&mut self.compact.last_handoff_path);
     if self.compact.exit_after {
       if !self.meta.flags.temp {
-        self.meta.usage.prompt_tokens = self.total_prompt;
-        self.meta.usage.completion_tokens = self.total_completion;
+        self.meta.usage.total_tokens = self.total_tokens;
         session::write_meta(&self.meta)?;
       }
       eprintln!("\nHandoff written to {path}");
@@ -871,8 +856,7 @@ impl Agent {
     ];
     self.dirty = false;
     if !self.meta.flags.temp {
-      self.meta.usage.prompt_tokens = self.total_prompt;
-      self.meta.usage.completion_tokens = self.total_completion;
+      self.meta.usage.total_tokens = self.total_tokens;
       session::write_meta(&self.meta)?;
       session::persist_session(&old_messages, &self.meta.session_id)?;
     }
@@ -880,10 +864,7 @@ impl Agent {
     self.meta.session_id = session::generate_session_id();
     self.meta.parent_session = Some(parent_id);
     self.meta.turn = 0;
-    self.meta.usage = session::SessionUsage {
-      prompt_tokens: 0,
-      completion_tokens: 0,
-    };
+    self.meta.usage = session::SessionUsage { total_tokens: 0 };
     self.meta.prompt = None;
     self.meta.start_ts = None;
     self.meta.end_ts = None;
@@ -893,18 +874,12 @@ impl Agent {
     self.push_task_tracking_reminder();
     self.compact.compacting = false;
     self.compact.urgency = 0;
-    self.total_prompt = 0;
-    self.total_completion = 0;
+    self.total_tokens = 0;
     Ok(false)
   }
 
   fn report_tokens(&self) {
-    eprintln!(
-      "\n\ntokens: prompt={} completion={} total={}",
-      self.total_prompt,
-      self.total_completion,
-      self.total_prompt + self.total_completion
-    );
+    eprintln!("\n\ntokens: {}", self.total_tokens);
   }
 
   fn record_task_tracking_turn(&mut self, results: &[ToolResult]) {
@@ -1232,10 +1207,7 @@ mod dirty_state_machine_tests {
         resume: false,
         temp: false,
       },
-      usage: session::SessionUsage {
-        prompt_tokens: 0,
-        completion_tokens: 0,
-      },
+      usage: session::SessionUsage { total_tokens: 0 },
       prompt: None,
       start_ts: None,
       end_ts: None,
@@ -1430,11 +1402,7 @@ mod dirty_state_machine_tests {
       content: "ok".into(),
       reasoning_content: String::new(),
       tool_calls: Vec::new(),
-      usage: crate::types::Usage {
-        prompt_tokens: 10,
-        completion_tokens: 5,
-        total_tokens: 15,
-      },
+      usage: crate::types::Usage { total_tokens: 15 },
     };
     let rt = tokio::runtime::Runtime::new().unwrap();
     rt.block_on(async {
@@ -1485,8 +1453,7 @@ mod dirty_state_machine_tests {
   async fn handoff_exit_after_writes_meta_and_returns_true() {
     let mut agent = dummy_agent();
     agent.push_msg(user_msg("hello"));
-    agent.total_prompt = 100;
-    agent.total_completion = 50;
+    agent.total_tokens = 150;
     let old_id = agent.meta.session_id.clone();
 
     let handoff_path = ".ogent/handoffs/test-handoff-exit.md";
@@ -1502,8 +1469,7 @@ mod dirty_state_machine_tests {
     let dir = session::session_dir(&old_id);
     assert!(dir.join("meta.json").exists());
     let meta = session::read_meta(&old_id).unwrap();
-    assert_eq!(meta.usage.prompt_tokens, 100);
-    assert_eq!(meta.usage.completion_tokens, 50);
+    assert_eq!(meta.usage.total_tokens, 150);
 
     // meta fields preserved (not a new session)
     assert_eq!(meta.prompt, None); // dummy_agent starts with None
