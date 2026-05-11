@@ -1,6 +1,6 @@
 use crate::client::{Client, ClientError};
 use crate::session;
-use crate::sse::StreamEvent;
+use crate::sse::{SseError, StreamEvent};
 use crate::task_tracker::{TaskTracker, is_tracking_tool_name};
 use crate::tools::{ToolContext, execute_tool, is_read_only_tool};
 use crate::tui::{AgentState, SteerEvent, TuiHandle};
@@ -247,7 +247,8 @@ impl SteerState {
 
         let resp = match chat_result {
           Ok(Ok(resp)) => resp,
-          Ok(Err(ClientError::Aborted { resp })) => {
+          Ok(Err(ClientError::Aborted { resp }))
+          | Ok(Err(ClientError::Sse(SseError::Aborted { resp }))) => {
             if !resp.content.is_empty()
               || !resp.reasoning_content.is_empty()
               || !resp.tool_calls.is_empty()
