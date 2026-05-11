@@ -8,13 +8,12 @@ struct Anchor<'a> {
   hash: &'a str,
 }
 
-pub fn render_hashlines(
-  source: &str,
-  start: Option<usize>,
-  end: Option<usize>,
-) -> String {
+pub fn render_hashlines(source: &str, start: Option<usize>, end: Option<usize>) -> String {
   let lines = source_lines(source);
-  let slice_start = start.map(|s| if s > 0 { s - 1 } else { 0 }).unwrap_or(0).min(lines.len());
+  let slice_start = start
+    .map(|s| if s > 0 { s - 1 } else { 0 })
+    .unwrap_or(0)
+    .min(lines.len());
   let slice_end = end.unwrap_or(lines.len()).min(lines.len());
   let mut out = String::new();
   for (i, line) in lines[slice_start..slice_end].iter().enumerate() {
