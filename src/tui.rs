@@ -71,10 +71,10 @@ impl UiLog {
 
   pub fn push_assistant_markdown(&self, content: &str) {
     for line in content.lines() {
-      self.push(format!("assistant: {line}"));
+      self.push(format!("ogent: {line}"));
     }
     if content.ends_with('\n') {
-      self.push("assistant:");
+      self.push("ogent:");
     }
   }
 
@@ -235,6 +235,8 @@ fn run_ui_loop(
       .borders(Borders::ALL)
       .title("message or command"),
   );
+  textarea.set_placeholder_text("waiting for input...");
+  textarea.set_placeholder_style(Style::default().fg(Color::DarkGray));
   textarea.set_wrap_mode(WrapMode::Word);
   textarea.set_cursor_line_style(Style::default());
   let mut scroll_y: usize = 0;
@@ -726,9 +728,9 @@ fn head_cells(value: &str, width: usize) -> String {
 }
 
 fn render_log_line(value: &str) -> Line<'static> {
-  if let Some(markdown) = value.strip_prefix("assistant: ") {
+  if let Some(markdown) = value.strip_prefix("ogent: ") {
     let mut spans = vec![Span::styled(
-      "assistant: ",
+      "ogent: ",
       Style::default()
         .fg(Color::Cyan)
         .add_modifier(Modifier::BOLD),
@@ -736,9 +738,9 @@ fn render_log_line(value: &str) -> Line<'static> {
     spans.extend(markdown_spans(markdown));
     return Line::from(spans);
   }
-  if value == "assistant:" {
+  if value == "ogent:" {
     return Line::from(vec![Span::styled(
-      "assistant:",
+      "ogent:",
       Style::default()
         .fg(Color::Cyan)
         .add_modifier(Modifier::BOLD),

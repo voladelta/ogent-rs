@@ -78,6 +78,7 @@ pub struct ToolResult {
   name: String,
   args: String,
   output: String,
+  success: bool,
 }
 
 impl Agent {
@@ -184,11 +185,12 @@ impl Agent {
               results.extend(run_read_only_batch(&read_only_batch).await?);
               read_only_batch.clear();
             }
-            let output = self.run_tool_call(tc).await;
+            let (output, success) = self.run_tool_call(tc).await;
             results.push(ToolResult {
               name: tc.function.name.clone(),
               args: tc.function.arguments.clone(),
               output,
+              success,
             });
           }
           if !read_only_batch.is_empty() {
@@ -263,14 +265,10 @@ impl Agent {
     max_turns: i32,
     mut auto_continue: bool,
     mut tui: TuiHandle,
-    mut wait_for_input: bool,
   ) -> Result<Vec<Message>, AgentError> {
     tui
       .log
       .push("[steer] commands: /auto /stop /complete /cancel /new /fork /q");
-    if wait_for_input {
-      tui.log.push("[steer] waiting for your first message");
-    }
     let mut turn = 1;
     'outer: loop {
       if self.next_turn_reset {
@@ -283,44 +281,16 @@ impl Agent {
           SteerAction::Exit => return Ok(self.messages.clone()),
           SteerAction::Restart => {
             turn = 1;
-            wait_for_input = true;
             tui
               .log
               .push("[steer] commands: /auto /stop /complete /cancel /new /fork /q");
-            tui.log.push("[steer] waiting for your first message");
             continue 'outer;
           }
           SteerAction::Continue => {}
         }
         if self.messages.len() > wait_baseline_len
           && matches!(self.messages.last().map(|m| m.role.as_str()), Some("user"))
-        {
-          wait_for_input = false;
-        }
-      }
-
-      while wait_for_input {
-        let Some(event) = tui.rx.recv().await else {
-          continue;
-        };
-        match self.apply_steer_event(event, &mut auto_continue, &tui)? {
-          SteerAction::Exit => return Ok(self.messages.clone()),
-          SteerAction::Restart => {
-            turn = 1;
-            wait_for_input = true;
-            tui
-              .log
-              .push("[steer] commands: /auto /stop /complete /cancel /new /fork /q");
-            tui.log.push("[steer] waiting for your first message");
-            continue 'outer;
-          }
-          SteerAction::Continue => {}
-        }
-        if self.messages.len() > wait_baseline_len
-          && matches!(self.messages.last().map(|m| m.role.as_str()), Some("user"))
-        {
-          wait_for_input = false;
-        }
+        {}
       }
 
       if max_turns > 0 && turn > max_turns {
@@ -370,9 +340,7 @@ impl Agent {
                 self.apply_steer_event(SteerEvent::New, &mut auto_continue, &tui)?;
                 chat.abort();
                 turn = 1;
-                wait_for_input = true;
                 tui.log.push("[steer] commands: /auto /stop /complete /cancel /new /fork /q");
-                tui.log.push("[steer] waiting for your first message");
                 continue 'outer;
               }
               SteerEvent::Exit => {
@@ -391,9 +359,7 @@ impl Agent {
                     cancel.cancel();
                     chat.abort();
                     turn = 1;
-                    wait_for_input = true;
                     tui.log.push("[steer] commands: /auto /stop /complete /cancel /new /fork /q");
-                    tui.log.push("[steer] waiting for your first message");
                     continue 'outer;
                   }
                   SteerAction::Continue => {}
@@ -420,7 +386,6 @@ impl Agent {
             ));
           }
           if cancelled_turn {
-            wait_for_input = true;
             continue;
           }
           if let Some(msg) = steer_msg {
@@ -472,11 +437,12 @@ impl Agent {
               results.extend(run_read_only_batch(&read_only_batch).await?);
               read_only_batch.clear();
             }
-            let output = self.run_tool_call(tc).await;
+            let (output, success) = self.run_tool_call(tc).await;
             results.push(ToolResult {
               name: tc.function.name.clone(),
               args: tc.function.arguments.clone(),
               output,
+              success,
             });
             if self.completion_summary.is_some() {
               break;
@@ -529,11 +495,9 @@ impl Agent {
                 Some(SteerEvent::New) => {
                   self.apply_steer_event(SteerEvent::New, &mut auto_continue, &tui)?;
                   turn = 1;
-                  wait_for_input = true;
                   tui
                     .log
                     .push("[steer] commands: /auto /stop /complete /cancel /new /fork /q");
-                  tui.log.push("[steer] waiting for your first message");
                   continue 'outer;
                 }
                 Some(SteerEvent::Auto) => {
@@ -587,7 +551,6 @@ impl Agent {
           .log
           .push("[steer] task complete; send a message to continue or /q to quit");
         self.completion_summary = None;
-        wait_for_input = true;
         continue;
       }
 
@@ -604,12 +567,10 @@ impl Agent {
         return Ok(self.messages.clone());
       }
       if !has_more && !auto_continue {
-        tui.log.push("[steer] turn complete; waiting for input");
         if turn == 1 {
           remove_interview(&mut self.tools);
         }
         turn += 1;
-        wait_for_input = true;
         continue;
       }
       if turn == 1 {
@@ -809,12 +770,27 @@ impl Agent {
 
     let results = self.process_tool_calls(&resp).await?;
     for r in results {
+      let indicator = if r.success { "ok" } else { "failed" };
       if let Some(log) = ui_log {
-        log.push(format!("tool: {}({})", r.name, truncate(&r.args, 120)));
-        log.push(format!("  => {}", truncate(&r.output, 200)));
+        log.push(format!(
+          "tool: {}({}) -> {}",
+          r.name,
+          truncate(&r.args, 120),
+          indicator
+        ));
+        if !r.success {
+          log.push(format!("  => {}", truncate(&r.output, 200)));
+        }
       } else {
-        eprintln!("tool: {}({})", r.name, truncate(&r.args, 120));
-        eprintln!("  => {}", truncate(&r.output, 200));
+        eprintln!(
+          "tool: {}({}) -> {}",
+          r.name,
+          truncate(&r.args, 120),
+          indicator
+        );
+        if !r.success {
+          eprintln!("  => {}", truncate(&r.output, 200));
+        }
       }
     }
     Ok(true)
@@ -842,12 +818,13 @@ impl Agent {
         results.extend(run_read_only_batch(&read_only_batch).await?);
         read_only_batch.clear();
       }
-      let output = self.run_tool_call(tc).await;
+      let (output, success) = self.run_tool_call(tc).await;
       let is_interactive = output == INTERACTIVE_ERR;
       results.push(ToolResult {
         name: tc.function.name.clone(),
         args: tc.function.arguments.clone(),
         output,
+        success,
       });
       if is_interactive {
         return Err(AgentError::InteractiveRequired);
@@ -868,8 +845,8 @@ impl Agent {
     Ok(results)
   }
 
-  async fn run_tool_call(&mut self, tc: &ToolCall) -> String {
-    let (output, is_interactive) = format_tool_result(
+  async fn run_tool_call(&mut self, tc: &ToolCall) -> (String, bool) {
+    let (output, success, is_interactive) = format_tool_result(
       execute_tool(
         ToolContext { agent: Some(self) },
         &tc.function.name,
@@ -878,9 +855,9 @@ impl Agent {
       .await,
     );
     if is_interactive {
-      return INTERACTIVE_ERR.to_string();
+      return (INTERACTIVE_ERR.to_string(), false);
     }
-    output
+    (output, success)
   }
 
   fn check_compact(&mut self) {
@@ -985,7 +962,7 @@ impl Agent {
     let mut saw_tracking_update = false;
     let mut saw_meaningful_non_tracking = false;
     for result in results {
-      if result.output.starts_with("ERROR:") {
+      if !result.success {
         continue;
       }
       if is_tracking_tool_name(&result.name) {
@@ -1069,17 +1046,19 @@ fn tool_msg(content: impl Into<String>, tool_call_id: impl Into<String>) -> Mess
 
 const INTERACTIVE_ERR: &str = "ERROR: interactive mode required";
 
-fn format_tool_result(result: anyhow::Result<String>) -> (String, bool) {
+fn format_tool_result(result: anyhow::Result<String>) -> (String, bool, bool) {
   match result {
-    Ok(out) => (out, false),
-    Err(e) if e.to_string() == "interactive mode required" => (INTERACTIVE_ERR.to_string(), true),
-    Err(e) => (format!("ERROR: {e}"), false),
+    Ok(out) => (out, true, false),
+    Err(e) if e.to_string() == "interactive mode required" => {
+      (INTERACTIVE_ERR.to_string(), false, true)
+    }
+    Err(e) => (format!("ERROR: {e}"), false, false),
   }
 }
 
 async fn run_read_only_batch(batch: &[&ToolCall]) -> Result<Vec<ToolResult>, AgentError> {
   let futs = batch.iter().map(|tc| async {
-    let (output, _) = format_tool_result(
+    let (output, success, _) = format_tool_result(
       execute_tool(
         ToolContext { agent: None },
         &tc.function.name,
@@ -1091,6 +1070,7 @@ async fn run_read_only_batch(batch: &[&ToolCall]) -> Result<Vec<ToolResult>, Age
       name: tc.function.name.clone(),
       args: tc.function.arguments.clone(),
       output,
+      success,
     }
   });
   let results = futures_util::future::join_all(futs).await;
