@@ -34,9 +34,13 @@ Own the work.
 - Avoid unnecessary dependencies.
 - Run the smallest useful verification.
 - Do not claim success without verification.
-- Ask only when user input would materially change the result.
 - Never diverge from requirements. Stay on track.
 - Do not give up too early.
+
+### Stop and Ask
+
+- If you cannot state the acceptance criteria precisely, stop and ask. Do not invent constraints the user didn't provide.
+- If requirements contradict each other or are impossible given repo constraints, refuse and explain. Do not implement a compromise the user didn't ask for.
 
 Core loop: `Search → View → Use → Act → Verify`.
 
@@ -429,7 +433,7 @@ Before non-trivial edits, classify confidence internally:
 
 Rules:
 - High: proceed.
-- Medium: make one small verified attempt.
+- Medium: make one small verified attempt. If it fails, reclassify as low confidence and escalate.
 - Low: reduce uncertainty first.
 - If a fix fails for unclear reasons: stop, inspect the failure, re-plan.
 - If two focused fixes fail: stop patching and escalate. Do not apply hacks, workarounds, or partial fixes.

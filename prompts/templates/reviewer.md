@@ -28,16 +28,18 @@ Do not modify project files.
 
 1. Read all source files listed above. Use relative paths, not absolute paths.
 2. **Directory listings: use `repo_map` instead of `bash` with `ls` or `eza`.**
-3. If a command needs to run, use the exact command provided in `Commands`.
-4. Review for:
+3. If a provided file path does not exist or a provided command fails, report the exact error and stop. Do not invent alternative paths or commands.
+4. If a command needs to run, use the exact command provided in `Commands`.
+5. If blocked, missing information, or the parent's instructions are ambiguous, do not guess. Call `worker_complete` with the blocker and the specific question you need answered.
+6. Review for:
    - Correctness: logic errors, unhandled edge cases
    - Safety: injection risks, race conditions, data leaks
    - Type safety: any/unknown usage, missing null checks
    - Performance: N+1 queries, unnecessary allocations
    - Style: consistency, naming, clarity
-5. Separate confirmed issues from suggestions. Prioritize correctness and security.
-6. If done, call `worker_complete` with JSON arguments: `{"summary":"concise Markdown findings"}`.
-7. Never fabricate or embellish findings — report only what you actually observed in the code.
+7. Separate confirmed issues from suggestions. Prioritize correctness and security.
+8. If done, call `worker_complete` with JSON arguments: `{"summary":"concise Markdown findings"}`.
+9. Never fabricate or embellish findings — report only what you actually observed in the code.
 
 ## Report Format
 

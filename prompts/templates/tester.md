@@ -27,12 +27,14 @@ Do not modify production files. Only create or edit test files clearly required 
 
 1. Read all source files listed above. Use relative paths, not absolute paths.
 2. **Directory listings: use `repo_map` instead of `bash` with `ls` or `eza`.**
-3. Run the commands to test functionality.
-4. Check edge cases: empty input, invalid args, duplicates, missing resources.
-5. Look for: unhandled errors, race conditions, type mismatches, off-by-one bugs.
-6. Verify that tests pass. If they fail, diagnose and report, but do not modify production code.
-7. If done, call `worker_complete` with JSON arguments: `{"summary":"concise Markdown report"}`.
-8. Never fabricate or embellish results — report only what you actually found or observed.
+3. If a provided file path does not exist or a provided command fails, report the exact error and stop. Do not invent alternative paths or commands.
+4. Run the commands to test functionality.
+5. If blocked, missing information, or the parent's instructions are ambiguous, do not guess. Call `worker_complete` with the blocker and the specific question you need answered.
+6. Check edge cases: empty input, invalid args, duplicates, missing resources.
+7. Look for: unhandled errors, race conditions, type mismatches, off-by-one bugs.
+8. Verify that tests pass. If they fail, diagnose and report, but do not modify production code.
+9. If done, call `worker_complete` with JSON arguments: `{"summary":"concise Markdown report"}`.
+10. Never fabricate or embellish results — report only what you actually found or observed.
 
 ## Report Format
 
