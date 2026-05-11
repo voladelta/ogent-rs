@@ -106,17 +106,17 @@ fn build_coder_tools() -> Vec<Tool> {
     ),
     schema(
       "web_search",
-      "Search the web using Exa.",
+      "Search the web, returning relevant excerpts. Auto for quick facts; deep-reasoning for complex or niche topics.",
       json!({"type":"object","properties":{"query":{"type":"string"},"num_results":{"type":"integer"},"type":{"type":"string","enum":["auto","deep-reasoning"]}},"required":["query"],"additionalProperties":false}),
     ),
     schema(
       "web_read",
-      "Read the content of one or more URLs using Exa.",
+      "Read key excerpts relevant to one or more URLs.",
       json!({"type":"object","properties":{"urls":{"type":"array","items":{"type":"string"}},"mode":{"type":"string","enum":["text","highlights"]}},"required":["urls"],"additionalProperties":false}),
     ),
     schema(
       "code_web_context",
-      "Search for code examples and practical implementation context.",
+      "Search real code for syntax, APIs, and patterns to avoid hallucinating implementation details. Not for general web search or URL reading.",
       json!({"type":"object","properties":{"query":{"type":"string"}},"required":["query"],"additionalProperties":false}),
     ),
     schema(
