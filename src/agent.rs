@@ -1341,7 +1341,6 @@ mod dirty_state_machine_tests {
     let tui = crate::tui::TuiHandle::test_handle();
     let action = agent
       .apply_steer_event(SteerEvent::Message("fix bug".into()), &mut false, &tui)
-      .await
       .unwrap();
     assert!(matches!(action, SteerAction::Continue));
     assert!(agent.dirty);
@@ -1355,12 +1354,10 @@ mod dirty_state_machine_tests {
     let tui = crate::tui::TuiHandle::test_handle();
     agent
       .apply_steer_event(SteerEvent::Message("fix bug".into()), &mut false, &tui)
-      .await
       .unwrap();
     let start_ts = agent.meta.start_ts;
     agent
       .apply_steer_event(SteerEvent::Message("more context".into()), &mut false, &tui)
-      .await
       .unwrap();
     assert_eq!(agent.meta.prompt, Some("fix bug".into()));
     assert_eq!(agent.meta.start_ts, start_ts);
@@ -1373,7 +1370,6 @@ mod dirty_state_machine_tests {
     let mut auto = false;
     let action = agent
       .apply_steer_event(SteerEvent::Auto, &mut auto, &tui)
-      .await
       .unwrap();
     assert!(matches!(action, SteerAction::Continue));
     assert!(!agent.dirty);
@@ -1388,7 +1384,6 @@ mod dirty_state_machine_tests {
     agent.push_msg(user_msg("hello"));
     let action = agent
       .apply_steer_event(SteerEvent::Stop, &mut auto, &tui)
-      .await
       .unwrap();
     assert!(matches!(action, SteerAction::Continue));
     assert!(agent.dirty);
@@ -1401,7 +1396,6 @@ mod dirty_state_machine_tests {
     let tui = crate::tui::TuiHandle::test_handle();
     let action = agent
       .apply_steer_event(SteerEvent::Cancel, &mut false, &tui)
-      .await
       .unwrap();
     assert!(matches!(action, SteerAction::Continue));
     assert!(!agent.dirty);
@@ -1413,7 +1407,6 @@ mod dirty_state_machine_tests {
     let tui = crate::tui::TuiHandle::test_handle();
     let action = agent
       .apply_steer_event(SteerEvent::Complete, &mut false, &tui)
-      .await
       .unwrap();
     assert!(matches!(action, SteerAction::Continue));
     assert!(!agent.dirty);
@@ -1428,7 +1421,6 @@ mod dirty_state_machine_tests {
     assert!(agent.dirty);
     let action = agent
       .apply_steer_event(SteerEvent::Complete, &mut false, &tui)
-      .await
       .unwrap();
     assert!(matches!(action, SteerAction::Continue));
     assert!(agent.dirty);
@@ -1441,7 +1433,6 @@ mod dirty_state_machine_tests {
     let tui = crate::tui::TuiHandle::test_handle();
     let action = agent
       .apply_steer_event(SteerEvent::Exit, &mut false, &tui)
-      .await
       .unwrap();
     assert!(matches!(action, SteerAction::Exit));
   }
@@ -1453,7 +1444,6 @@ mod dirty_state_machine_tests {
     let old_id = agent.meta.session_id.clone();
     let action = agent
       .apply_steer_event(SteerEvent::New, &mut false, &tui)
-      .await
       .unwrap();
     assert!(matches!(action, SteerAction::Restart));
     assert!(!agent.dirty);
@@ -1473,7 +1463,6 @@ mod dirty_state_machine_tests {
 
     let action = agent
       .apply_steer_event(SteerEvent::New, &mut false, &tui)
-      .await
       .unwrap();
     assert!(matches!(action, SteerAction::Restart));
 
@@ -1600,7 +1589,6 @@ mod dirty_state_machine_tests {
     let old_id = agent.meta.session_id.clone();
     let action = agent
       .apply_steer_event(SteerEvent::Fork, &mut false, &tui)
-      .await
       .unwrap();
     assert!(matches!(action, SteerAction::Continue));
     assert!(!agent.dirty);
@@ -1621,7 +1609,6 @@ mod dirty_state_machine_tests {
 
     let action = agent
       .apply_steer_event(SteerEvent::Fork, &mut false, &tui)
-      .await
       .unwrap();
     assert!(matches!(action, SteerAction::Continue));
 
