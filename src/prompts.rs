@@ -166,28 +166,15 @@ pub fn build_messages(prompt: &str) -> Vec<Message> {
 }
 
 pub fn enrich_initial_messages(messages: &mut [Message]) -> Option<crate::workflow::WorkflowState> {
-  let mut workflow_state = None;
   append_to_last_user_message(messages, &discover_skills_message());
-  if let Ok((name, root, body, workflow)) = load_skill_content("colgrep") {
+  if let Ok((name, root, body, _)) = load_skill_content("colgrep") {
     append_to_last_user_message(
       messages,
       &format!("<skill name=\"{name}\" root=\"{root}\">\n{body}\n</skill>"),
     );
-    if let Some(wf) = workflow {
-      workflow_state = Some(crate::workflow::WorkflowState::new(wf));
-    }
-  }
-  if let Ok((name, root, body, workflow)) = load_skill_content("codectx") {
-    append_to_last_user_message(
-      messages,
-      &format!("<skill name=\"{name}\" root=\"{root}\">\n{body}\n</skill>"),
-    );
-    if let Some(wf) = workflow {
-      workflow_state = Some(crate::workflow::WorkflowState::new(wf));
-    }
   }
 
-  workflow_state
+  None
 }
 
 fn append_to_last_user_message(messages: &mut [Message], content: &str) {

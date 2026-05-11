@@ -51,7 +51,7 @@ Skills are loaded from:
 
 At startup, available skills are discovered and listed in the user message. The agent can call `load_skill` to inject a skill body into the next turn.
 
-The `colgrep` and `codectx` skills are preloaded: if their `SKILL.md` files exist in a skill root, ogent auto-injects their full body into the initial user message after the skills list. This gives the 10x coder semantic code search and repo context instructions without spending a turn on `load_skill`.
+The `colgrep` skill is preloaded: if their `SKILL.md` files exist in a skill root, ogent auto-injects their full body into the initial user message after the skills list. This gives the 10x coder semantic code search and repo context instructions without spending a turn on `load_skill`.
 
 Skills may optionally define a **workflow** graph in YAML frontmatter. When loaded, ogent enforces the phase graph at runtime: transitions are validated, loops are bounded, and `complete` is gated to terminal phases only. See "Workflow Skills" below.
 

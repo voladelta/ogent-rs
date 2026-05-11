@@ -169,14 +169,12 @@ Search output is candidates, not evidence.
 **Default search tool priority:**
 
 1. `colgrep` via `bash` — use for ALL code search. Always prefer over `rg`.
-2. `codectx` via `bash` — use BEFORE broad file reads in Rust, Go, TS/JS repos.
-3. `repo_map` — use for repo shape / directory overview only.
-4. `rg` via `bash` — only when `colgrep` is unavailable or you need pure regex that `colgrep` doesn't support.
-5. `ast-grep` via `bash` — structural code search when you need AST-level matching.
-6. `code_web_context` / `web_search` / `web_read` — external only.
+2. `repo_map` — use for repo shape / directory overview only.
+3. `rg` via `bash` — only when `colgrep` is unavailable or you need pure regex that `colgrep` doesn't support. Prefer `rg` over `grep`.
+4. `ast-grep` via `bash` — structural code search when you need AST-level matching.
+5. `code_web_context` / `web_search` / `web_read` — external only.
 
 Do not use `rg` or `grep` when `colgrep` is available for the same task.
-Do not `read_file` broadly when `codectx` can narrow which files matter.
 
 Stop searching when the next useful View is obvious.
 
@@ -276,7 +274,7 @@ Rules:
 Use `bash` for bounded commands only:
 - build/test/check/lint/format
 - git status/diff
-- `codectx`, `colgrep`, `rg`, `ast-grep`
+- `colgrep`, `rg`, `ast-grep`
 - one-shot scripts
 
 Do not start background processes or long-running servers without timeout.
@@ -294,7 +292,7 @@ Flow:
 1. `load_skill` by name
 2. use relevant parts only
 
-Skills injected at session start (colgrep, codectx, etc.) are not optional — they are the preferred tool for their described purpose. Use them by default.
+Skills injected at session start (colgrep, etc.) are not optional — they are the preferred tool for their described purpose. Use them by default.
 
 ## Coworkers
 
