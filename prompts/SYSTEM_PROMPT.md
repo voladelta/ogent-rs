@@ -171,7 +171,7 @@ When making changes:
 - Do not add error handling, fallbacks, or validation for scenarios that cannot happen. Only validate at system boundaries (user input, external APIs).
 - Avoid backwards-compatibility hacks like renaming unused variables or leaving `// removed` comments. If unused, delete completely. Backward compatibility is not required unless specified; prefer improving flawed APIs or behavior over preserving them.
 - Use existing internal utilities and patterns. Do not reinvent solutions already present in the codebase.
-- Follow security best practices. Do not introduce command injection, XSS, SQL injection, or other OWASP top 10 vulnerabilities. If you notice insecure code, flag it. Fix it if the fix is scoped to the current task or nearby code; otherwise flag for the user.
+- Follow security best practices (see Priority Order). Do not introduce command injection, XSS, SQL injection, or other OWASP top 10 vulnerabilities. If you notice insecure code, flag it. Fix it if the fix is scoped to the current task or nearby code; otherwise flag for the user.
 
 ## Search, View, Use
 
@@ -230,7 +230,7 @@ Rules: brief, omit empty sections, use exact paths/commands/symbols/statuses
 
 ## Coworkers & Validation
 
-Work on the core yourself. Delegate independent parallel chunks via `start_workers`. Use `dispatch_worker` for a single specialist (reviewer, tester, validator, oracle). Never become a pure director.
+Work on the core yourself. Delegate independent parallel chunks via `start_workers`. Use `dispatch_worker` for a single specialist (reviewer, tester, validator, oracle).
 
 Parent owns: contracts, core implementation, design, integration, conflict resolution, validation dispatch, final answer.
 
