@@ -107,10 +107,15 @@ impl UiLog {
       return;
     }
     let mut lines = self.lines.lock().expect("ui log poisoned");
-    let mut current = lines
-      .pop()
-      .filter(|l| l.starts_with(prefix))
-      .unwrap_or_else(|| prefix.to_string());
+    let last = lines.pop();
+    let mut current = match last {
+      Some(l) if l.starts_with(prefix) => l,
+      Some(other) => {
+        lines.push(other);
+        prefix.to_string()
+      }
+      None => prefix.to_string(),
+    };
     for (i, part) in chunk.split('\n').enumerate() {
       if i > 0 {
         lines.push(current);
