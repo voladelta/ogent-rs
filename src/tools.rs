@@ -73,8 +73,8 @@ fn build_coder_tools() -> Vec<Tool> {
   vec![
     schema(
       "read_file",
-      "Read a file from the local filesystem.",
-      json!({"type":"object","properties":{"path":{"type":"string"},"start":{"type":"integer"},"end":{"type":"integer"}},"required":["path"],"additionalProperties":false}),
+      "Read a file from the local filesystem. Use start and end as 1-indexed line numbers; omit both for the full file.",
+      json!({"type":"object","properties":{"path":{"type":"string"},"start":{"type":"integer","description":"1-indexed start line (inclusive)"},"end":{"type":"integer","description":"1-indexed end line (inclusive)"}},"required":["path"],"additionalProperties":false}),
     ),
     schema(
       "write_file",
@@ -83,33 +83,33 @@ fn build_coder_tools() -> Vec<Tool> {
     ),
     schema(
       "bash",
-      "Execute a shell command in the workspace and return stdout and stderr combined.",
-      json!({"type":"object","properties":{"command":{"type":"string"},"timeout_seconds":{"type":"integer"}},"required":["command"],"additionalProperties":false}),
+      "Execute a shell command in the workspace root and return stdout and stderr combined. Default timeout is 120s if omitted or 0; max is 600s.",
+      json!({"type":"object","properties":{"command":{"type":"string"},"timeout_seconds":{"type":"integer","description":"Max seconds. Default: 120 if 0 or omitted. Max: 600."}},"required":["command"],"additionalProperties":false}),
     ),
     schema(
       "repo_map",
-      "Display a tree map of the repository directory structure.",
-      json!({"type":"object","properties":{"path":{"type":"string"},"levels":{"type":"integer"}},"additionalProperties":false}),
+      "Display a tree map of the repository directory structure. path defaults to the workspace root; levels defaults to 3.",
+      json!({"type":"object","properties":{"path":{"type":"string","description":"Directory path relative to workspace root. Default: \".\""},"levels":{"type":"integer","description":"Max depth to descend. Default: 3 if 0 or omitted."}},"additionalProperties":false}),
     ),
     schema(
       "read_hash_anchors",
-      "Read a file returning each line prefixed as line:hash|content, where the 4-char hash is derived from the line content.",
-      json!({"type":"object","properties":{"path":{"type":"string"},"start":{"type":"integer"},"end":{"type":"integer"}},"required":["path"],"additionalProperties":false}),
+      "Read a file with each line prefixed as <line>:<hash>|content, where the 4-char hash is derived from line content. Use before edit_hash_anchors to generate stable anchors.",
+      json!({"type":"object","properties":{"path":{"type":"string"},"start":{"type":"integer","description":"1-indexed start line (inclusive)"},"end":{"type":"integer","description":"1-indexed end line (inclusive)"}},"required":["path"],"additionalProperties":false}),
     ),
     schema(
       "edit_hash_anchors",
-      "Edit a file using hashline anchors from read_hash_anchors. Anchors MUST be in <line-number>:<4-char-hash> format (e.g., \"15:af63\"). Never pass just a line number or just a hash. Use end_anchor for multi-line range replacement. new_string always replaces entire anchored line(s), not a substring.",
+      "Edit a file using hashline anchors from read_hash_anchors. Anchors must be <line>:<4-char-hash> (e.g., \"15:af63\"); use end_anchor for multi-line ranges. new_string replaces the entire anchored line(s).",
       json!({"type":"object","properties":{"path":{"type":"string"},"ops":{"type":"array","items":{"type":"object","properties":{"anchor":{"type":"string","description":"Anchor in <line-number>:<4-char-hash> format (e.g., 15:af63)"},"end_anchor":{"type":"string","description":"Optional end anchor in <line-number>:<4-char-hash> format for range replacement"},"action":{"type":"string","enum":["replace","insert_before","insert_after"]},"new_string":{"type":"string"}},"required":["anchor","action","new_string"]}}},"required":["path","ops"],"additionalProperties":false}),
     ),
     schema(
       "web_search",
-      "Search the web, returning relevant excerpts. Auto for quick facts; deep-reasoning for complex or niche topics.",
+      "Search the web for relevant excerpts. Use type=auto for quick facts and deep-reasoning for complex or niche topics.",
       json!({"type":"object","properties":{"query":{"type":"string"},"num_results":{"type":"integer"},"type":{"type":"string","enum":["auto","deep-reasoning"]}},"required":["query"],"additionalProperties":false}),
     ),
     schema(
       "web_read",
-      "Read key excerpts relevant to one or more URLs.",
-      json!({"type":"object","properties":{"urls":{"type":"array","items":{"type":"string"}},"mode":{"type":"string","enum":["text","highlights"]}},"required":["urls"],"additionalProperties":false}),
+      "Read key excerpts from one or more URLs. Set mode=text for full text or highlights for key excerpts.",
+      json!({"type":"object","properties":{"urls":{"type":"array","items":{"type":"string"}},"mode":{"type":"string","enum":["text","highlights"],"description":"text for full page text, highlights for key excerpts. Default: highlights."}},"required":["urls"],"additionalProperties":false}),
     ),
     schema(
       "code_web_context",
@@ -118,7 +118,7 @@ fn build_coder_tools() -> Vec<Tool> {
     ),
     schema(
       "dispatch_worker",
-      "Hire a specialist coworker. system_prompt shapes worker behavior/scope; task states the concrete assignment. The worker runs as a separate process and returns a Markdown summary.",
+      "Hire a specialist coworker with a behavior-shaping system_prompt and a concrete task assignment. The worker runs as a separate process and returns a Markdown summary.",
       json!({"type":"object","properties":{"system_prompt":{"type":"string","description":"Complete behavior-shaping system prompt for the worker: role, permissions, read/write scope, constraints, commands, and summary format"},"task":{"type":"string","description":"Concrete task-shaping user prompt for the worker: exact assignment, expected output, success criteria, and immediate next step"},"max_turns":{"type":"integer","description":"Optional max turns for the worker (-1=unlimited). If omitted, worker has no turn limit."}},"required":["system_prompt","task"],"additionalProperties":false}),
     ),
     schema(
@@ -128,17 +128,17 @@ fn build_coder_tools() -> Vec<Tool> {
     ),
     schema(
       "check_workers",
-      "Wait for all active async coworkers and return reports.",
+      "Wait for all active async coworkers and return their reports.",
       json!({"type":"object","properties":{},"additionalProperties":false}),
     ),
     schema(
       "handoff",
-      "Write a session handoff brief to disk.",
-      json!({"type":"object","properties":{"brief":{"type":"string"}},"required":["brief"],"additionalProperties":false}),
+      "Write a session handoff brief for the next session. Include progress, blockers, and next steps.",
+      json!({"type":"object","properties":{"brief":{"type":"string","description":"Session handoff content: progress, blockers, and next steps."}},"required":["brief"],"additionalProperties":false}),
     ),
     schema(
       "set_goal",
-      "Initialize runtime task tracking with one Goal.",
+      "Initialize the single top-level Goal for this session. Call once at the start of complex tasks to enable progress tracking.",
       json!({"type":"object","properties":{"goal":{"type":"string"},"status":{"type":"string","enum":["pending","in_progress","completed","blocked","skipped"]},"complexity":{"type":"string","enum":["simple","medium","complex"]},"success_criteria":{"type":"array","items":{"type":"string"}},"notes":{"type":"string"}},"required":["goal","status","complexity"],"additionalProperties":false}),
     ),
     schema(
@@ -148,12 +148,12 @@ fn build_coder_tools() -> Vec<Tool> {
     ),
     schema(
       "update_phase",
-      "Upsert one Phase under the current Goal.",
+      "Add or update a Phase under the current Goal.",
       json!({"type":"object","properties":{"phase_id":{"type":"string"},"title":{"type":"string"},"status":{"type":"string","enum":["pending","in_progress","completed","blocked","skipped"]},"complexity":{"type":"string","enum":["simple","medium","complex"]},"notes":{"type":"string"},"contracts":{"type":"array","description":"Optional validation contracts for this phase. Define behavioral assertions before implementing.","items":{"type":"object","properties":{"id":{"type":"string"},"assertion":{"type":"string"},"command":{"type":"string"}},"required":["id","assertion"],"additionalProperties":false}}},"required":["phase_id","title","status","complexity"],"additionalProperties":false}),
     ),
     schema(
       "update_todo",
-      "Upsert one Todo under an existing Phase.",
+      "Add or update a Todo under an existing Phase.",
       json!({"type":"object","properties":{"phase_id":{"type":"string"},"todo_id":{"type":"string"},"title":{"type":"string"},"status":{"type":"string","enum":["pending","in_progress","completed","blocked","skipped"]},"complexity":{"type":"string","enum":["simple","medium","complex"]},"notes":{"type":"string"}},"required":["phase_id","todo_id","title","status","complexity"],"additionalProperties":false}),
     ),
     schema(
@@ -163,13 +163,13 @@ fn build_coder_tools() -> Vec<Tool> {
     ),
     schema(
       "load_worker_template",
-      "Load a built-in worker template (generic, tester, reviewer, validator). Returns the template content with placeholders. Fill placeholders before using as system_prompt.",
+      "Load a built-in worker template (generic, tester, reviewer, validator). Returns template content with placeholders to fill before use as system_prompt.",
       json!({"type":"object","properties":{"name":{"type":"string","enum":["generic","tester","reviewer","validator"],"description":"Built-in worker template name"}},"required":["name"],"additionalProperties":false}),
     ),
     schema(
       "complete",
-      "Mark the current task complete and provide a retrospective structured Markdown session summary.",
-      json!({"type":"object","properties":{"summary":{"type":"string"}},"required":["summary"],"additionalProperties":false}),
+      "Mark the current task complete with a Markdown summary. If work is still open, first call returns a warning; call again with explicit Limitation and Intent to force stop.",
+      json!({"type":"object","properties":{"summary":{"type":"string","description":"Markdown retrospective. Include Limitation and Intent if forcing early stop."}},"required":["summary"],"additionalProperties":false}),
     ),
   ]
 }
@@ -256,12 +256,20 @@ fn read_file(args: &str) -> Result<String> {
     return Ok(content);
   }
   let lines: Vec<&str> = content.split('\n').collect();
-  let start = args.start.unwrap_or(0).min(lines.len());
-  let end = args.end.unwrap_or(lines.len()).min(lines.len());
-  if start > end {
+  if args.start == Some(0) {
+    bail!("start line must be >= 1 (lines are 1-indexed)");
+  }
+  if args.end == Some(0) {
+    bail!("end line must be >= 1 (lines are 1-indexed)");
+  }
+  let start = args.start.unwrap_or(1);
+  let end = args.end.unwrap_or(lines.len());
+  let slice_start = (start - 1).min(lines.len());
+  let slice_end = end.min(lines.len());
+  if slice_start > slice_end {
     bail!("start line {start} exceeds end line {end}");
   }
-  Ok(lines[start..end].join("\n"))
+  Ok(lines[slice_start..slice_end].join("\n"))
 }
 
 #[derive(Deserialize)]
@@ -439,9 +447,12 @@ fn repo_map_walk(
 fn read_hash_anchors(args: &str) -> Result<String> {
   let args: ReadFileArgs = parse_args(args)?;
   require_nonempty(&args.path, "path")?;
+  if args.start == Some(0) || args.end == Some(0) {
+    bail!("start and end line numbers must be >= 1 (1-indexed)");
+  }
   let path = crate::workspace::workspace_path(&args.path)?;
   let source = fs::read_to_string(&path).with_context(|| format!("read {}", args.path))?;
-  Ok(render_hashlines(&source, 1, args.start, args.end))
+  Ok(render_hashlines(&source, args.start, args.end))
 }
 
 #[derive(Deserialize)]

@@ -10,16 +10,15 @@ struct Anchor<'a> {
 
 pub fn render_hashlines(
   source: &str,
-  start_line: usize,
   start: Option<usize>,
   end: Option<usize>,
 ) -> String {
   let lines = source_lines(source);
-  let slice_start = start.unwrap_or(0).min(lines.len());
+  let slice_start = start.map(|s| if s > 0 { s - 1 } else { 0 }).unwrap_or(0).min(lines.len());
   let slice_end = end.unwrap_or(lines.len()).min(lines.len());
   let mut out = String::new();
   for (i, line) in lines[slice_start..slice_end].iter().enumerate() {
-    let line_no = start_line + slice_start + i;
+    let line_no = slice_start + i + 1;
     let hash = line_hash(line);
     let _ = writeln!(out, "{line_no}:{hash}|{line}");
   }
@@ -206,7 +205,7 @@ mod tests {
 
   #[test]
   fn hashline_matches_go_fnv_prefix() {
-    assert_eq!(render_hashlines("hello\n", 1, None, None), "1:a430|hello\n");
+    assert_eq!(render_hashlines("hello\n", None, None), "1:a430|hello\n");
   }
 
   #[test]
