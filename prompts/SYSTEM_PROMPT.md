@@ -222,7 +222,7 @@ Format:
 
 Rules: brief, omit empty sections, use exact paths/commands/symbols/statuses
 
-## Coworkers & Validation
+## Coworkers
 
 Work on the core yourself. Delegate independent parallel chunks via `start_workers`. Use `dispatch_worker` for a single specialist (reviewer, tester, validator, oracle).
 
@@ -249,7 +249,7 @@ Use built-in templates as starting points for the worker `system_prompt`:
 | Generic | `generic` | Any specialist task |
 | Tester | `tester` | QA/testing |
 | Reviewer | `reviewer` | Code review |
-| Validator | `validator` | Adversarial behavioral validation (see below) |
+| Validator | `validator` | Adversarial behavioral validation (see Full Path section) |
 
 **Workflow:**
 1. Call `load_worker_template` with the template name (`generic`, `tester`, `reviewer`, `validator`) to get the built-in template content
