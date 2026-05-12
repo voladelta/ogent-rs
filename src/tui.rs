@@ -35,9 +35,9 @@ pub enum SteerEvent {
   Cancel,
   Complete,
   New,
-  Fork,
   Exit,
   Profile(String),
+  Compact(Option<String>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -159,6 +159,8 @@ struct StatusInner {
   model: String,
   tokens: i32,
   state: AgentState,
+  compact_threshold: i32,
+  context_limit: usize,
 }
 
 impl UiStatus {
@@ -169,6 +171,8 @@ impl UiStatus {
         model,
         tokens: 0,
         state: AgentState::Idle,
+        compact_threshold: -1,
+        context_limit: 0,
       })),
     }
   }
@@ -186,6 +190,14 @@ impl UiStatus {
 
   pub fn set_state(&self, state: AgentState) {
     self.inner.lock().expect("ui status poisoned").state = state;
+  }
+
+  pub fn set_compact_threshold(&self, threshold: i32) {
+    self.inner.lock().expect("ui status poisoned").compact_threshold = threshold;
+  }
+
+  pub fn set_context_limit(&self, limit: usize) {
+    self.inner.lock().expect("ui status poisoned").context_limit = limit;
   }
 
   pub fn state(&self) -> AgentState {
@@ -515,8 +527,11 @@ pub fn parse_steer_event(line: &str) -> SteerEvent {
   match line.trim() {
     "/cancel" => SteerEvent::Cancel,
     "/complete" => SteerEvent::Complete,
+    "/compact" => SteerEvent::Compact(None),
+    s if s.starts_with("/compact ") => {
+      SteerEvent::Compact(Some(s.strip_prefix("/compact ").unwrap().trim().to_string()))
+    }
     "/new" => SteerEvent::New,
-    "/fork" => SteerEvent::Fork,
     "/q" | "/quit" | "quit" | "exit" => SteerEvent::Exit,
     s if s.starts_with("/profile ") => {
       SteerEvent::Profile(s.strip_prefix("/profile ").unwrap().trim().to_string())
@@ -655,6 +670,17 @@ fn draw(
       status_snapshot.model,
       status_snapshot.tokens,
     );
+    if status_snapshot.compact_threshold >= 0 && status_snapshot.context_limit > 0 {
+      let pct = if status_snapshot.context_limit > 0 {
+        status_snapshot.tokens as usize * 100 / status_snapshot.context_limit
+      } else {
+        0
+      };
+      bar.push_str(&format!(
+        " | compact@{}% [{}% used]",
+        status_snapshot.compact_threshold, pct
+      ));
+    }
     truncate_to_width(&mut bar, chunks[0].width.saturating_sub(1) as usize);
     frame.render_widget(Paragraph::new(bar), chunks[0]);
 
@@ -919,8 +945,9 @@ mod tests {
   fn parses_steer_commands() {
     assert_eq!(parse_steer_event("/cancel"), SteerEvent::Cancel);
     assert_eq!(parse_steer_event("/complete"), SteerEvent::Complete);
+    assert_eq!(parse_steer_event("/compact"), SteerEvent::Compact(None));
+    assert_eq!(parse_steer_event("/compact fix auth"), SteerEvent::Compact(Some("fix auth".into())));
     assert_eq!(parse_steer_event("/new"), SteerEvent::New);
-    assert_eq!(parse_steer_event("/fork"), SteerEvent::Fork);
     assert_eq!(parse_steer_event("/q"), SteerEvent::Exit);
     assert_eq!(parse_steer_event("/quit"), SteerEvent::Exit);
     assert_eq!(parse_steer_event("quit"), SteerEvent::Exit);

@@ -31,7 +31,7 @@ struct Args {
   steer: bool,
   #[arg(long, default_value_t = false)]
   worker: bool,
-  #[arg(long, default_value_t = -1)]
+  #[arg(long, default_value_t = 80)]
   autocompact: i32,
   #[arg(long)]
   resume: Option<Option<String>>,
@@ -175,6 +175,10 @@ async fn main() -> Result<()> {
   }
     let loop_result = if args.steer {
     let tui = tui::start(args.profile.clone(), profile.model.to_string())?;
+    if args.autocompact >= 0 {
+      tui.status.set_compact_threshold(args.autocompact);
+      tui.status.set_context_limit(profile.context_limit);
+    }
     agent
       .steer_loop(tui, wait_for_steer_input)
       .await

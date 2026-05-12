@@ -76,7 +76,7 @@ impl SteerState {
               ctx.turn = 1;
               tui
                 .log
-                .push("[steer] commands: /complete /cancel /new /fork /q".to_string());
+                .push("[steer] commands: /complete /cancel /new /compact [/compact <focus>] /q".to_string());
               return Ok(Self::Idle {
                 wait_for_input: true,
               });
@@ -102,7 +102,7 @@ impl SteerState {
               SteerAction::Restart => {
                 ctx.turn = 1;
                 tui.log.push(
-                  "[steer] commands: /complete /cancel /new /fork /q".to_string(),
+                  "[steer] commands: /complete /cancel /new /compact [/compact <focus>] /q".to_string(),
                 );
                 return Ok(Self::Idle {
                   wait_for_input: true,
@@ -201,7 +201,7 @@ impl SteerState {
                   agent.apply_steer_event(SteerEvent::New, tui)?;
                   chat.abort();
                   ctx.turn = 1;
-                  tui.log.push("[steer] commands: /complete /cancel /new /fork /q".to_string());
+                  tui.log.push("[steer] commands: /complete /cancel /new /compact [/compact <focus>] /q".to_string());
                   return Ok(Self::Idle { wait_for_input: true });
                 }
                 SteerEvent::Exit => {
@@ -220,7 +220,7 @@ impl SteerState {
                       cancel.cancel();
                       chat.abort();
                       ctx.turn = 1;
-                  tui.log.push("[steer] commands: /complete /cancel /new /fork /q".to_string());
+                  tui.log.push("[steer] commands: /complete /cancel /new /compact [/compact <focus>] /q".to_string());
                       return Ok(Self::Idle { wait_for_input: true });
                     }
                     SteerAction::Continue => {}
@@ -290,6 +290,35 @@ impl SteerState {
             .log
             .push("[steer] task complete; send a message to continue or /q to quit".to_string());
           agent.completion_summary = None;
+
+          if agent.compact.compacting
+            && agent.compact.threshold > 0.0
+          {
+            let ratio = agent.total_tokens as f64 / agent.compact.context_limit as f64;
+            if ratio >= agent.compact.threshold {
+              let mut compact_msg = String::from(
+                "Context budget exhausted. Produce a handoff brief now:\n\
+                 - ## Goal\n\
+                 - ## What was done\n\
+                 - ## Current state\n\
+                 - ## Relevant excerpts\n\
+                 - ## Next steps\n\n\
+                 Be concise. Specific facts only.",
+              );
+              if let Some(tracker) = &agent.task_tracker {
+                compact_msg.push_str(&format!(
+                  "\n\n## Task Plan (include verbatim)\n{}",
+                  serde_json::to_string_pretty(tracker).unwrap_or_default(),
+                ));
+              }
+              agent.push_msg(user_msg(compact_msg));
+              tui.log.push("[compact] autocompact triggered, requesting handoff brief...");
+              agent.pending_compact = Some(None);
+              ctx.turn += 1;
+              return Ok(Self::StartTurn);
+            }
+          }
+
           return Ok(Self::Idle {
             wait_for_input: true,
           });
@@ -304,6 +333,75 @@ impl SteerState {
 
         if should_exit {
           return Ok(Self::Exit(agent.messages.clone()));
+        }
+
+        if let Some(task_prompt) = agent.pending_compact.take() {
+          let handoff = agent.messages.iter()
+            .rev()
+            .find(|m| m.role == "assistant")
+            .map(|m| m.content.clone())
+            .unwrap_or_default();
+
+          if handoff.is_empty() {
+            tui.log.push("[compact] model returned empty response, not compacting");
+          } else {
+            let parent_id = agent.meta.session_id.clone();
+
+            if !agent.meta.flags.temp {
+              agent.meta.usage.total_tokens = agent.total_tokens;
+              session::write_meta(&agent.meta)?;
+              session::persist_session(&agent.messages, &agent.meta.session_id)?;
+            }
+
+            let mut new_messages = crate::prompts::build_messages("");
+            let mut content = format!(
+              "[handoff from session {}]\n\n{}\n\n\
+               If the summary is unclear or you need specific details, \
+               read the full transcript:\n\
+               .ogent/sessions/{}/messages.jsonl",
+              parent_id, handoff, parent_id,
+            );
+            if let Some(ref tp) = task_prompt {
+              content.push_str(&format!("\n\nFocus task: {}", tp));
+            }
+            new_messages.push(Message {
+              role: "user".into(),
+              content,
+              ..Default::default()
+            });
+
+            agent.meta.session_id = session::generate_session_id();
+            agent.meta.parent_session = Some(parent_id.clone());
+            agent.meta.start_ts = Some(session::timestamp_ms());
+            agent.meta.end_ts = None;
+            agent.meta.usage = session::SessionUsage { total_tokens: 0 };
+            if task_prompt.is_some() {
+              agent.meta.prompt = task_prompt;
+            }
+            agent.messages = new_messages;
+            agent.total_tokens = 0;
+            agent.dirty = true;
+            agent.next_turn_reset = true;
+            agent.compact.compacting = false;
+            agent.compact.urgency = 0;
+            agent.completion_summary = None;
+            agent.complete_open_work_warned = false;
+
+            if !agent.meta.flags.temp {
+              session::write_meta(&agent.meta)?;
+              session::persist_session(&agent.messages, &agent.meta.session_id)?;
+            }
+
+            tui.log.clear();
+            tui.log.push(format!(
+              "[compact] {} → {} (parent preserved)",
+              parent_id, agent.meta.session_id
+            ));
+            tui.status.set_tokens(0);
+          }
+
+          ctx.turn += 1;
+          return Ok(Self::Idle { wait_for_input: true });
         }
 
         if !has_more {
@@ -362,6 +460,7 @@ pub struct Agent {
   pub meta: session::SessionMeta,
   pub dirty: bool,
   pub next_turn_reset: bool,
+  pub pending_compact: Option<Option<String>>,
 }
 
 pub struct ToolResult {
@@ -395,6 +494,7 @@ impl Agent {
       meta,
       dirty: false,
       next_turn_reset: false,
+      pending_compact: None,
     }
   }
 
@@ -458,7 +558,7 @@ impl Agent {
   ) -> Result<Vec<Message>, AgentError> {
     tui
       .log
-      .push("[steer] commands: /complete /cancel /new /fork /q");
+      .push("[steer] commands: /complete /cancel /new /compact [/compact <focus>] /q");
     let mut state = SteerState::Idle { wait_for_input };
     let mut ctx = SteerCtx {
       turn: 1,
@@ -558,30 +658,33 @@ impl Agent {
         tui.log.push("[steer] new session started");
         return Ok(SteerAction::Restart);
       }
-      SteerEvent::Fork => {
+      SteerEvent::Compact(task_prompt) => {
         if !self.dirty {
-          tui.log.push("[steer] nothing to fork; session is empty");
+          tui.log.push("[steer] nothing to compact; session is empty");
         } else {
-          if !self.meta.flags.temp {
-            self.meta.usage.total_tokens = self.total_tokens;
-            session::write_meta(&self.meta)?;
-            session::persist_session(&self.messages, &self.meta.session_id)?;
+          let mut compact_msg = String::from(
+            "Produce a handoff brief for continuing this work in a fresh context window.\n\n\
+             Include:\n\
+             - ## Goal — what was the user trying to accomplish\n\
+             - ## What was done — key actions, files modified, decisions (specific paths)\n\
+             - ## Current state — what's in progress, what's blocked\n\
+             - ## Relevant excerpts — critical code, errors, outputs\n\
+             - ## Next steps\n\n\
+             Be concise. Specific facts only. Omit anything that won't matter for continuing.",
+          );
+          if let Some(tracker) = &self.task_tracker {
+            compact_msg.push_str(&format!(
+              "\n\n## Task Plan (include verbatim)\n\
+               Preserve the full task plan so set_goal/update_phase/update_todo can be resumed:\n{}",
+              serde_json::to_string_pretty(tracker).unwrap_or_default(),
+            ));
           }
-          let parent_id = self.meta.session_id.clone();
-          self.meta.session_id = session::generate_session_id();
-          self.meta.parent_session = Some(parent_id.clone());
-          self.meta.start_ts = Some(session::timestamp_ms());
-          self.meta.end_ts = None;
-          self.next_turn_reset = true;
-          self.dirty = true;
-          if !self.meta.flags.temp {
-            session::write_meta(&self.meta)?;
-            session::persist_session(&self.messages, &self.meta.session_id)?;
+          if let Some(ref prompt) = task_prompt {
+            compact_msg.push_str(&format!("\n\nFocus the new session on: {}", prompt));
           }
-          tui.log.push(format!(
-            "[steer] forked to {}; parent is {}. Resume parent with --resume-session {}",
-            self.meta.session_id, parent_id, parent_id
-          ));
+          self.push_msg(user_msg(compact_msg));
+          tui.log.push("[compact] requesting handoff brief...");
+          self.pending_compact = Some(task_prompt);
         }
       }
       SteerEvent::Profile(name) => {
@@ -1138,57 +1241,54 @@ mod dirty_state_machine_tests {
   }
 
   #[tokio::test]
-  async fn fork_on_empty_is_noop() {
+  async fn compact_on_empty_is_noop() {
     let mut agent = dummy_agent();
     let tui = crate::tui::TuiHandle::test_handle();
     let old_id = agent.meta.session_id.clone();
     let action = agent
-      .apply_steer_event(SteerEvent::Fork, &tui)
+      .apply_steer_event(SteerEvent::Compact(None), &tui)
       .unwrap();
     assert!(matches!(action, SteerAction::Continue));
     assert!(!agent.dirty);
     assert_eq!(agent.meta.session_id, old_id);
-    assert_eq!(agent.meta.parent_session, None);
-    assert!(!agent.next_turn_reset);
+    assert!(agent.pending_compact.is_none());
   }
 
   #[tokio::test]
-  async fn fork_persists_parent_and_creates_fork() {
+  async fn compact_pushes_handoff_message() {
     let mut agent = dummy_agent();
     let tui = crate::tui::TuiHandle::test_handle();
     agent.push_msg(user_msg("hello"));
-    agent.meta.prompt = Some("test prompt".into());
-    agent.meta.start_ts = Some(1000);
-    agent.meta.end_ts = Some(2000);
-    let parent_id = agent.meta.session_id.clone();
+    let old_id = agent.meta.session_id.clone();
+    let old_len = agent.messages.len();
 
     let action = agent
-      .apply_steer_event(SteerEvent::Fork, &tui)
+      .apply_steer_event(SteerEvent::Compact(None), &tui)
       .unwrap();
     assert!(matches!(action, SteerAction::Continue));
-
-    // parent persisted
-    let parent_dir = session::session_dir(&parent_id);
-    assert!(parent_dir.join("meta.json").exists());
-    assert!(parent_dir.join("messages.jsonl").exists());
-
-    // fork has new identity
     assert!(agent.dirty);
-    assert!(agent.next_turn_reset);
-    assert_ne!(agent.meta.session_id, parent_id);
-    assert_eq!(agent.meta.parent_session, Some(parent_id.clone()));
-    assert_eq!(agent.meta.prompt, Some("test prompt".into()));
-    assert!(agent.meta.start_ts.unwrap() >= 1000); // fork time >= original start
-    assert_eq!(agent.meta.end_ts, None);
-    assert_eq!(agent.messages.len(), 3); // system + initial user + "hello"
+    assert_eq!(agent.meta.session_id, old_id);
+    assert!(agent.pending_compact.is_some());
+    assert!(agent.pending_compact.as_ref().unwrap().is_none());
+    assert_eq!(agent.messages.len(), old_len + 1);
+    let last = agent.messages.last().unwrap();
+    assert_eq!(last.role, "user");
+    assert!(last.content.contains("handoff brief"));
+  }
 
-    // fork persisted immediately
-    let fork_dir = session::session_dir(&agent.meta.session_id);
-    assert!(fork_dir.join("meta.json").exists());
-    assert!(fork_dir.join("messages.jsonl").exists());
+  #[tokio::test]
+  async fn compact_with_focus_includes_prompt() {
+    let mut agent = dummy_agent();
+    let tui = crate::tui::TuiHandle::test_handle();
+    agent.push_msg(user_msg("hello"));
 
-    // clean up
-    let _ = std::fs::remove_dir_all(&parent_dir);
-    let _ = std::fs::remove_dir_all(&fork_dir);
+    let action = agent
+      .apply_steer_event(SteerEvent::Compact(Some("fix auth".into())), &tui)
+      .unwrap();
+    assert!(matches!(action, SteerAction::Continue));
+    assert!(agent.pending_compact.is_some());
+    assert_eq!(agent.pending_compact.as_ref().unwrap().as_deref(), Some("fix auth"));
+    let last = agent.messages.last().unwrap();
+    assert!(last.content.contains("fix auth"));
   }
 }
