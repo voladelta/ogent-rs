@@ -6,6 +6,7 @@ use crate::tools::{ToolContext, execute_tool, is_read_only_tool};
 use crate::tui::{AgentState, SteerEvent, TuiHandle};
 use crate::types::{ChatResponse, Message, Tool, ToolCall};
 use crate::workers::WorkerManager;
+use std::io::{self, Write};
 
 #[derive(Debug, thiserror::Error)]
 pub enum AgentError {
@@ -731,6 +732,7 @@ impl Agent {
       ));
       if ui_log.is_none() {
         print!("{}", resp.content);
+        io::stdout().flush().map_err(anyhow::Error::from)?;
         self.report_tokens();
       }
       return Ok(false);

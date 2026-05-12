@@ -502,7 +502,7 @@ Some trailing text"#;
       resolve_worker_prompts("reviewer", "review src/lib.rs", "## Files\n- src/lib.rs")
         .await
         .unwrap();
-    assert!(sys.contains("Reviewer Worker"));
+    assert!(sys.contains("code reviewer"));
     assert!(sys.contains("## Context"));
     assert!(sys.contains("src/lib.rs"));
     assert_eq!(task, "review src/lib.rs");

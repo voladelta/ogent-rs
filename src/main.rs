@@ -16,6 +16,8 @@ mod workspace;
 
 use anyhow::{Context, Result, bail};
 use clap::Parser;
+use std::env;
+use std::io::{self, Write};
 
 use agent::{Agent, CompactState};
 use types::Message;
@@ -35,6 +37,8 @@ struct Args {
   autocompact: i32,
   #[arg(long)]
   resume: Option<Option<String>>,
+  #[arg(long)]
+  fork: Option<Option<String>>,
   #[arg(long, default_value_t = false)]
   temp: bool,
   prompt: Vec<String>,
@@ -42,7 +46,10 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-  let args = Args::parse();
+  let args = parse_args();
+  if args.resume.is_some() && args.fork.is_some() {
+    bail!("use either resume or fork, not both");
+  }
   let profile = profiles::get_profile(&args.profile)
     .with_context(|| format!("unknown profile: {}", args.profile))?;
   let client = providers::new_client(profile)?;
@@ -79,8 +86,10 @@ async fn main() -> Result<()> {
   let mut old_session_id: Option<String> = None;
 
   let is_resume = args.resume.is_some();
+  let is_fork = args.fork.is_some();
+  let is_loaded_session = is_resume || is_fork;
   let prompt = args.prompt.join(" ");
-  let wait_for_steer_input = args.steer && !args.worker && !is_resume && prompt.is_empty();
+  let wait_for_steer_input = args.steer && !args.worker && !is_loaded_session && prompt.is_empty();
 
   let (messages, tools, task_tracker, workflow_state): (
     Vec<Message>,
@@ -98,8 +107,8 @@ async fn main() -> Result<()> {
       None,
       None,
     )
-  } else if is_resume {
-    let path = match args.resume {
+  } else if is_loaded_session {
+    let path = match args.resume.or(args.fork) {
       Some(Some(name)) => format!(".ogent/sessions/{name}.jsonl"),
       Some(None) => session::find_latest_session(".ogent/sessions").context("no session found")?,
       None => unreachable!(),
@@ -111,8 +120,12 @@ async fn main() -> Result<()> {
         .unwrap_or(&path)
         .to_string(),
     );
-    eprintln!("[resume] loading {path}");
+    let load_action = if is_fork { "fork" } else { "resume" };
+    eprintln!("[{load_action}] loading {path}");
     let mut loaded = session::load_session(&path)?;
+    if is_resume {
+      meta.session_id = old_session_id.clone().expect("loaded session id");
+    }
     if !prompt.is_empty() {
       loaded.push(Message {
         role: "user".into(),
@@ -134,11 +147,19 @@ async fn main() -> Result<()> {
     meta.start_ts = Some(session::timestamp_ms());
   }
   if let Some(ref sid) = old_session_id {
-    meta.parent_session = Some(sid.clone());
-    if let Ok(old_meta) = session::read_meta(sid) {
+    let old_session_meta = session::read_meta(sid).ok();
+    if is_fork {
+      meta.parent_session = Some(sid.clone());
+    } else if let Some(ref old_meta) = old_session_meta {
+      meta.parent_session = old_meta.parent_session.clone();
+    }
+    if let Some(old_meta) = old_session_meta.as_ref() {
       eprintln!(
-        "[resume] parent session {sid} (profile: {}, mode: {})",
-        old_meta.profile, old_meta.mode
+        "[{}] {} session {sid} (profile: {}, mode: {})",
+        if is_fork { "fork" } else { "resume" },
+        if is_fork { "parent" } else { "continuing" },
+        old_meta.profile,
+        old_meta.mode
       );
     }
   }
@@ -151,7 +172,7 @@ async fn main() -> Result<()> {
     workflow_state,
     meta,
   );
-  if args.worker || is_resume || !prompt.is_empty() {
+  if args.worker || is_loaded_session || !prompt.is_empty() {
     agent.dirty = true;
   }
   let loop_result = if args.steer {
@@ -178,9 +199,21 @@ async fn main() -> Result<()> {
     }
   }
   if !args.worker && !args.temp {
-    eprintln!("\nogent resume {} to continue this session", agent.meta.session_id);
+    io::stdout().flush()?;
+    eprintln!(
+      "\nogent resume {} to continue this session",
+      agent.meta.session_id
+    );
   }
   Ok(())
+}
+
+fn parse_args() -> Args {
+  let mut raw: Vec<String> = env::args().collect();
+  if raw.len() > 1 && (raw[1] == "resume" || raw[1] == "fork") {
+    raw[1] = format!("--{}", raw[1]);
+  }
+  Args::parse_from(raw)
 }
 
 fn build_worker_messages(system_prompt: &str, prompt: &str, session_id: &str) -> Vec<Message> {
