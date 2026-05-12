@@ -18,21 +18,6 @@ pub struct ToolContext<'a> {
   pub agent: Option<&'a mut Agent>,
 }
 
-#[derive(Debug)]
-pub struct InteractiveRequired;
-
-impl std::fmt::Display for InteractiveRequired {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    write!(f, "interactive mode required")
-  }
-}
-
-impl std::error::Error for InteractiveRequired {}
-
-pub fn is_interactive_required(err: &anyhow::Error) -> bool {
-  err.downcast_ref::<InteractiveRequired>().is_some()
-}
-
 pub async fn execute_tool(mut ctx: ToolContext<'_>, name: &str, args: &str) -> Result<String> {
   match name {
     "read_file" => read_file(args),
@@ -45,17 +30,35 @@ pub async fn execute_tool(mut ctx: ToolContext<'_>, name: &str, args: &str) -> R
     "web_read" => web_read(args).await,
     "code_web_context" => code_web_context(args).await,
 
-    "set_goal" => set_goal(ctx.agent.as_deref_mut(), args),
-    "revise_goal" => revise_goal(ctx.agent.as_deref_mut(), args),
-    "update_phase" => update_phase(ctx.agent.as_deref_mut(), args),
-    "update_todo" => update_todo(ctx.agent.as_deref_mut(), args),
+    "set_goal" => {
+      let agent = ctx.agent.as_deref_mut().context("set_goal requires an active agent")?;
+      set_goal(agent, args)
+    }
+    "revise_goal" => {
+      let agent = ctx.agent.as_deref_mut().context("revise_goal requires an active agent")?;
+      revise_goal(agent, args)
+    }
+    "update_phase" => {
+      let agent = ctx.agent.as_deref_mut().context("update_phase requires an active agent")?;
+      update_phase(agent, args)
+    }
+    "update_todo" => {
+      let agent = ctx.agent.as_deref_mut().context("update_todo requires an active agent")?;
+      update_todo(agent, args)
+    }
     "load_skill" => load_skill(ctx.agent.as_deref_mut(), args),
     "load_worker_template" => load_worker_template(args),
     "dispatch_worker" => dispatch_worker(args).await,
     "start_workers" => start_workers(ctx.agent.as_deref_mut(), args).await,
     "check_workers" => check_workers(ctx.agent.as_deref_mut(), args).await,
-    "worker_complete" => worker_complete(ctx.agent.as_deref_mut(), args),
-    "complete" => complete(ctx.agent.as_deref_mut(), args),
+    "worker_complete" => {
+      let agent = ctx.agent.as_deref_mut().context("worker_complete requires an active agent")?;
+      worker_complete(agent, args)
+    }
+    "complete" => {
+      let agent = ctx.agent.as_deref_mut().context("complete requires an active agent")?;
+      complete(agent, args)
+    }
     _ => bail!("unknown tool: {name}"),
   }
 }
@@ -229,16 +232,6 @@ fn schema(name: &str, description: &str, parameters: Value) -> Tool {
   }
 }
 
-fn require_agent<'a>(
-  agent: Option<&'a mut crate::agent::Agent>,
-  tool: &str,
-) -> Result<&'a mut crate::agent::Agent> {
-  agent.ok_or_else(|| {
-    let mut err = anyhow::Error::new(InteractiveRequired);
-    err = err.context(format!("{tool} requires an active agent"));
-    err
-  })
-}
 
 fn exa_client() -> &'static reqwest::Client {
   static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
@@ -621,10 +614,9 @@ struct SetGoalArgs {
   notes: String,
 }
 
-fn set_goal(agent: Option<&mut crate::agent::Agent>, args: &str) -> Result<String> {
+fn set_goal(agent: &mut crate::agent::Agent, args: &str) -> Result<String> {
   let args: SetGoalArgs = parse_args(args)?;
   require_nonempty(&args.goal, "goal")?;
-  let agent = require_agent(agent, "set_goal")?;
   if agent.task_tracker.is_some() {
     bail!("set_goal can only be called once; use revise_goal for goal changes");
   }
@@ -656,11 +648,10 @@ struct ReviseGoalArgs {
   notes: String,
 }
 
-fn revise_goal(agent: Option<&mut crate::agent::Agent>, args: &str) -> Result<String> {
+fn revise_goal(agent: &mut crate::agent::Agent, args: &str) -> Result<String> {
   let args: ReviseGoalArgs = parse_args(args)?;
   require_nonempty(&args.goal, "goal")?;
   require_nonempty(&args.reason, "reason")?;
-  let agent = require_agent(agent, "revise_goal")?;
   let Some(tracker) = agent.task_tracker.as_mut() else {
     bail!("set_goal must be called before revise_goal");
   };
@@ -689,11 +680,10 @@ struct UpdatePhaseArgs {
   contracts: Option<Vec<crate::task_tracker::ValidationContract>>,
 }
 
-fn update_phase(agent: Option<&mut crate::agent::Agent>, args: &str) -> Result<String> {
+fn update_phase(agent: &mut crate::agent::Agent, args: &str) -> Result<String> {
   let args: UpdatePhaseArgs = parse_args(args)?;
   require_nonempty(&args.phase_id, "phase_id")?;
   require_nonempty(&args.title, "title")?;
-  let agent = require_agent(agent, "update_phase")?;
   let Some(tracker) = agent.task_tracker.as_mut() else {
     bail!("set_goal must be called before update_phase");
   };
@@ -733,12 +723,11 @@ struct UpdateTodoArgs {
   notes: String,
 }
 
-fn update_todo(agent: Option<&mut crate::agent::Agent>, args: &str) -> Result<String> {
+fn update_todo(agent: &mut crate::agent::Agent, args: &str) -> Result<String> {
   let args: UpdateTodoArgs = parse_args(args)?;
   require_nonempty(&args.phase_id, "phase_id")?;
   require_nonempty(&args.todo_id, "todo_id")?;
   require_nonempty(&args.title, "title")?;
-  let agent = require_agent(agent, "update_todo")?;
   let Some(tracker) = agent.task_tracker.as_mut() else {
     bail!("set_goal must be called before update_todo");
   };
@@ -831,10 +820,9 @@ struct CompleteArgs {
   summary: String,
 }
 
-fn complete(agent: Option<&mut crate::agent::Agent>, args: &str) -> Result<String> {
+fn complete(agent: &mut crate::agent::Agent, args: &str) -> Result<String> {
   let args: CompleteArgs = parse_args(args)?;
   require_nonempty(&args.summary, "summary")?;
-  let agent = require_agent(agent, "complete")?;
   // Workflow gate
   if let Some(ref ws) = agent.workflow_state
     && let Some(ref phase) = ws.current_phase
@@ -871,10 +859,9 @@ fn complete(agent: Option<&mut crate::agent::Agent>, args: &str) -> Result<Strin
   Ok("Task marked complete.".to_string())
 }
 
-fn worker_complete(agent: Option<&mut crate::agent::Agent>, args: &str) -> Result<String> {
+fn worker_complete(agent: &mut crate::agent::Agent, args: &str) -> Result<String> {
   let args: CompleteArgs = parse_args(args)?;
   require_nonempty(&args.summary, "summary")?;
-  let agent = require_agent(agent, "worker_complete")?;
   agent.completion_summary = Some(args.summary.trim().to_string());
   Ok("Worker marked complete.".to_string())
 }

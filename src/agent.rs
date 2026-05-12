@@ -9,8 +9,6 @@ use crate::workers::WorkerManager;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AgentError {
-  #[error("interactive mode required")]
-  InteractiveRequired,
   #[error("client error")]
   Client(#[from] ClientError),
   #[error(transparent)]
@@ -533,11 +531,7 @@ impl Agent {
         .chat(&self.messages, &self.tools, None, None)
         .await?;
 
-      let mut has_more = match self.handle_turn_response(resp).await {
-        Ok(hm) => hm,
-        Err(AgentError::InteractiveRequired) => return Ok(self.messages.clone()),
-        Err(e) => return Err(e),
-      };
+      let mut has_more = self.handle_turn_response(resp).await?;
       if self
         .finish_turn(&mut has_more, None)
         .await?
@@ -800,16 +794,12 @@ impl Agent {
         read_only_batch.clear();
       }
       let (output, success) = self.run_tool_call(tc).await;
-      let is_interactive = output == INTERACTIVE_ERR;
       results.push(ToolResult {
         name: tc.function.name.clone(),
         args: tc.function.arguments.clone(),
         output,
         success,
       });
-      if is_interactive {
-        return Err(AgentError::InteractiveRequired);
-      }
       if self.completion_summary.is_some() {
         break;
       }
@@ -827,7 +817,7 @@ impl Agent {
   }
 
   async fn run_tool_call(&mut self, tc: &ToolCall) -> (String, bool) {
-    let (output, success, is_interactive) = format_tool_result(
+    let (output, success, _) = format_tool_result(
       execute_tool(
         ToolContext { agent: Some(self) },
         &tc.function.name,
@@ -835,9 +825,6 @@ impl Agent {
       )
       .await,
     );
-    if is_interactive {
-      return (INTERACTIVE_ERR.to_string(), false);
-    }
     (output, success)
   }
 
@@ -949,14 +936,9 @@ fn tool_msg(content: impl Into<String>, tool_call_id: impl Into<String>) -> Mess
   }
 }
 
-const INTERACTIVE_ERR: &str = "ERROR: interactive mode required";
-
 fn format_tool_result(result: anyhow::Result<String>) -> (String, bool, bool) {
   match result {
     Ok(out) => (out, true, false),
-    Err(ref e) if crate::tools::is_interactive_required(e) => {
-      (INTERACTIVE_ERR.to_string(), false, true)
-    }
     Err(e) => (format!("ERROR: {e}"), false, false),
   }
 }
@@ -979,9 +961,6 @@ async fn run_read_only_batch(batch: &[&ToolCall]) -> Result<Vec<ToolResult>, Age
     }
   });
   let results = futures_util::future::join_all(futs).await;
-  if results.iter().any(|r| r.output == INTERACTIVE_ERR) {
-    return Err(AgentError::InteractiveRequired);
-  }
   Ok(results)
 }
 
