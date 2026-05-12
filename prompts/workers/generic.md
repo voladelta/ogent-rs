@@ -1,5 +1,3 @@
-# Generic Worker Prompt Template
-
 Use this template to derive a self-contained worker system prompt and task prompt.
 The worker cannot see the parent conversation, so preserve every concrete fact needed
 to do the job.
