@@ -21,6 +21,14 @@ enum SteerAction {
   Restart,
 }
 
+#[derive(Default)]
+pub(crate) enum CompactPending {
+  #[default]
+  None,
+  NoFocus,
+  WithFocus(String),
+}
+
 enum SteerState {
   Idle {
     wait_for_input: bool,
@@ -276,7 +284,7 @@ impl SteerState {
               tui
                 .log
                 .push("[compact] autocompact triggered, requesting handoff brief...");
-              agent.pending_compact = Some(None);
+              agent.pending_compact = CompactPending::NoFocus;
               return Ok(Self::StartTurn);
             }
           }
@@ -292,7 +300,13 @@ impl SteerState {
           return Ok(Self::Exit(agent.messages.clone()));
         }
 
-        if let Some(task_prompt) = agent.pending_compact.take() {
+        let pending = std::mem::take(&mut agent.pending_compact);
+        if !matches!(pending, CompactPending::None) {
+          let task_prompt = match pending {
+            CompactPending::NoFocus => None,
+            CompactPending::WithFocus(s) => Some(s),
+            CompactPending::None => unreachable!(),
+          };
           let handoff = agent
             .messages
             .iter()
@@ -438,7 +452,7 @@ pub struct Agent {
   pub meta: session::SessionMeta,
   pub dirty: bool,
 
-  pub pending_compact: Option<Option<String>>,
+  pub pending_compact: CompactPending,
 }
 
 pub struct ToolResult {
@@ -472,7 +486,7 @@ impl Agent {
       meta,
       dirty: false,
 
-      pending_compact: None,
+      pending_compact: CompactPending::None,
     }
   }
 
@@ -626,7 +640,7 @@ impl Agent {
         self.complete_open_work_warned = false;
         self.compact.compacting = false;
         self.compact.urgency = 0;
-        self.pending_compact = None;
+        self.pending_compact = CompactPending::None;
         tui.log.clear();
         tui.status.set_tokens(0);
         tui.log.push("[steer] new session started");
@@ -658,7 +672,10 @@ impl Agent {
           }
           self.push_msg(user_msg(compact_msg));
           tui.log.push("[compact] requesting handoff brief...");
-          self.pending_compact = Some(task_prompt);
+          self.pending_compact = match task_prompt {
+            Some(p) => CompactPending::WithFocus(p),
+            None => CompactPending::NoFocus,
+          };
         }
       }
       SteerEvent::Profile(name) => match crate::profiles::get_profile(&name) {
@@ -1196,7 +1213,7 @@ mod dirty_state_machine_tests {
     assert!(matches!(action, SteerAction::Continue));
     assert!(!agent.dirty);
     assert_eq!(agent.meta.session_id, old_id);
-    assert!(agent.pending_compact.is_none());
+    assert!(matches!(agent.pending_compact, CompactPending::None));
   }
 
   #[tokio::test]
@@ -1213,8 +1230,7 @@ mod dirty_state_machine_tests {
     assert!(matches!(action, SteerAction::Continue));
     assert!(agent.dirty);
     assert_eq!(agent.meta.session_id, old_id);
-    assert!(agent.pending_compact.is_some());
-    assert!(agent.pending_compact.as_ref().unwrap().is_none());
+    assert!(matches!(agent.pending_compact, CompactPending::NoFocus));
     assert_eq!(agent.messages.len(), old_len + 1);
     let last = agent.messages.last().unwrap();
     assert_eq!(last.role, "user");
@@ -1231,11 +1247,7 @@ mod dirty_state_machine_tests {
       .apply_steer_event(SteerEvent::Compact(Some("fix auth".into())), &tui)
       .unwrap();
     assert!(matches!(action, SteerAction::Continue));
-    assert!(agent.pending_compact.is_some());
-    assert_eq!(
-      agent.pending_compact.as_ref().unwrap().as_deref(),
-      Some("fix auth")
-    );
+    assert!(matches!(agent.pending_compact, CompactPending::WithFocus(ref s) if s == "fix auth"));
     let last = agent.messages.last().unwrap();
     assert!(last.content.contains("fix auth"));
   }
