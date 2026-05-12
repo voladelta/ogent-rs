@@ -550,9 +550,7 @@ impl Agent {
     mut tui: TuiHandle,
     wait_for_input: bool,
   ) -> Result<Vec<Message>, AgentError> {
-    tui
-      .log
-      .push(STEER_COMMANDS);
+    tui.log.push(STEER_COMMANDS);
     let mut state = SteerState::Idle { wait_for_input };
     let mut ctx = SteerCtx { turn: 1 };
 
