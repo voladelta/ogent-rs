@@ -515,10 +515,11 @@ impl Agent {
         if let Some(idx) = first.content.find(WORKFLOW_MARKER) {
           first.content.truncate(idx);
         }
-        let _ = std::fmt::Write::write_fmt(
+        std::fmt::Write::write_fmt(
           &mut first.content,
           format_args!("{WORKFLOW_MARKER}\n{reminder}"),
-        );
+        )
+        .unwrap();
       }
     }
   }

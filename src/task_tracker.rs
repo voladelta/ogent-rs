@@ -262,11 +262,12 @@ impl TaskTracker {
     body.push_str("Task tracker already exists. Do not call `set_goal` again.\n");
     body.push_str(&self.render_summary_lines());
     if stale_nudge {
-      let _ = writeln!(
+      writeln!(
         body,
         "- Stale: non-tracking work progressed for {} turns without tracker updates.",
         self.stale_turns
-      );
+      )
+      .unwrap();
     }
     body.push_str("- Keep Goal -> Phases -> Todos current with update_phase/update_todo. Use revise_goal only if the objective changed.\n");
     body
@@ -275,52 +276,55 @@ impl TaskTracker {
   fn render_summary_lines(&self) -> String {
     use std::fmt::Write;
     let mut lines = String::new();
-    let _ = writeln!(
+    writeln!(
       lines,
       "- Goal: [{}|{}] {}",
       format_status(self.goal.status),
       format_complexity(self.goal.complexity),
       self.goal.title
-    );
+    )
+    .unwrap();
     if !self.goal.notes.is_empty() {
-      let _ = writeln!(lines, "  notes: {}", self.goal.notes);
+      writeln!(lines, "  notes: {}", self.goal.notes).unwrap();
     }
     for criterion in self.goal.success_criteria.iter().take(4) {
-      let _ = writeln!(lines, "  success: {criterion}");
+      writeln!(lines, "  success: {criterion}").unwrap();
     }
     if !self.revisions.is_empty() {
-      let _ = writeln!(lines, "- Goal revisions: {}", self.revisions.len());
+      writeln!(lines, "- Goal revisions: {}", self.revisions.len()).unwrap();
     }
     let mut counts = [0usize; 5];
     for phase in &self.phases {
       counts[status_index(phase.status)] += 1;
     }
-    let _ = writeln!(
+    writeln!(
       lines,
       "- Phases: pending={} in_progress={} blocked={} completed={} skipped={}",
       counts[0], counts[1], counts[3], counts[2], counts[4]
-    );
+    )
+    .unwrap();
     let mut emitted = 0usize;
     for phase in &self.phases {
       if phase.status.is_open() && emitted < 4 {
-        let _ = writeln!(
+        writeln!(
           lines,
           "- phase({}) [{}|{}] {}",
           phase.id,
           format_status(phase.status),
           format_complexity(phase.complexity),
           phase.title
-        );
+        )
+        .unwrap();
         if !phase.contracts.is_empty() {
           for c in phase.contracts.iter().take(6) {
-            let _ = writeln!(lines, "    contract {}: {}", c.id, c.assertion);
+            writeln!(lines, "    contract {}: {}", c.id, c.assertion).unwrap();
           }
         }
         emitted += 1;
       }
       for todo in &phase.todos {
         if todo.status.is_open() && emitted < 8 {
-          let _ = writeln!(
+          writeln!(
             lines,
             "  - todo({}/{}) [{}|{}] {}",
             phase.id,
@@ -328,7 +332,8 @@ impl TaskTracker {
             format_status(todo.status),
             format_complexity(todo.complexity),
             todo.title
-          );
+          )
+          .unwrap();
           emitted += 1;
         }
       }

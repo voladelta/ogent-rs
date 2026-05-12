@@ -74,12 +74,13 @@ pub fn discover_skills_message() -> String {
       if name.is_empty() || !seen.insert(name.clone()) {
         continue;
       }
-      let _ = writeln!(
+      writeln!(
         out,
         "  <skill name=\"{}\" description=\"{}\" />",
         xml_escape(&name),
         xml_escape(&desc)
-      );
+      )
+      .unwrap();
     }
   }
   if seen.is_empty() {

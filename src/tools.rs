@@ -468,7 +468,7 @@ fn repo_map_walk(
   if depth == 0 {
     out.push_str(".\n");
   } else if let Some(name) = rel.file_name() {
-    let _ = writeln!(out, "{}{}", "  ".repeat(depth), name.to_string_lossy());
+    writeln!(out, "{}{}", "  ".repeat(depth), name.to_string_lossy()).unwrap();
   }
   if path.is_dir() && depth < max_depth {
     let mut entries: Vec<_> = fs::read_dir(path)?.flatten().collect();
@@ -537,11 +537,11 @@ async fn web_search(args: &str) -> Result<String> {
   let v = exa_post("https://api.exa.ai/search", body).await?;
   let mut out = String::new();
   for (i, r) in v["results"].as_array().into_iter().flatten().enumerate() {
-    let _ = writeln!(out, "{}. {}", i + 1, r["title"].as_str().unwrap_or(""));
-    let _ = writeln!(out, "   {}", r["url"].as_str().unwrap_or(""));
+    writeln!(out, "{}. {}", i + 1, r["title"].as_str().unwrap_or("")).unwrap();
+    writeln!(out, "   {}", r["url"].as_str().unwrap_or("")).unwrap();
     if let Some(highlights) = r["highlights"].as_array() {
       for h in highlights {
-        let _ = writeln!(out, "   > {}", h.as_str().unwrap_or(""));
+        writeln!(out, "   > {}", h.as_str().unwrap_or("")).unwrap();
       }
     }
     out.push('\n');
@@ -574,15 +574,15 @@ async fn web_read(args: &str) -> Result<String> {
   let v = exa_post("https://api.exa.ai/contents", body).await?;
   let mut out = String::new();
   for r in v["results"].as_array().into_iter().flatten() {
-    let _ = writeln!(out, "--- {} ---", r["title"].as_str().unwrap_or(""));
-    let _ = writeln!(out, "{}", r["url"].as_str().unwrap_or(""));
+    writeln!(out, "--- {} ---", r["title"].as_str().unwrap_or("")).unwrap();
+    writeln!(out, "{}", r["url"].as_str().unwrap_or("")).unwrap();
     out.push('\n');
     if mode == "text" {
       out.push_str(r["text"].as_str().unwrap_or(""));
       out.push_str("\n\n");
     } else if let Some(highlights) = r["highlights"].as_array() {
       for h in highlights {
-        let _ = writeln!(out, "> {}", h.as_str().unwrap_or(""));
+        writeln!(out, "> {}", h.as_str().unwrap_or("")).unwrap();
       }
       out.push('\n');
     }
