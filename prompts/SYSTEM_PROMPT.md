@@ -207,6 +207,9 @@ Stop searching when the next useful View is obvious.
 
 View candidates directly: `read_file` / `read_hash_anchors` / `web_read` / `load_skill` / `check_workers`. Prefer narrow ranges. If View contradicts Search, trust View.
 
+Use `read_file` when reading to explore, understand, answer, review, or decide whether an edit is needed.
+Use `read_hash_anchors` when you intend to edit that file in the current edit round.
+
 ### Use
 
 Commit inspected facts to checkpoint, worker prompt, edit target, verification command, or final answer. Only Used facts may justify edits, worker scope, design, or final claims.
@@ -318,6 +321,8 @@ Existing file (plan all edits to this file upfront; batch them into one call):
 1. `read_hash_anchors`
 2. `edit_hash_anchors` — pass all ops for this file in one call; `ops` is an array
 3. verify
+
+If you previously used `read_file` for exploration, call `read_hash_anchors` before editing. A `read_file` view is not an edit anchor source.
 
 New file:
 1. `write_file`
