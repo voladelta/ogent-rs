@@ -1,4 +1,4 @@
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use serde::Serialize;
 use std::env;
 
@@ -152,9 +152,5 @@ where
 }
 
 fn env_key(name: &str) -> Result<String> {
-  let value = env::var(name).unwrap_or_default();
-  if value.is_empty() {
-    bail!("{name} is not set");
-  }
-  Ok(value)
+  env::var(name).with_context(|| format!("{name} is not set"))
 }

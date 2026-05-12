@@ -205,8 +205,18 @@ pub async fn run_worker_process(args: WorkerProcessArgs) -> WorkerProcessResult 
     });
   }
 
-  let mut stdout = child.stdout.take().unwrap();
-  let mut stderr = child.stderr.take().unwrap();
+  let Some(mut stdout) = child.stdout.take() else {
+    return WorkerProcessResult {
+      err: Some("worker stdout pipe unavailable after spawn".into()),
+      ..Default::default()
+    };
+  };
+  let Some(mut stderr) = child.stderr.take() else {
+    return WorkerProcessResult {
+      err: Some("worker stderr pipe unavailable after spawn".into()),
+      ..Default::default()
+    };
+  };
 
   let stdout_task = tokio::spawn(async move {
     let mut buf = Vec::new();

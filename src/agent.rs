@@ -954,7 +954,7 @@ const INTERACTIVE_ERR: &str = "ERROR: interactive mode required";
 fn format_tool_result(result: anyhow::Result<String>) -> (String, bool, bool) {
   match result {
     Ok(out) => (out, true, false),
-    Err(e) if e.to_string() == "interactive mode required" => {
+    Err(ref e) if crate::tools::is_interactive_required(e) => {
       (INTERACTIVE_ERR.to_string(), false, true)
     }
     Err(e) => (format!("ERROR: {e}"), false, false),

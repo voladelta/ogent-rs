@@ -18,6 +18,21 @@ pub struct ToolContext<'a> {
   pub agent: Option<&'a mut Agent>,
 }
 
+#[derive(Debug)]
+pub struct InteractiveRequired;
+
+impl std::fmt::Display for InteractiveRequired {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    write!(f, "interactive mode required")
+  }
+}
+
+impl std::error::Error for InteractiveRequired {}
+
+pub fn is_interactive_required(err: &anyhow::Error) -> bool {
+  err.downcast_ref::<InteractiveRequired>().is_some()
+}
+
 pub async fn execute_tool(mut ctx: ToolContext<'_>, name: &str, args: &str) -> Result<String> {
   match name {
     "read_file" => read_file(args),
@@ -218,7 +233,11 @@ fn require_agent<'a>(
   agent: Option<&'a mut crate::agent::Agent>,
   tool: &str,
 ) -> Result<&'a mut crate::agent::Agent> {
-  agent.with_context(|| format!("{tool} requires an active agent"))
+  agent.ok_or_else(|| {
+    let mut err = anyhow::Error::new(InteractiveRequired);
+    err = err.context(format!("{tool} requires an active agent"));
+    err
+  })
 }
 
 fn exa_client() -> &'static reqwest::Client {
@@ -678,17 +697,20 @@ fn update_phase(agent: Option<&mut crate::agent::Agent>, args: &str) -> Result<S
   let Some(tracker) = agent.task_tracker.as_mut() else {
     bail!("set_goal must be called before update_phase");
   };
-  if let Some(ref mut ws) = agent.workflow_state {
-    if args.status == Status::InProgress {
-      ws.transition_to(&args.phase_id)?;
-    } else if args.status == Status::Completed
-      && ws.current_phase.as_deref() != Some(&args.phase_id)
-    {
-      // Agent may mark a terminal phase completed without ever setting it in_progress.
-      // Transition workflow state so complete/terminal checks align.
-      let _ = ws.transition_to(&args.phase_id);
+      if let Some(ref mut ws) = agent.workflow_state {
+      if args.status == Status::InProgress {
+        ws.transition_to(&args.phase_id)?;
+      } else if args.status == Status::Completed
+        && ws.current_phase.as_deref() != Some(&args.phase_id)
+      {
+        if let Err(e) = ws.transition_to(&args.phase_id) {
+          match e {
+            crate::workflow::WorkflowError::MaxVisitsExceeded { .. } => bail!("{e}"),
+            _ => {}
+          }
+        }
+      }
     }
-  }
   tracker.update_phase(PhaseUpdate {
     id: args.phase_id.trim().to_string(),
     title: args.title.trim().to_string(),
