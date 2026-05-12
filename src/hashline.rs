@@ -1,6 +1,5 @@
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
-use std::fmt::Write;
 
 #[derive(Debug, Clone, Copy)]
 struct Anchor<'a> {
@@ -15,13 +14,15 @@ pub fn render_hashlines(source: &str, start: Option<usize>, end: Option<usize>) 
     .unwrap_or(0)
     .min(lines.len());
   let slice_end = end.unwrap_or(lines.len()).min(lines.len());
-  let mut out = String::new();
-  for (i, line) in lines[slice_start..slice_end].iter().enumerate() {
-    let line_no = slice_start + i + 1;
-    let hash = line_hash(line);
-    let _ = writeln!(out, "{line_no}:{hash}|{line}");
-  }
-  out
+  lines[slice_start..slice_end]
+    .iter()
+    .enumerate()
+    .map(|(i, line)| {
+      let line_no = slice_start + i + 1;
+      let hash = line_hash(line);
+      format!("{line_no}:{hash}|{line}\n")
+    })
+    .collect()
 }
 
 pub fn source_lines(source: &str) -> Vec<String> {
