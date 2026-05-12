@@ -157,7 +157,7 @@ pub struct UiStatus {
 struct StatusInner {
   profile: String,
   model: String,
-  tokens: i32,
+  tokens: u64,
   state: AgentState,
   compact_threshold: i32,
   context_limit: usize,
@@ -177,7 +177,7 @@ impl UiStatus {
     }
   }
 
-  pub fn set_tokens(&self, tokens: i32) {
+  pub fn set_tokens(&self, tokens: u64) {
     let mut s = self.inner.lock().expect("ui status poisoned");
     s.tokens = tokens;
   }

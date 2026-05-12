@@ -34,7 +34,7 @@ pub struct SessionFlags {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionUsage {
-  pub total_tokens: i32,
+  pub total_tokens: u64,
 }
 
 pub fn generate_session_id() -> String {

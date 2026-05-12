@@ -220,7 +220,7 @@ impl SteerState {
               || !resp.reasoning_content.is_empty()
               || !resp.tool_calls.is_empty()
             {
-              agent.total_tokens = resp.usage.total_tokens;
+              agent.total_tokens = resp.usage.total_tokens as u64;
               agent.push_msg(assistant_msg_full(
                 resp.content.clone(),
                 resp.reasoning_content.clone(),
@@ -444,7 +444,7 @@ pub struct Agent {
   pub messages: Vec<Message>,
   pub tools: Vec<Tool>,
   pub worker_manager: WorkerManager,
-  pub total_tokens: i32,
+  pub total_tokens: u64,
   pub compact: CompactState,
   pub completion_summary: Option<String>,
   pub task_tracker: Option<TaskTracker>,
@@ -706,7 +706,7 @@ impl Agent {
     streamed: bool,
   ) -> Result<bool, AgentError> {
     self.meta.end_ts = Some(session::timestamp_ms());
-    self.total_tokens = resp.usage.total_tokens;
+    self.total_tokens = resp.usage.total_tokens as u64;
     if !resp.reasoning_content.is_empty() && !streamed {
       if let Some(log) = ui_log {
         log.push(format!(
