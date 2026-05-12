@@ -653,6 +653,7 @@ impl Agent {
         self.complete_open_work_warned = false;
         self.compact.compacting = false;
         self.compact.urgency = 0;
+        self.pending_compact = None;
         tui.log.clear();
         tui.status.set_tokens(0);
         tui.log.push("[steer] new session started");
