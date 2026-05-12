@@ -27,9 +27,6 @@ pub struct SessionFlags {
   pub steer: bool,
   pub worker: bool,
   pub autocompact: i32,
-  pub handoff: bool,
-  #[serde(rename = "continue")]
-  pub continue_flag: bool,
   pub resume: bool,
   pub temp: bool,
 }
@@ -97,10 +94,6 @@ pub fn append_journal(session_id: &str, summary: &str) -> Result<()> {
   writeln!(file, "---")?;
   writeln!(file)?;
   Ok(())
-}
-
-pub fn find_latest_handoff(dir: &str) -> Option<String> {
-  find_latest_file(dir, "md", |_| true)
 }
 
 pub fn find_latest_session(dir: &str) -> Option<String> {
@@ -208,8 +201,6 @@ mod tests {
         steer: true,
         worker: false,
         autocompact: -1,
-        handoff: false,
-        continue_flag: false,
         resume: false,
         temp: false,
       },
@@ -238,8 +229,6 @@ mod tests {
         steer: true,
         worker: false,
         autocompact: -1,
-        handoff: false,
-        continue_flag: false,
         resume: false,
         temp: false,
       },

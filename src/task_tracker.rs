@@ -1,8 +1,6 @@
 use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
 
-const HANDOFF_STATE_START: &str = "<ogent_task_tracker_state>";
-const HANDOFF_STATE_END: &str = "</ogent_task_tracker_state>";
 const STALE_NUDGE_TURNS: usize = 3;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -239,10 +237,6 @@ impl TaskTracker {
     }
   }
 
-  pub fn mark_restored(&mut self) {
-    self.pending_reminder = true;
-  }
-
   pub fn take_reminder(&mut self) -> Option<String> {
     let stale_nudge =
       self.open_work_exists() && !self.stale_nudge_emitted && self.stale_turns >= STALE_NUDGE_TURNS;
@@ -254,48 +248,6 @@ impl TaskTracker {
     }
     self.pending_reminder = false;
     Some(self.render_compact_reminder(stale_nudge))
-  }
-
-  pub fn render_handoff_appendix(&self) -> String {
-    let mut out = String::new();
-    out.push_str("## Runtime Task Tracking\n\n");
-    out.push_str(&self.render_summary_lines());
-    out.push('\n');
-    out.push_str(HANDOFF_STATE_START);
-    out.push('\n');
-    out.push_str(
-      &serde_json::to_string_pretty(self).unwrap_or_else(|_| "{\"error\":\"encode\"}".to_string()),
-    );
-    out.push('\n');
-    out.push_str(HANDOFF_STATE_END);
-    out
-  }
-
-  pub fn from_handoff_text(text: &str) -> Option<Self> {
-    let start = text.find(HANDOFF_STATE_START)?;
-    let after_start = start + HANDOFF_STATE_START.len();
-    let end_rel = text[after_start..].find(HANDOFF_STATE_END)?;
-    let end = after_start + end_rel;
-    serde_json::from_str(text[after_start..end].trim()).ok()
-  }
-
-  pub fn strip_handoff_state_block(text: &str) -> String {
-    let Some(start) = text.find(HANDOFF_STATE_START) else {
-      return text.to_string();
-    };
-    let after_start = start + HANDOFF_STATE_START.len();
-    let Some(end_rel) = text[after_start..].find(HANDOFF_STATE_END) else {
-      return text.to_string();
-    };
-    let end = after_start + end_rel + HANDOFF_STATE_END.len();
-    let mut out = String::new();
-    out.push_str(text[..start].trim_end());
-    let trailing = text[end..].trim_start();
-    if !out.is_empty() && !trailing.is_empty() {
-      out.push_str("\n\n");
-    }
-    out.push_str(trailing);
-    out
   }
 
   fn note_tracking_update(&mut self) {
@@ -488,17 +440,6 @@ mod tests {
   }
 
   #[test]
-  fn restored_tracker_reminder_warns_against_set_goal() {
-    let mut tracker = seed();
-    tracker.mark_restored();
-    let reminder = tracker
-      .take_reminder()
-      .expect("restored tracker should remind");
-    assert!(reminder.contains("Task tracker already exists"));
-    assert!(reminder.contains("Use revise_goal only if the objective changed"));
-  }
-
-  #[test]
   fn starting_new_phase_demotes_prior_in_progress_phase() {
     let mut tracker = seed();
     tracker.update_phase(PhaseUpdate {
@@ -534,27 +475,6 @@ mod tests {
     });
     assert!(tracker.open_work_exists());
     assert!(!tracker.open_phase_or_todo_exists());
-  }
-
-  #[test]
-  fn handoff_round_trip_and_strip() {
-    let mut tracker = seed();
-    tracker.update_phase(PhaseUpdate {
-      id: "phase-1".into(),
-      title: "plumbing".into(),
-      status: Status::InProgress,
-      complexity: Complexity::Medium,
-      notes: String::new(),
-      contracts: None,
-    });
-    let mut handoff = String::from("User brief");
-    handoff.push_str("\n\n");
-    handoff.push_str(&tracker.render_handoff_appendix());
-    let restored = TaskTracker::from_handoff_text(&handoff).expect("tracker should restore");
-    assert_eq!(restored.goal.title, tracker.goal.title);
-    let stripped = TaskTracker::strip_handoff_state_block(&handoff);
-    assert!(!stripped.contains(HANDOFF_STATE_START));
-    assert!(stripped.contains("Runtime Task Tracking"));
   }
 
   #[test]
@@ -733,17 +653,6 @@ mod tests {
     let snapshot = tracker.render_tool_snapshot();
     assert!(snapshot.contains("Ship runtime tracker"));
     assert!(snapshot.contains("P1"));
-  }
-
-  #[test]
-  fn from_handoff_text_returns_none_when_no_state_block() {
-    assert!(TaskTracker::from_handoff_text("no state here").is_none());
-  }
-
-  #[test]
-  fn strip_handoff_state_block_returns_original_when_no_block() {
-    let text = "no state here";
-    assert_eq!(TaskTracker::strip_handoff_state_block(text), text);
   }
 
   #[test]

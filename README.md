@@ -95,17 +95,11 @@ cargo run -- "Add auth module, then review it for security issues"
 # Parallel worker-friendly task
 cargo run -- "Add tests for src/auth.rs and write README documentation"
 
-# Continue from handoff
-cargo run -- --continue
-
 # Resume from the latest session
 cargo run -- --resume "Add more tests"
 
 # Resume from a specific session by name
 cargo run -- --resume --resume-session 1778216383-2028 "Add a main block"
-
-# Auto-compact context at 10%, write handoff, then exit
-cargo run -- --autocompact 10 --handoff "Large refactoring task"
 
 # Auto-compact context at 5% and continue automatically
 cargo run -- --autocompact 5 "Large refactoring task"

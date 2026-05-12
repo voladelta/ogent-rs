@@ -34,10 +34,6 @@ struct Args {
   #[arg(long, default_value_t = -1)]
   autocompact: i32,
   #[arg(long, default_value_t = false)]
-  handoff: bool,
-  #[arg(long = "continue", default_value_t = false)]
-  continue_flag: bool,
-  #[arg(long, default_value_t = false)]
   resume: bool,
   #[arg(long, default_value_t = false)]
   temp: bool,
@@ -55,7 +51,6 @@ async fn main() -> Result<()> {
   let compact = if args.autocompact >= 0 {
     CompactState::new(
       f64::from(args.autocompact) / 100.0,
-      args.handoff,
       profile.context_limit,
     )
   } else {
@@ -78,8 +73,6 @@ async fn main() -> Result<()> {
       steer: args.steer,
       worker: args.worker,
       autocompact: args.autocompact,
-      handoff: args.handoff,
-      continue_flag: args.continue_flag,
       resume: args.resume,
       temp: args.temp,
     },
@@ -93,7 +86,7 @@ async fn main() -> Result<()> {
   let is_resume = args.resume;
   let prompt = args.prompt.join(" ");
   let wait_for_steer_input =
-    args.steer && !args.worker && !args.continue_flag && !is_resume && prompt.is_empty();
+    args.steer && !args.worker && !is_resume && prompt.is_empty();
 
   let (mut messages, tools, mut task_tracker, workflow_state) = if args.worker {
     let system_prompt = read_stdin().await?.trim().to_string();
@@ -103,30 +96,7 @@ async fn main() -> Result<()> {
     (
       build_worker_messages(&system_prompt, &prompt, &session_id),
       tools::configured_worker_tools(),
-      None,
-      None,
-    )
-  } else if args.continue_flag {
-    let path = session::find_latest_handoff(".ogent/handoffs").context("no handoff found")?;
-    eprintln!("[continue] resuming from {path}");
-    let data = tokio::fs::read_to_string(&path).await.unwrap_or_default();
-    let mut task_tracker = crate::task_tracker::TaskTracker::from_handoff_text(&data);
-    if let Some(tracker) = task_tracker.as_mut() {
-      tracker.mark_restored();
-    }
-    let stripped = crate::task_tracker::TaskTracker::strip_handoff_state_block(&data);
-    let content =
-      format!("## Previous Session Handoff\n\n{stripped}\n\nPlease continue from this handoff.");
-    let mut messages = prompts::build_messages("");
-    messages.push(Message {
-      role: "user".into(),
-      content,
-      ..Default::default()
-    });
-    (
-      messages,
-      tools::configured_coder_tools(args.steer),
-      task_tracker,
+      None as Option<crate::task_tracker::TaskTracker>,
       None,
     )
   } else if is_resume {
@@ -202,7 +172,7 @@ async fn main() -> Result<()> {
     workflow_state,
     meta,
   );
-  if args.worker || args.continue_flag || is_resume || !prompt.is_empty() {
+  if args.worker || is_resume || !prompt.is_empty() {
     agent.dirty = true;
   }
     let loop_result = if args.steer {

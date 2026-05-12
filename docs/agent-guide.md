@@ -20,7 +20,7 @@ At meaningful in-session boundaries, the agent may write a short `<checkpoint>` 
 </checkpoint>
 ```
 
-Checkpoints help preserve working state across phase changes, delegation, compaction, and handoff. They are model-facing context notes only: runtime code does not parse them, save them as durable memory, or load them on future runs.
+Checkpoints help preserve working state across phase changes, delegation, and compaction. They are model-facing context notes only: runtime code does not parse them, save them as durable memory, or load them on future runs.
 
 ### Runtime task tracking
 

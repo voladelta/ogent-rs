@@ -16,15 +16,13 @@ Common options:
 | `--steer` | Start interactive TUI steering mode |
 | `--retry <n>` | Retry transient API errors. Default: `5` |
 | `--max-turns <n>` | Limit agent turns. Default: `-1` for unlimited |
-| `--autocompact <percent>` | Start handoff/compaction when remaining context crosses the threshold |
-| `--handoff` | Exit after writing a handoff during compaction |
-| `--continue` | Resume from the newest `.ogent/handoffs/*.md` file |
+| `--autocompact <percent>` | Start compaction when remaining context crosses the threshold |
 | `--resume` | Resume from the latest non-worker session (`.ogent/sessions/*.jsonl`) |
 | `--resume-session <name>` | Resume from a specific session file by name (without `.jsonl`) |
 | `--worker` | Internal worker mode. Reads system prompt from stdin |
 | `--temp` | Ephemeral mode: run without persisting session state to disk |
 
-Non-steer mode requires a prompt unless `--continue` or `--resume` is used.
+Non-steer mode requires a prompt unless `--resume` is used.
 
 ## Profiles
 
@@ -60,7 +58,6 @@ cargo run -- --profile kimi "Explain this repository"
 | `dispatch_worker` | Hire a specialist coworker. system_prompt shapes worker behavior/scope; task states the concrete assignment. The worker runs as a separate process and returns a Markdown summary |
 | `start_workers` | Start a batch of specialist coworkers asynchronously and return worker IDs immediately |
 | `check_workers` | Wait for active async coworkers, collect their summaries/errors, and clear the batch |
-| `handoff` | Write a session handoff brief under `.ogent/handoffs/` |
 | `set_goal` | Initialize runtime task tracking with one Goal (single-use) |
 | `revise_goal` | Revise the Goal and record prior goal + reason |
 | `update_phase` | Upsert one Phase under the current Goal |
@@ -69,9 +66,9 @@ cargo run -- --profile kimi "Explain this repository"
 
 Web tools require `EXA_API_KEY`.
 
-Workers use the same toolset except `dispatch_worker`, `start_workers`, `check_workers`, `handoff`, `set_goal`, `revise_goal`, `update_phase`, `update_todo`, and `complete`. Workers have `worker_complete` to return their final Markdown summary.
+Workers use the same toolset except `dispatch_worker`, `start_workers`, `check_workers`, `set_goal`, `revise_goal`, `update_phase`, `update_todo`, and `complete`. Workers have `worker_complete` to return their final Markdown summary.
 
-Tool calls are evaluated in order. Contiguous read-only calls (`read_file`, `read_hash_anchors`, `repo_map`, web tools, `load_skill`) may run in parallel. Mutating or blocking calls (`write_file`, `edit_hash_anchors`, `bash`, workers, `handoff`) act as barriers and run serially.
+Tool calls are evaluated in order. Contiguous read-only calls (`read_file`, `read_hash_anchors`, `repo_map`, web tools, `load_skill`) may run in parallel. Mutating or blocking calls (`write_file`, `edit_hash_anchors`, `bash`, workers) act as barriers and run serially.
 
 ## Hashline Editing
 
@@ -129,15 +126,7 @@ Worker sessions include `worker` in the filename.
 
 When the coder calls `complete`, its structured Markdown summary is appended to `.ogent/journal.md`. Journal entries are retrospective experience notes, not instructions loaded into future runs. If tracked work is still open, the first `complete` call returns a warning; a second `complete` must include explicit limitation and intent.
 
-Handoffs are written to `.ogent/handoffs/*.md`. When a task tracker exists, handoffs automatically include readable tracker summary plus machine-readable tracker state. `--continue` restores that state when possible. Continue from the newest handoff:
-
-```bash
-cargo run -- --continue
-```
-
 ### Resume from Session
-
-Resume a previous conversation from `.ogent/sessions/*.jsonl` without a handoff:
 
 ```bash
 # Resume the latest non-worker session
@@ -171,12 +160,12 @@ The agent receives contextual reminders at key points in the turn budget to guid
 |---|---|---|
 | Turn 1 | Always | "Use turns deliberately. Delegate coworkers now if work is parallelizable." |
 | 50% used | `max_turns >= 10`, remaining = `max_turns/2` | "If useful work is parallelizable and delegatable, delegate coworkers now." |
-| 75% used | `max_turns >= 10`, remaining = `max_turns/4` (>= 5) | "Focus on verification, completion, or handoff. Avoid new delegation." |
-| 3 left | `remaining == 3` | "Finish current chunk and prepare to `handoff` for human review and resume." |
-| 2 left | `remaining == 2` | "No new work. `complete` or `handoff` for human resume." |
-| FINAL | `remaining == 1` | "`complete` if done. Otherwise `handoff` for human to review and resume." |
+| 75% used | `max_turns >= 10`, remaining = `max_turns/4` (>= 5) | "Focus on verification and completion. Avoid new delegation." |
+| 3 left | `remaining == 3` | "Finish current chunk and prepare to summarize for human review." |
+| 2 left | `remaining == 2` | "No new work. `complete` or prepare a summary." |
+| FINAL | `remaining == 1` | "`complete` if done. Otherwise summarize progress for human review." |
 
-These reminders help the agent avoid overcommitting on the final turns and explicitly permit `handoff` as a safe exit strategy when the turn budget is exhausted.
+These reminders help the agent avoid overcommitting on the final turns and prioritize completion when the turn budget is exhausted.
 
 ## Token Reporting
 

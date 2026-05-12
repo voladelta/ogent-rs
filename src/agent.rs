@@ -285,12 +285,6 @@ impl SteerState {
       }
 
       Self::FinishTurn { mut has_more } => {
-        if agent.completion_summary.is_some()
-          && !agent.compact.last_handoff_path.is_empty()
-          && agent.handle_handoff().await?
-        {
-          return Ok(Self::Exit(agent.messages.clone()));
-        }
         if agent.completion_summary.is_some() {
           tui
             .log
@@ -329,33 +323,27 @@ impl SteerState {
 #[derive(Debug, Clone)]
 pub struct CompactState {
   pub threshold: f64,
-  pub exit_after: bool,
   pub context_limit: usize,
   pub compacting: bool,
   pub urgency: usize,
-  pub last_handoff_path: String,
 }
 
 impl CompactState {
   pub fn disabled() -> Self {
     Self {
       threshold: -1.0,
-      exit_after: false,
       context_limit: 0,
       compacting: false,
       urgency: 0,
-      last_handoff_path: String::new(),
     }
   }
 
-  pub fn new(threshold: f64, exit_after: bool, context_limit: usize) -> Self {
+  pub fn new(threshold: f64, context_limit: usize) -> Self {
     Self {
       threshold,
-      exit_after,
       context_limit,
       compacting: false,
       urgency: 0,
-      last_handoff_path: String::new(),
     }
   }
 }
@@ -489,12 +477,6 @@ impl Agent {
     has_more: &mut bool,
     ui_log: Option<&crate::tui::UiLog>,
   ) -> Result<bool, AgentError> {
-    if !self.compact.last_handoff_path.is_empty() {
-      if self.handle_handoff().await? {
-        return Ok(true);
-      }
-      *has_more = true;
-    }
     if self.completion_summary.is_some() {
       return Ok(true);
     }
@@ -569,7 +551,6 @@ impl Agent {
         self.worker_manager = WorkerManager::new();
         self.completion_summary = None;
         self.complete_open_work_warned = false;
-        self.compact.last_handoff_path = String::new();
         self.compact.compacting = false;
         self.compact.urgency = 0;
         tui.log.clear();
@@ -772,13 +753,13 @@ impl Agent {
     let pct = total * 100 / self.compact.context_limit;
     let body = match self.compact.urgency {
       1 => format!(
-        "Context budget at {pct}%.\nFinish the current chunk. Do not start unrelated work.\nIf useful state may be lost, write a checkpoint before continuing.\nIf between chunks, call `handoff`."
+        "Context budget at {pct}%.\nFinish the current chunk. Do not start unrelated work.\nIf useful state may be lost, write a checkpoint before continuing."
       ),
       2 => format!(
-        "Context budget at {pct}%.\nApproaching the limit. Finish only critical in-progress work.\nDo not delegate new work.\nWrite a checkpoint if it will preserve important state, then call `handoff` as soon as possible."
+        "Context budget at {pct}%.\nApproaching the limit. Finish only critical in-progress work.\nDo not delegate new work.\nWrite a checkpoint if it will preserve important state."
       ),
       _ => format!(
-        "Context budget at {pct}%.\nEXHAUSTED.\nDo not write more files, delegate, or start new work.\nCall `handoff` IMMEDIATELY with completed files, current state, verification state, blockers, and next steps."
+        "Context budget at {pct}%.\nEXHAUSTED.\nDo not write more files, delegate, or start new work.\nCall `complete` IMMEDIATELY with a summary of completed files, current state, verification state, blockers, and next steps."
       ),
     };
     self.push_msg(user_msg(format!(
@@ -786,59 +767,7 @@ impl Agent {
     )));
   }
 
-  async fn handle_handoff(&mut self) -> Result<bool, AgentError> {
-    let path = std::mem::take(&mut self.compact.last_handoff_path);
-    if self.compact.exit_after {
-      if !self.meta.flags.temp {
-        self.meta.usage.total_tokens = self.total_tokens;
-        session::write_meta(&self.meta)?;
-      }
-      eprintln!("\nHandoff written to {path}");
-      return Ok(true);
-    }
-    let data = tokio::fs::read_to_string(&path)
-      .await
-      .unwrap_or_else(|_| "(handoff read error)".into());
-    if let Some(mut tracker) = TaskTracker::from_handoff_text(&data) {
-      tracker.mark_restored();
-      self.task_tracker = Some(tracker);
-    }
-    let stripped = TaskTracker::strip_handoff_state_block(&data);
-    let system = self
-      .messages
-      .first()
-      .filter(|m| m.role == "system")
-      .map(|m| m.content.clone())
-      .unwrap_or_default();
-    let old_messages = std::mem::take(&mut self.messages);
-    self.messages = vec![
-      system_msg(system),
-      user_msg(format!(
-        "## Previous Session Handoff\n\n{stripped}\n\nPlease process this handoff brief and continue the work."
-      )),
-    ];
-    self.dirty = false;
-    if !self.meta.flags.temp {
-      self.meta.usage.total_tokens = self.total_tokens;
-      session::write_meta(&self.meta)?;
-      session::persist_session(&old_messages, &self.meta.session_id)?;
-    }
-    let parent_id = self.meta.session_id.clone();
-    self.meta.session_id = session::generate_session_id();
-    self.meta.parent_session = Some(parent_id);
-    self.meta.usage = session::SessionUsage { total_tokens: 0 };
-    self.meta.prompt = None;
-    self.meta.start_ts = None;
-    self.meta.end_ts = None;
-    if !self.meta.flags.temp {
-      session::write_meta(&self.meta)?;
-    }
-    self.push_task_tracking_reminder();
-    self.compact.compacting = false;
-    self.compact.urgency = 0;
-    self.total_tokens = 0;
-    Ok(false)
-  }
+
 
   fn report_tokens(&self) {
     eprintln!("\n\ntokens: {}", self.total_tokens);
@@ -876,14 +805,6 @@ impl Agent {
 fn user_msg(content: impl Into<String>) -> Message {
   Message {
     role: "user".into(),
-    content: content.into(),
-    ..Default::default()
-  }
-}
-
-fn system_msg(content: impl Into<String>) -> Message {
-  Message {
-    role: "system".into(),
     content: content.into(),
     ..Default::default()
   }
@@ -1035,8 +956,6 @@ mod dirty_state_machine_tests {
         steer: true,
         worker: false,
         autocompact: -1,
-        handoff: false,
-        continue_flag: false,
         resume: false,
         temp: false,
       },
@@ -1216,75 +1135,6 @@ mod dirty_state_machine_tests {
     });
     assert!(agent.meta.end_ts.is_some());
     assert!(agent.dirty);
-  }
-
-  #[tokio::test]
-  async fn handoff_normal_persists_old_and_resets_meta() {
-    let mut agent = dummy_agent();
-    agent.push_msg(user_msg("hello"));
-    agent.meta.prompt = Some("test prompt".into());
-    agent.meta.start_ts = Some(1000);
-    agent.meta.end_ts = Some(2000);
-    let old_id = agent.meta.session_id.clone();
-
-    let handoff_path = ".ogent/handoffs/test-handoff.md";
-    std::fs::create_dir_all(".ogent/handoffs").ok();
-    std::fs::write(handoff_path, "# Handoff\n\nstate: done\n").unwrap();
-    agent.compact.last_handoff_path = handoff_path.into();
-    agent.compact.exit_after = false;
-
-    let should_exit = agent.handle_handoff().await.unwrap();
-    assert!(!should_exit);
-
-    // old session persisted
-    let old_dir = session::session_dir(&old_id);
-    assert!(old_dir.join("meta.json").exists());
-    assert!(old_dir.join("messages.jsonl").exists());
-
-    // new session is clean with reset meta
-    assert!(!agent.dirty);
-    assert_eq!(agent.meta.prompt, None);
-    assert_eq!(agent.meta.start_ts, None);
-    assert_eq!(agent.meta.end_ts, None);
-    assert_eq!(agent.meta.parent_session, Some(old_id.clone()));
-    assert_ne!(agent.meta.session_id, old_id);
-    assert_eq!(agent.messages.len(), 2); // system + handoff user
-
-    // clean up
-    let _ = std::fs::remove_dir_all(&old_dir);
-    let _ = std::fs::remove_file(handoff_path);
-  }
-
-  #[tokio::test]
-  async fn handoff_exit_after_writes_meta_and_returns_true() {
-    let mut agent = dummy_agent();
-    agent.push_msg(user_msg("hello"));
-    agent.total_tokens = 150;
-    let old_id = agent.meta.session_id.clone();
-
-    let handoff_path = ".ogent/handoffs/test-handoff-exit.md";
-    std::fs::create_dir_all(".ogent/handoffs").ok();
-    std::fs::write(handoff_path, "# Handoff\n").unwrap();
-    agent.compact.last_handoff_path = handoff_path.into();
-    agent.compact.exit_after = true;
-
-    let should_exit = agent.handle_handoff().await.unwrap();
-    assert!(should_exit);
-
-    // session persisted with updated usage
-    let dir = session::session_dir(&old_id);
-    assert!(dir.join("meta.json").exists());
-    let meta = session::read_meta(&old_id).unwrap();
-    assert_eq!(meta.usage.total_tokens, 150);
-
-    // meta fields preserved (not a new session)
-    assert_eq!(meta.prompt, None); // dummy_agent starts with None
-    assert_eq!(agent.meta.session_id, old_id);
-    assert!(agent.dirty); // still dirty from before
-
-    // clean up
-    let _ = std::fs::remove_dir_all(&dir);
-    let _ = std::fs::remove_file(handoff_path);
   }
 
   #[tokio::test]

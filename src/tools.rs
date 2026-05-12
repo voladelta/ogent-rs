@@ -29,7 +29,7 @@ pub async fn execute_tool(mut ctx: ToolContext<'_>, name: &str, args: &str) -> R
     "web_search" => web_search(args).await,
     "web_read" => web_read(args).await,
     "code_web_context" => code_web_context(args).await,
-    "handoff" => handoff(ctx.agent.as_deref_mut(), args),
+
     "set_goal" => set_goal(ctx.agent.as_deref_mut(), args),
     "revise_goal" => revise_goal(ctx.agent.as_deref_mut(), args),
     "update_phase" => update_phase(ctx.agent.as_deref_mut(), args),
@@ -60,7 +60,6 @@ const WORKER_EXCLUDED: &[&str] = &[
   "dispatch_worker",
   "start_workers",
   "check_workers",
-  "handoff",
   "complete",
   "set_goal",
   "revise_goal",
@@ -131,11 +130,7 @@ fn build_coder_tools() -> Vec<Tool> {
       "Wait for all active async coworkers and return their reports.",
       json!({"type":"object","properties":{},"additionalProperties":false}),
     ),
-    schema(
-      "handoff",
-      "Write a session handoff brief for the next session. Include progress, blockers, and next steps.",
-      json!({"type":"object","properties":{"brief":{"type":"string","description":"Session handoff content: progress, blockers, and next steps."}},"required":["brief"],"additionalProperties":false}),
-    ),
+
     schema(
       "set_goal",
       "Initialize the single top-level Goal for this session. Call once at the start of complex tasks to enable progress tracking.",
@@ -594,32 +589,7 @@ async fn exa_post(url: &str, body: Value) -> Result<Value> {
   Ok(v)
 }
 
-#[derive(Deserialize)]
-struct HandoffArgs {
-  brief: String,
-}
 
-fn handoff(agent: Option<&mut crate::agent::Agent>, args: &str) -> Result<String> {
-  let args: HandoffArgs = parse_args(args)?;
-  require_nonempty(&args.brief, "brief")?;
-  fs::create_dir_all(".ogent/handoffs")?;
-  let path = format!(".ogent/handoffs/{}.md", crate::session::timestamp());
-  let mut body = args.brief.trim_end().to_string();
-  if let Some(tracker) = agent.as_ref().and_then(|agent| agent.task_tracker.as_ref()) {
-    let appendix = tracker.render_handoff_appendix();
-    if !appendix.is_empty() {
-      if !body.is_empty() {
-        body.push_str("\n\n");
-      }
-      body.push_str(&appendix);
-    }
-  }
-  fs::write(&path, body)?;
-  if let Some(agent) = agent {
-    agent.compact.last_handoff_path = path.clone();
-  }
-  Ok(format!("Handoff written to {path}"))
-}
 
 #[derive(Deserialize)]
 struct SetGoalArgs {
@@ -933,7 +903,6 @@ mod tests {
     assert!(!is_read_only_tool("edit_hash_anchors"));
     assert!(!is_read_only_tool("bash"));
     assert!(!is_read_only_tool("complete"));
-    assert!(!is_read_only_tool("handoff"));
   }
 
   #[test]
@@ -956,7 +925,6 @@ mod tests {
     assert!(!names.contains(&"dispatch_worker"));
     assert!(!names.contains(&"start_workers"));
     assert!(!names.contains(&"check_workers"));
-    assert!(!names.contains(&"handoff"));
     assert!(!names.contains(&"complete"));
     assert!(!names.contains(&"set_goal"));
     assert!(names.contains(&"worker_complete"));
