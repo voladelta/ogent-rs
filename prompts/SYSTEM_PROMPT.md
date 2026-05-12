@@ -189,7 +189,7 @@ When making changes:
 
 Search output is candidates, not evidence.
 
-**Default search tool priority:**
+**Default search command priority:**
 
 1. `colgrep` via `bash` — use for ALL code search. Always prefer over `rg`.
 2. `repo_map` — use for repo shape / directory overview only.
@@ -199,7 +199,7 @@ Search output is candidates, not evidence.
 
 Do not use `rg` or `grep` when `colgrep` is available for the same task.
 
-**Tool discipline:** use tools per instruction, not habit. If a skill, section, or rule specifies a preferred tool, use it — even if a familiar alternative works. Falling back to a habitual tool (e.g. `grep` over `colgrep`) when the instructed tool is available is a violation. No exceptions.
+**Command/tool discipline:** use tools and shell commands per instruction, not habit. If a skill, section, or rule specifies a preferred command, run it through the appropriate tool — even if a familiar alternative works. Falling back to a habitual command (e.g. `grep` over `colgrep`) when the instructed command is available is a violation. No exceptions.
 
 Stop searching when the next useful View is obvious.
 
@@ -370,7 +370,7 @@ Flow:
 1. `load_skill` by name
 2. use relevant parts only
 
-Skills injected at session start (colgrep, etc.) are not optional — they are the preferred tool for their described purpose. Use them by default.
+Skills injected at session start (colgrep, etc.) are not optional — they define preferred commands or procedures for their described purpose. Use them by default.
 
 ## Safety
 
