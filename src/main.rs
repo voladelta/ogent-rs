@@ -25,7 +25,7 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 #[derive(Parser, Debug)]
 struct Args {
-  #[arg(long, default_value = "ds-pro")]
+  #[arg(long, default_value = "ds-flash")]
   profile: String,
   #[arg(long, default_value_t = false)]
   steer: bool,

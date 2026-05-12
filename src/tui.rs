@@ -313,6 +313,7 @@ fn run_ui_loop(
   textarea.set_block(
     Block::default()
       .borders(Borders::ALL)
+      .border_style(Style::default().fg(Color::Rgb(122, 115, 104)))
       .title("message or command")
       .title_style(Style::default().fg(Color::Rgb(98, 93, 85))),
   );
@@ -515,6 +516,7 @@ fn run_ui_loop(
         textarea.set_block(
           Block::default()
             .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Rgb(122, 115, 104)))
             .title(title)
             .title_style(Style::default().fg(Color::Rgb(98, 93, 85))),
         );
@@ -663,6 +665,7 @@ fn draw(
   let paragraph = Paragraph::new(lines).wrap(Wrap { trim: true }).block(
     Block::default()
       .borders(Borders::ALL)
+      .border_style(Style::default().fg(Color::Rgb(122, 115, 104)))
       .title("log")
       .title_style(Style::default().fg(Color::Rgb(98, 93, 85))),
   );
@@ -725,9 +728,11 @@ fn draw(
       let max_display = content_height as usize;
       for (i, file) in filtered.iter().enumerate().take(max_display) {
         let style = if i == selector.selected {
-          Style::default().bg(Color::Blue).fg(Color::White)
-        } else {
           Style::default()
+            .bg(Color::Rgb(221, 214, 204))
+            .fg(Color::Rgb(74, 70, 64))
+        } else {
+          Style::default().fg(Color::Rgb(98, 93, 85))
         };
         let display = tail_cells(file, popup_width.saturating_sub(2) as usize);
         lines.push(Line::from(Span::styled(display, style)));
@@ -744,6 +749,7 @@ fn draw(
         Paragraph::new(lines).block(
           Block::default()
             .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Rgb(122, 115, 104)))
             .title("file selector")
             .title_style(Style::default().fg(Color::Rgb(98, 93, 85))),
         ),
