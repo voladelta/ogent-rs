@@ -14,7 +14,6 @@ Common options:
 |---|---|
 | `--profile <name>` | Model profile. Default: `ds-pro` |
 | `--steer` | Start interactive TUI steering mode |
-| `--auto` | In steer mode, start with auto-continuation enabled |
 | `--retry <n>` | Retry transient API errors. Default: `5` |
 | `--max-turns <n>` | Limit agent turns. Default: `-1` for unlimited |
 | `--autocompact <percent>` | Start handoff/compaction when remaining context crosses the threshold |

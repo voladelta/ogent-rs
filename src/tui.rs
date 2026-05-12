@@ -32,8 +32,6 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SteerEvent {
   Message(String),
-  Auto,
-  Stop,
   Cancel,
   Complete,
   New,
@@ -161,19 +159,17 @@ struct StatusInner {
   model: String,
   turn: i32,
   tokens: i32,
-  auto: bool,
   state: AgentState,
 }
 
 impl UiStatus {
-  pub fn new(profile: String, model: String, auto: bool) -> Self {
+  pub fn new(profile: String, model: String) -> Self {
     Self {
       inner: Arc::new(Mutex::new(StatusInner {
         profile,
         model,
         turn: 0,
         tokens: 0,
-        auto,
         state: AgentState::Idle,
       })),
     }
@@ -183,10 +179,6 @@ impl UiStatus {
     let mut s = self.inner.lock().expect("ui status poisoned");
     s.turn = turn;
     s.tokens = tokens;
-  }
-
-  pub fn set_auto(&self, auto: bool) {
-    self.inner.lock().expect("ui status poisoned").auto = auto;
   }
 
   pub fn set_profile(&self, profile: String, model: String) {
@@ -216,10 +208,10 @@ pub struct TuiHandle {
   thread: Option<JoinHandle<()>>,
 }
 
-pub fn start(profile: String, model: String, auto: bool) -> Result<TuiHandle> {
+pub fn start(profile: String, model: String) -> Result<TuiHandle> {
   let (tx, rx) = mpsc::unbounded_channel();
   let log = UiLog::default();
-  let status = UiStatus::new(profile, model, auto);
+  let status = UiStatus::new(profile, model);
   let ui_log = log.clone();
   let ui_status = status.clone();
   let stop = Arc::new(AtomicBool::new(false));
@@ -258,7 +250,7 @@ impl TuiHandle {
     Self {
       rx,
       log: UiLog::default(),
-      status: UiStatus::new("test".into(), "test".into(), false),
+      status: UiStatus::new("test".into(), "test".into()),
       stop: Arc::new(AtomicBool::new(false)),
       thread: None,
     }
@@ -524,8 +516,6 @@ fn run_ui_loop(
 
 pub fn parse_steer_event(line: &str) -> SteerEvent {
   match line.trim() {
-    "/auto" => SteerEvent::Auto,
-    "/stop" => SteerEvent::Stop,
     "/cancel" => SteerEvent::Cancel,
     "/complete" => SteerEvent::Complete,
     "/new" => SteerEvent::New,
@@ -662,18 +652,12 @@ fn draw(
   terminal.draw(|frame| {
     frame.render_widget(Clear, frame.area());
 
-    let auto = if status_snapshot.auto {
-      "auto on"
-    } else {
-      "auto off"
-    };
     let mut bar = format!(
-      "{} | {} | turn {} | tokens {} | {}",
+      "{} | {} | turn {} | tokens {}",
       status_snapshot.profile,
       status_snapshot.model,
       status_snapshot.turn,
       status_snapshot.tokens,
-      auto
     );
     truncate_to_width(&mut bar, chunks[0].width.saturating_sub(1) as usize);
     frame.render_widget(Paragraph::new(bar), chunks[0]);
@@ -937,8 +921,6 @@ mod tests {
 
   #[test]
   fn parses_steer_commands() {
-    assert_eq!(parse_steer_event("/auto"), SteerEvent::Auto);
-    assert_eq!(parse_steer_event("/stop"), SteerEvent::Stop);
     assert_eq!(parse_steer_event("/cancel"), SteerEvent::Cancel);
     assert_eq!(parse_steer_event("/complete"), SteerEvent::Complete);
     assert_eq!(parse_steer_event("/new"), SteerEvent::New);

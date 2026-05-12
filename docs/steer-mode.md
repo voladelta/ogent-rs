@@ -8,7 +8,7 @@ cargo run -- --steer --profile ds-pro "Write a small web server"
 
 The TUI shows:
 
-- a status bar with profile, model, turn, token count, and auto mode
+- a status bar with profile, model, turn, and token count
 - a scrollable log of reasoning summaries, assistant content, tool calls, and worker updates
 - an input box for steering messages and commands
 
@@ -16,8 +16,6 @@ Supported commands:
 
 | Input | Effect |
 |---|---|
-| `/auto` | Enable auto-continuation |
-| `/stop` | Disable auto-continuation after the current turn |
 | `/complete` | Ask the agent to summarize the session, call `complete`, save the journal entry, and exit |
 | `/cancel` | Cancel the in-flight model request |
 | `/new` | Restart the session from scratch: clear history (except system prompt), reset turns/tokens/workers, and wait for input |

@@ -27,7 +27,6 @@ pub struct SessionMeta {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionFlags {
   pub steer: bool,
-  pub auto: bool,
   pub worker: bool,
   pub autocompact: i32,
   pub handoff: bool,
@@ -212,7 +211,6 @@ mod tests {
       turn: 1,
       flags: SessionFlags {
         steer: true,
-        auto: false,
         worker: false,
         autocompact: -1,
         handoff: false,
@@ -246,7 +244,6 @@ mod tests {
       turn: 0,
       flags: SessionFlags {
         steer: true,
-        auto: false,
         worker: false,
         autocompact: -1,
         handoff: false,

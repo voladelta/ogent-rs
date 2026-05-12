@@ -46,7 +46,6 @@ enum SteerState {
 struct SteerCtx {
   turn: i32,
   max_turns: i32,
-  auto_continue: bool,
 }
 
 impl SteerState {
@@ -70,7 +69,7 @@ impl SteerState {
         let mut wait = wait_for_input;
 
         while let Ok(event) = tui.rx.try_recv() {
-          match agent.apply_steer_event(event, &mut ctx.auto_continue, tui)? {
+          match agent.apply_steer_event(event, tui)? {
             SteerAction::Exit => {
               return Ok(Self::Exit(agent.messages.clone()));
             }
@@ -78,7 +77,7 @@ impl SteerState {
               ctx.turn = 1;
               tui
                 .log
-                .push("[steer] commands: /auto /stop /complete /cancel /new /fork /q".to_string());
+                .push("[steer] commands: /complete /cancel /new /fork /q".to_string());
               return Ok(Self::Idle {
                 wait_for_input: true,
               });
@@ -97,14 +96,14 @@ impl SteerState {
             let Some(event) = tui.rx.recv().await else {
               continue;
             };
-            match agent.apply_steer_event(event, &mut ctx.auto_continue, tui)? {
+          match agent.apply_steer_event(event, tui)? {
               SteerAction::Exit => {
                 return Ok(Self::Exit(agent.messages.clone()));
               }
               SteerAction::Restart => {
                 ctx.turn = 1;
                 tui.log.push(
-                  "[steer] commands: /auto /stop /complete /cancel /new /fork /q".to_string(),
+                  "[steer] commands: /complete /cancel /new /fork /q".to_string(),
                 );
                 return Ok(Self::Idle {
                   wait_for_input: true,
@@ -210,10 +209,10 @@ impl SteerState {
                 }
                 SteerEvent::New => {
                   cancel.cancel();
-                  agent.apply_steer_event(SteerEvent::New, &mut ctx.auto_continue, tui)?;
+                  agent.apply_steer_event(SteerEvent::New, tui)?;
                   chat.abort();
                   ctx.turn = 1;
-                  tui.log.push("[steer] commands: /auto /stop /complete /cancel /new /fork /q".to_string());
+                  tui.log.push("[steer] commands: /complete /cancel /new /fork /q".to_string());
                   return Ok(Self::Idle { wait_for_input: true });
                 }
                 SteerEvent::Exit => {
@@ -222,7 +221,7 @@ impl SteerState {
                   return Ok(Self::Exit(agent.messages.clone()));
                 }
                 other => {
-                  match agent.apply_steer_event(other, &mut ctx.auto_continue, tui)? {
+                  match agent.apply_steer_event(other, tui)? {
                     SteerAction::Exit => {
                       cancel.cancel();
                       chat.abort();
@@ -232,7 +231,7 @@ impl SteerState {
                       cancel.cancel();
                       chat.abort();
                       ctx.turn = 1;
-                      tui.log.push("[steer] commands: /auto /stop /complete /cancel /new /fork /q".to_string());
+                  tui.log.push("[steer] commands: /complete /cancel /new /fork /q".to_string());
                       return Ok(Self::Idle { wait_for_input: true });
                     }
                     SteerAction::Continue => {}
@@ -316,7 +315,6 @@ impl SteerState {
         let should_exit = agent
           .finish_turn(
             &mut has_more,
-            ctx.auto_continue,
             Some(&tui.log),
             ctx.max_turns,
             ctx.turn,
@@ -327,7 +325,7 @@ impl SteerState {
           return Ok(Self::Exit(agent.messages.clone()));
         }
 
-        if !has_more && !ctx.auto_continue {
+        if !has_more {
           ctx.turn += 1;
           return Ok(Self::Idle {
             wait_for_input: true,
@@ -453,7 +451,6 @@ impl Agent {
   pub async fn run_loop(
     &mut self,
     max_turns: i32,
-    auto_continue: bool,
   ) -> Result<Vec<Message>, AgentError> {
     let mut turn = 1;
     loop {
@@ -477,7 +474,7 @@ impl Agent {
         Err(e) => return Err(e),
       };
       if self
-        .finish_turn(&mut has_more, auto_continue, None, max_turns, turn)
+        .finish_turn(&mut has_more, None, max_turns, turn)
         .await?
       {
         return Ok(self.messages.clone());
@@ -492,18 +489,16 @@ impl Agent {
   pub async fn steer_loop(
     &mut self,
     max_turns: i32,
-    auto_continue: bool,
     mut tui: TuiHandle,
     wait_for_input: bool,
   ) -> Result<Vec<Message>, AgentError> {
     tui
       .log
-      .push("[steer] commands: /auto /stop /complete /cancel /new /fork /q");
+      .push("[steer] commands: /complete /cancel /new /fork /q");
     let mut state = SteerState::Idle { wait_for_input };
     let mut ctx = SteerCtx {
       turn: 1,
       max_turns,
-      auto_continue,
     };
 
     loop {
@@ -517,7 +512,6 @@ impl Agent {
   async fn finish_turn(
     &mut self,
     has_more: &mut bool,
-    auto_continue: bool,
     ui_log: Option<&crate::tui::UiLog>,
     max_turns: i32,
     turn: i32,
@@ -531,7 +525,7 @@ impl Agent {
     if self.completion_summary.is_some() {
       return Ok(true);
     }
-    let mut pushed_worker_status = false;
+    let mut _pushed_worker_status = false;
     if let Some(msg) = self.worker_manager.status_message().await {
       if let Some(log) = ui_log {
         self.push_msg(user_msg(msg.clone()));
@@ -539,16 +533,13 @@ impl Agent {
       } else {
         self.push_msg(user_msg(msg));
       }
-      pushed_worker_status = true;
+      _pushed_worker_status = true;
       *has_more = true;
     }
     if *has_more {
       self.check_compact();
       self.push_task_tracking_reminder();
       self.push_turn_budget_reminder(max_turns, turn + 1);
-      if auto_continue && !self.compact.compacting && !pushed_worker_status {
-        self.push_msg(user_msg(AUTO_CONTINUE_REMINDER.to_string()));
-      }
     }
     Ok(false)
   }
@@ -556,7 +547,6 @@ impl Agent {
   fn apply_steer_event(
     &mut self,
     event: SteerEvent,
-    auto_continue: &mut bool,
     tui: &TuiHandle,
   ) -> Result<SteerAction, AgentError> {
     match event {
@@ -569,16 +559,6 @@ impl Agent {
         }
         self.push_msg(user_msg(content.clone()));
         tui.log.push(format!("[user] {}", truncate(&content, 200)));
-      }
-      SteerEvent::Auto => {
-        *auto_continue = true;
-        tui.status.set_auto(true);
-        tui.log.push("[steer] auto on");
-      }
-      SteerEvent::Stop => {
-        *auto_continue = false;
-        tui.status.set_auto(false);
-        tui.log.push("[steer] auto off");
       }
       SteerEvent::Cancel => {
         tui.log.push("[steer] no in-flight request to cancel");
@@ -1057,19 +1037,6 @@ mod truncate_tests {
   }
 }
 
-const AUTO_CONTINUE_REMINDER: &str = r#"Reminder: [auto_continue]
-Auto mode is enabled. Prefer action over extended analysis. Continue only if useful work remains.
-
-Before continuing:
-- Re-check the current goal, latest tool results, worker status, and context budget.
-- If no useful work remains, call `complete` with a retrospective structured Markdown summary.
-- If the next step is clear, proceed. If unclear on low-risk work, make your best call and proceed.
-- Destructive, irreversible, or shared-system actions (force push, deleting branches, messaging, pushing to shared infra) still require user confirmation. Auto mode is not a license to destroy.
-- If a command or edit fails, inspect the failure and make one focused retry when justified.
-- If blocked by missing expertise, uncertainty, or parallelizable review, dispatch a scoped worker with exact paths, evidence, success criteria, and expected summary format.
-- If context is getting large, write a checkpoint for yourself and prefer finishing the current chunk over starting new work.
-- If continuation would be speculative or unsafe, call `complete` with the current state and limitation."#;
-
 const MANUAL_COMPLETE_REMINDER: &str = r#"Reminder: [manual_complete]
 The user requested completion from steer mode.
 
@@ -1209,7 +1176,6 @@ mod dirty_state_machine_tests {
       turn: 0,
       flags: session::SessionFlags {
         steer: true,
-        auto: false,
         worker: false,
         autocompact: -1,
         handoff: false,
@@ -1256,7 +1222,7 @@ mod dirty_state_machine_tests {
     let mut agent = dummy_agent();
     let tui = crate::tui::TuiHandle::test_handle();
     let action = agent
-      .apply_steer_event(SteerEvent::Message("fix bug".into()), &mut false, &tui)
+      .apply_steer_event(SteerEvent::Message("fix bug".into()), &tui)
       .unwrap();
     assert!(matches!(action, SteerAction::Continue));
     assert!(agent.dirty);
@@ -1269,41 +1235,14 @@ mod dirty_state_machine_tests {
     let mut agent = dummy_agent();
     let tui = crate::tui::TuiHandle::test_handle();
     agent
-      .apply_steer_event(SteerEvent::Message("fix bug".into()), &mut false, &tui)
+      .apply_steer_event(SteerEvent::Message("fix bug".into()), &tui)
       .unwrap();
     let start_ts = agent.meta.start_ts;
     agent
-      .apply_steer_event(SteerEvent::Message("more context".into()), &mut false, &tui)
+      .apply_steer_event(SteerEvent::Message("more context".into()), &tui)
       .unwrap();
     assert_eq!(agent.meta.prompt, Some("fix bug".into()));
     assert_eq!(agent.meta.start_ts, start_ts);
-  }
-
-  #[tokio::test]
-  async fn auto_on_clean_stays_clean() {
-    let mut agent = dummy_agent();
-    let tui = crate::tui::TuiHandle::test_handle();
-    let mut auto = false;
-    let action = agent
-      .apply_steer_event(SteerEvent::Auto, &mut auto, &tui)
-      .unwrap();
-    assert!(matches!(action, SteerAction::Continue));
-    assert!(!agent.dirty);
-    assert!(auto);
-  }
-
-  #[tokio::test]
-  async fn stop_on_dirty_stays_dirty() {
-    let mut agent = dummy_agent();
-    let tui = crate::tui::TuiHandle::test_handle();
-    let mut auto = true;
-    agent.push_msg(user_msg("hello"));
-    let action = agent
-      .apply_steer_event(SteerEvent::Stop, &mut auto, &tui)
-      .unwrap();
-    assert!(matches!(action, SteerAction::Continue));
-    assert!(agent.dirty);
-    assert!(!auto);
   }
 
   #[tokio::test]
@@ -1311,7 +1250,7 @@ mod dirty_state_machine_tests {
     let mut agent = dummy_agent();
     let tui = crate::tui::TuiHandle::test_handle();
     let action = agent
-      .apply_steer_event(SteerEvent::Cancel, &mut false, &tui)
+      .apply_steer_event(SteerEvent::Cancel, &tui)
       .unwrap();
     assert!(matches!(action, SteerAction::Continue));
     assert!(!agent.dirty);
@@ -1322,7 +1261,7 @@ mod dirty_state_machine_tests {
     let mut agent = dummy_agent();
     let tui = crate::tui::TuiHandle::test_handle();
     let action = agent
-      .apply_steer_event(SteerEvent::Complete, &mut false, &tui)
+      .apply_steer_event(SteerEvent::Complete, &tui)
       .unwrap();
     assert!(matches!(action, SteerAction::Continue));
     assert!(!agent.dirty);
@@ -1336,7 +1275,7 @@ mod dirty_state_machine_tests {
     agent.push_msg(assistant_msg_with_reasoning("ok", ""));
     assert!(agent.dirty);
     let action = agent
-      .apply_steer_event(SteerEvent::Complete, &mut false, &tui)
+      .apply_steer_event(SteerEvent::Complete, &tui)
       .unwrap();
     assert!(matches!(action, SteerAction::Continue));
     assert!(agent.dirty);
@@ -1348,7 +1287,7 @@ mod dirty_state_machine_tests {
     let mut agent = dummy_agent();
     let tui = crate::tui::TuiHandle::test_handle();
     let action = agent
-      .apply_steer_event(SteerEvent::Exit, &mut false, &tui)
+      .apply_steer_event(SteerEvent::Exit, &tui)
       .unwrap();
     assert!(matches!(action, SteerAction::Exit));
   }
@@ -1359,7 +1298,7 @@ mod dirty_state_machine_tests {
     let tui = crate::tui::TuiHandle::test_handle();
     let old_id = agent.meta.session_id.clone();
     let action = agent
-      .apply_steer_event(SteerEvent::New, &mut false, &tui)
+      .apply_steer_event(SteerEvent::New, &tui)
       .unwrap();
     assert!(matches!(action, SteerAction::Restart));
     assert!(!agent.dirty);
@@ -1378,7 +1317,7 @@ mod dirty_state_machine_tests {
     let old_id = agent.meta.session_id.clone();
 
     let action = agent
-      .apply_steer_event(SteerEvent::New, &mut false, &tui)
+      .apply_steer_event(SteerEvent::New, &tui)
       .unwrap();
     assert!(matches!(action, SteerAction::Restart));
 
@@ -1498,7 +1437,7 @@ mod dirty_state_machine_tests {
     let tui = crate::tui::TuiHandle::test_handle();
     let old_id = agent.meta.session_id.clone();
     let action = agent
-      .apply_steer_event(SteerEvent::Fork, &mut false, &tui)
+      .apply_steer_event(SteerEvent::Fork, &tui)
       .unwrap();
     assert!(matches!(action, SteerAction::Continue));
     assert!(!agent.dirty);
@@ -1518,7 +1457,7 @@ mod dirty_state_machine_tests {
     let parent_id = agent.meta.session_id.clone();
 
     let action = agent
-      .apply_steer_event(SteerEvent::Fork, &mut false, &tui)
+      .apply_steer_event(SteerEvent::Fork, &tui)
       .unwrap();
     assert!(matches!(action, SteerAction::Continue));
 

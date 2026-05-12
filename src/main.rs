@@ -29,8 +29,6 @@ struct Args {
   profile: String,
   #[arg(long, default_value_t = false)]
   steer: bool,
-  #[arg(long, default_value_t = false)]
-  auto: bool,
   #[arg(long = "retry", default_value_t = 5)]
   retry: usize,
   #[arg(long, default_value_t = false)]
@@ -84,7 +82,6 @@ async fn main() -> Result<()> {
     turn: 0,
     flags: session::SessionFlags {
       steer: args.steer,
-      auto: args.auto,
       worker: args.worker,
       autocompact: args.autocompact,
       handoff: args.handoff,
@@ -215,13 +212,13 @@ async fn main() -> Result<()> {
   if args.worker || args.continue_flag || is_resume || !prompt.is_empty() {
     agent.dirty = true;
   }
-  let loop_result = if args.steer {
-    let tui = tui::start(args.profile.clone(), profile.model.to_string(), args.auto)?;
+    let loop_result = if args.steer {
+    let tui = tui::start(args.profile.clone(), profile.model.to_string())?;
     agent
-      .steer_loop(args.max_turns, args.auto, tui, wait_for_steer_input)
+      .steer_loop(args.max_turns, tui, wait_for_steer_input)
       .await
   } else {
-    agent.run_loop(args.max_turns, true).await
+    agent.run_loop(args.max_turns).await
   };
 
   let final_messages = match loop_result {
