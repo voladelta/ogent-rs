@@ -313,10 +313,11 @@ fn run_ui_loop(
   textarea.set_block(
     Block::default()
       .borders(Borders::ALL)
-      .title("message or command"),
+      .title("message or command")
+      .title_style(Style::default().fg(Color::Rgb(98, 93, 85))),
   );
   textarea.set_placeholder_text("waiting for input...");
-  textarea.set_placeholder_style(Style::default().fg(Color::DarkGray));
+  textarea.set_placeholder_style(Style::default().fg(Color::Rgb(122, 115, 104)));
   textarea.set_wrap_mode(WrapMode::Word);
   textarea.set_cursor_line_style(Style::default());
   let mut scroll_y: usize = 0;
@@ -511,7 +512,12 @@ fn run_ui_loop(
           AgentState::Working => "working...",
           AgentState::Idle => "message or command",
         };
-        textarea.set_block(Block::default().borders(Borders::ALL).title(title));
+        textarea.set_block(
+          Block::default()
+            .borders(Borders::ALL)
+            .title(title)
+            .title_style(Style::default().fg(Color::Rgb(98, 93, 85))),
+        );
       }
       (log_height, max_scroll_y) = draw(
         terminal,
@@ -654,9 +660,12 @@ fn draw(
   let log_height = chunks[1].height.saturating_sub(2);
 
   let lines: Vec<Line> = log_lines.iter().map(|line| render_log_line(line)).collect();
-  let paragraph = Paragraph::new(lines)
-    .wrap(Wrap { trim: true })
-    .block(Block::default().borders(Borders::ALL).title("log"));
+  let paragraph = Paragraph::new(lines).wrap(Wrap { trim: true }).block(
+    Block::default()
+      .borders(Borders::ALL)
+      .title("log")
+      .title_style(Style::default().fg(Color::Rgb(98, 93, 85))),
+  );
   let total_wrapped = paragraph.line_count(log_width.max(1));
   let max_scroll = total_wrapped.saturating_sub(log_height as usize);
   let y = if follow_bottom {
@@ -681,7 +690,10 @@ fn draw(
       ));
     }
     truncate_to_width(&mut bar, chunks[0].width.saturating_sub(1) as usize);
-    frame.render_widget(Paragraph::new(bar), chunks[0]);
+    frame.render_widget(
+      Paragraph::new(bar).style(Style::default().fg(Color::Rgb(122, 115, 104))),
+      chunks[0],
+    );
 
     frame.render_widget(paragraph.scroll((y as u16, 0)), chunks[1]);
 
@@ -732,7 +744,8 @@ fn draw(
         Paragraph::new(lines).block(
           Block::default()
             .borders(Borders::ALL)
-            .title("file selector"),
+            .title("file selector")
+            .title_style(Style::default().fg(Color::Rgb(98, 93, 85))),
         ),
         popup_area,
       );
@@ -823,41 +836,35 @@ fn head_cells(value: &str, width: usize) -> String {
 
 fn render_log_line(value: &str) -> Line<'static> {
   if let Some(markdown) = value.strip_prefix("ogent: ") {
-    let mut spans = vec![Span::styled(
-      "ogent: ",
-      Style::default()
-        .fg(Color::Cyan)
-        .add_modifier(Modifier::BOLD),
-    )];
-    spans.extend(markdown_spans(markdown));
+    let spans: Vec<Span> = markdown_spans(markdown)
+      .into_iter()
+      .map(|s| s.patch_style(Style::default().bg(Color::Rgb(221, 214, 204))))
+      .collect();
     return Line::from(spans);
   }
   if value == "ogent:" {
-    return Line::from(vec![Span::styled(
-      "ogent:",
-      Style::default()
-        .fg(Color::Cyan)
-        .add_modifier(Modifier::BOLD),
-    )]);
+    return Line::from(Span::styled(
+      " ",
+      Style::default().bg(Color::Rgb(221, 214, 204)),
+    ));
   }
   if let Some(reasoning) = value.strip_prefix("reasoning: ") {
-    return Line::from(vec![
-      Span::styled(
-        "reasoning: ",
-        Style::default()
-          .fg(Color::Magenta)
-          .add_modifier(Modifier::ITALIC),
-      ),
-      Span::raw(reasoning.to_string()),
-    ]);
+    return Line::from(Span::styled(
+      reasoning.to_string(),
+      Style::default().fg(Color::Rgb(98, 93, 85)),
+    ));
   }
   if value == "reasoning:" {
-    return Line::from(vec![Span::styled(
-      "reasoning:",
-      Style::default()
-        .fg(Color::Magenta)
-        .add_modifier(Modifier::ITALIC),
-    )]);
+    return Line::from(Span::styled(
+      " ",
+      Style::default().fg(Color::Rgb(98, 93, 85)),
+    ));
+  }
+  if let Some(user_msg) = value.strip_prefix("[user] ") {
+    return Line::from(Span::styled(
+      format!("{user_msg}"),
+      Style::default().bg(Color::Rgb(242, 238, 235)),
+    ));
   }
   Line::from(Span::raw(value.to_string()))
 }

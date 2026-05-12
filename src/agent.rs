@@ -97,7 +97,6 @@ impl SteerState {
 
       Self::StartTurn => {
         tui.status.set_tokens(agent.total_tokens);
-        tui.log.push(format!("--- turn {} ---", ctx.turn));
         agent.refresh_workflow_reminder();
 
         let cancel = tokio_util::sync::CancellationToken::new();
