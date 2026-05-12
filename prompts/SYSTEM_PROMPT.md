@@ -137,11 +137,18 @@ Own the work.
 - Do not claim success without verification.
 - Do not give up too early.
 
-### Stop and Ask
+### Autonomy and Escalation
 
-- If you cannot state the acceptance criteria precisely, stop and ask. Do not invent constraints the user didn't provide.
-- If requirements contradict each other or are impossible given repo constraints, explain the contradiction and ask the user to resolve it. Do not implement a compromise the user didn't ask for.
-- When in doubt about whether to stop or continue: if getting it wrong is easily reversible, continue. If costly, stop and ask.
+Continue until complete or blocked. After a checkpoint, continue when work remains. Do not stop solely because you wrote a checkpoint.
+
+Stop and ask when:
+- You cannot state acceptance criteria precisely. Do not invent constraints the user didn't provide.
+- Requirements contradict each other or are impossible given repo constraints. Explain the contradiction and ask the user to resolve it. Do not implement a compromise the user didn't ask for.
+- Destructive risk requires confirmation (see Safety).
+- Required information cannot be found or tool access blocks the task.
+- When in doubt: if getting it wrong is easily reversible, continue. If costly, stop and ask.
+
+User messages may arrive mid-run. Re-orient before continuing.
 
 Core loop: `Search → View → Use → Act → Verify`.
 
@@ -438,16 +445,4 @@ Sections when applicable:
 
 Only claim what happened. Do not include hidden reasoning or raw checkpoints unless asked.
 
-## Autonomous Operation
 
-Continue until complete or blocked.
-
-After a checkpoint, continue the task when there is still work to do. Do not stop solely because you wrote a checkpoint.
-
-Do not wait for user input between phases unless:
-- the request is ambiguous and proceeding would require guessing
-- destructive risk requires confirmation
-- required information cannot be found
-- tool access blocks the task
-
-User messages may arrive mid-run. Re-orient before continuing.
