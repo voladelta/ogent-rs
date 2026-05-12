@@ -80,3 +80,69 @@ pub fn normalize(path: &Path) -> PathBuf {
   }
   out
 }
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn workspace_path_rejects_empty() {
+    assert!(workspace_path("").is_err());
+  }
+
+  #[test]
+  fn workspace_path_accepts_relative_in_workspace() {
+    assert!(workspace_path("src/main.rs").is_ok());
+    assert!(workspace_path("./src/main.rs").is_ok());
+    assert!(workspace_path(".").is_ok());
+  }
+
+  #[test]
+  fn workspace_path_rejects_outside_workspace() {
+    assert!(workspace_path("/etc/passwd").is_err());
+    assert!(workspace_path("/tmp/foo").is_err());
+  }
+
+  #[test]
+  fn workspace_path_rejects_ogent_config() {
+    assert!(workspace_path("~/.ogent/skills/test.md").is_err());
+  }
+
+  #[test]
+  fn readable_path_rejects_empty() {
+    assert!(readable_path("").is_err());
+  }
+
+  #[test]
+  fn readable_path_accepts_relative_in_workspace() {
+    assert!(readable_path("src/main.rs").is_ok());
+  }
+
+  #[test]
+  fn readable_path_rejects_outside_workspace_and_ogent() {
+    assert!(readable_path("/etc/passwd").is_err());
+    assert!(readable_path("/tmp/foo").is_err());
+  }
+
+  #[test]
+  fn readable_path_accepts_ogent_config() {
+    if std::env::var_os("HOME").is_none() {
+      return;
+    }
+    assert!(readable_path("~/.ogent/skills/test.md").is_ok());
+  }
+
+  #[test]
+  fn normalize_collapses_dot_and_dotdot() {
+    let p = Path::new("/a/b/./c/../d");
+    let n = normalize(p);
+    assert_eq!(n, Path::new("/a/b/d"));
+  }
+
+  #[test]
+  fn normalize_leading_parent_dir_pops_nothing() {
+    let p = Path::new("../a/b");
+    let n = normalize(p);
+    assert_eq!(n, Path::new("a/b"));
+  }
+}

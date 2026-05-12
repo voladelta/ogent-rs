@@ -1086,4 +1086,47 @@ mod tests {
     assert!(msg.contains("stdout"));
     assert!(msg.contains("stderr"));
   }
+
+  #[test]
+  fn check_bash_cds_allows_workspace_relative() {
+    assert!(check_bash_cds("cd src").is_ok());
+    assert!(check_bash_cds("cd ./src").is_ok());
+    assert!(check_bash_cds("cd .").is_ok());
+  }
+
+  #[test]
+  fn check_bash_cds_allows_tmp() {
+    assert!(check_bash_cds("cd /tmp").is_ok());
+    assert!(check_bash_cds("cd /tmp/foo").is_ok());
+  }
+
+  #[test]
+  fn check_bash_cds_rejects_outside_workspace_and_tmp() {
+    assert!(check_bash_cds("cd /etc").is_err());
+    assert!(check_bash_cds("cd /").is_err());
+    assert!(check_bash_cds("cd ..").is_err());
+    assert!(check_bash_cds("cd ../..").is_err());
+  }
+
+  #[test]
+  fn check_bash_cds_rejects_home() {
+    assert!(check_bash_cds("cd ~").is_err());
+    assert!(check_bash_cds("cd ~/projects").is_err());
+  }
+
+  #[test]
+  fn check_bash_cds_rejects_bare_cd() {
+    assert!(check_bash_cds("cd").is_err());
+  }
+
+  #[test]
+  fn check_bash_cds_checks_all_separated_commands() {
+    assert!(check_bash_cds("cd src && cd /etc").is_err());
+    assert!(check_bash_cds("cd src; cd /etc").is_err());
+    assert!(check_bash_cds("cd src || cd /etc").is_err());
+    assert!(check_bash_cds("cd src | cd /etc").is_err());
+    assert!(check_bash_cds("cd src\ncd /etc").is_err());
+    assert!(check_bash_cds("cd src && cd .").is_ok());
+    assert!(check_bash_cds("cd /tmp; cd /etc").is_err());
+  }
 }

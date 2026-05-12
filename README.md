@@ -98,9 +98,6 @@ cargo run -- "Add tests for src/auth.rs and write README documentation"
 # Resume from the latest session
 cargo run -- --resume "Add more tests"
 
-# Resume from a specific session by name
-cargo run -- --resume --resume-session 1778216383-2028 "Add a main block"
-
 # Auto-compact context at 50% and continue automatically
 cargo run -- --autocompact 50 "Large refactoring task"
 
@@ -116,9 +113,6 @@ cargo run -- --profile glm "Summarize this repository"
 
 # Max DeepSeek reasoning effort
 cargo run -- --profile ds-pro-max "Design a caching layer"
-
-# Limit turns
-cargo run -- --max-turns 15 "Add a simple health check endpoint"
 
 # TUI steer mode
 cargo run -- --steer --profile ds-pro "Write a small web server"

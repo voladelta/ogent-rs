@@ -12,13 +12,11 @@ Common options:
 
 | Option | Description |
 |---|---|
-| `--profile <name>` | Model profile. Default: `ds-pro` |
+| `--profile <name>` | Model profile. Default: `ds-flash` |
 | `--steer` | Start interactive TUI steering mode |
 | `--retry <n>` | Retry transient API errors. Default: `5` |
-| `--max-turns <n>` | Limit agent turns. Default: `-1` for unlimited |
 | `--autocompact <percent>` | Auto-compact context when usage crosses threshold. Default: `80`. `-1` to disable |
 | `--resume` | Resume from the latest non-worker session (`.ogent/sessions/*.jsonl`) |
-| `--resume-session <name>` | Resume from a specific session file by name (without `.jsonl`) |
 | `--worker` | Internal worker mode. Reads system prompt from stdin |
 | `--temp` | Ephemeral mode: run without persisting session state to disk |
 
@@ -28,9 +26,9 @@ Non-steer mode requires a prompt unless `--resume` is used.
 
 | Profile | Backend | Model | Key env | Context | Max output | Thinking |
 |---|---|---|---|---|---|---|
-| `ds-flash` | DeepSeek | `deepseek-v4-flash` | `DEEPSEEK_API_KEY` | 1M | 393216 | `thinking:{type:enabled}` + `reasoning_effort=high` |
+| `ds-flash` *(default)* | DeepSeek | `deepseek-v4-flash` | `DEEPSEEK_API_KEY` | 1M | 393216 | `thinking:{type:enabled}` + `reasoning_effort=high` |
 | `ds-flash-max` | DeepSeek | `deepseek-v4-flash` | `DEEPSEEK_API_KEY` | 1M | 393216 | `thinking:{type:enabled}` + `reasoning_effort=max` |
-| `ds-pro` *(default)* | DeepSeek | `deepseek-v4-pro` | `DEEPSEEK_API_KEY` | 1M | 393216 | `thinking:{type:enabled}` + `reasoning_effort=high` |
+| `ds-pro` | DeepSeek | `deepseek-v4-pro` | `DEEPSEEK_API_KEY` | 1M | 393216 | `thinking:{type:enabled}` + `reasoning_effort=high` |
 | `ds-pro-max` | DeepSeek | `deepseek-v4-pro` | `DEEPSEEK_API_KEY` | 1M | 393216 | `thinking:{type:enabled}` + `reasoning_effort=max` |
 | `kimi` | Baseten | `moonshotai/Kimi-K2.6` | `BASETEN_API_KEY` | 256K | 262144 | `enable_thinking=true` |
 | `glm` | Z.ai | `glm-5.1` | `Z_API_KEY` | 200K | 131072 | interleaved + preserved |
@@ -133,22 +131,10 @@ When the coder calls `complete`, its structured Markdown summary is appended to 
 cargo run -- --resume "Now add a type hint to the function"
 
 # Resume a specific session by name (without .jsonl)
-cargo run -- --resume --resume-session 1778216383-2028 "Add a main block"
-```
-
-Sessions are saved even when the run hits `--max-turns`. If the turn limit is reached, the exit message prints:
-
-```
-Reached max turns (N). Session saved. Resume with ogent --resume.
+cargo run -- --resume 1778216383-2028 "Add a main block"
 ```
 
 ## Turn Limits
-
-```bash
-cargo run -- --max-turns 20 "Add auth middleware"
-```
-
-`--max-turns=-1` is unlimited.
 
 Worker limits can be set by the parent agent through the `max_turns` field in `dispatch_worker` or async worker specs.
 
