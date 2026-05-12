@@ -201,7 +201,7 @@ async fn main() -> Result<()> {
   if !args.worker && !args.temp {
     io::stdout().flush()?;
     eprintln!(
-      "\nogent resume {} to continue this session",
+      "\nogent --resume={} to continue this session",
       agent.meta.session_id
     );
   }
