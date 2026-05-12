@@ -59,7 +59,6 @@ pub async fn execute_tool(mut ctx: ToolContext<'_>, name: &str, args: &str) -> R
       update_todo(agent, args)
     }
     "load_skill" => load_skill(ctx.agent.as_deref_mut(), args),
-    "load_worker_template" => load_worker_template(args),
     "dispatch_worker" => dispatch_worker(args).await,
     "start_workers" => {
       start_workers(
@@ -119,7 +118,6 @@ const WORKER_EXCLUDED: &[&str] = &[
   "revise_goal",
   "update_phase",
   "update_todo",
-  "load_worker_template",
 ];
 
 fn build_coder_tools() -> Vec<Tool> {
@@ -171,13 +169,13 @@ fn build_coder_tools() -> Vec<Tool> {
     ),
     schema(
       "dispatch_worker",
-      "Hire a specialist coworker with a behavior-shaping system_prompt and a concrete task assignment. The worker runs as a separate process and returns a Markdown summary.",
-      json!({"type":"object","properties":{"system_prompt":{"type":"string","description":"Complete behavior-shaping system prompt for the worker: role, permissions, read/write scope, constraints, commands, and summary format"},"task":{"type":"string","description":"Concrete task-shaping user prompt for the worker: exact assignment, expected output, success criteria, and immediate next step"}},"required":["system_prompt","task"],"additionalProperties":false}),
+      "Hire a specialist coworker. ogent generates the worker's system prompt via an architect LLM call using the template and context you provide. The worker runs as a separate process and returns a Markdown summary.",
+      json!({"type":"object","properties":{"task":{"type":"string","description":"What the worker should accomplish — exact assignment, expected output, success criteria"},"template":{"type":"string","description":"Worker template or concise custom role: generic, tester, reviewer, validator, etc. Default: generic."},"context":{"type":"string","description":"Markdown context for the worker: project info, files, commands, constraints, known facts"}},"required":["task"],"additionalProperties":false}),
     ),
     schema(
       "start_workers",
-      "Start a batch of specialist coworkers asynchronously and return immediately with worker IDs.",
-      json!({"type":"object","properties":{"coworkers":{"type":"array","minItems":1,"items":{"type":"object","properties":{"name":{"type":"string","description":"Optional short unique label for status"},"system_prompt":{"type":"string","description":"Behavior-shaping system prompt: role, permissions, read/write scope, constraints, commands, and summary format"},"task_prompt":{"type":"string","description":"Concrete task prompt: assignment, expected output, success criteria, and immediate next step"}},"required":["system_prompt","task_prompt"],"additionalProperties":false}}},"required":["coworkers"],"additionalProperties":false}),
+      "Start a batch of specialist coworkers asynchronously. ogent generates each worker's system prompt via an architect LLM call.",
+      json!({"type":"object","properties":{"coworkers":{"type":"array","minItems":1,"items":{"type":"object","properties":{"name":{"type":"string","description":"Optional short unique label for status"},"task":{"type":"string","description":"What the worker should accomplish"},"template":{"type":"string","description":"Worker template or concise custom role: generic, tester, reviewer, validator, etc. Default: generic."},"context":{"type":"string","description":"Markdown context: project info, files, commands, constraints, known facts"}},"required":["task"],"additionalProperties":false}}},"required":["coworkers"],"additionalProperties":false}),
     ),
     schema(
       "check_workers",
@@ -210,11 +208,6 @@ fn build_coder_tools() -> Vec<Tool> {
       json!({"type":"object","properties":{"name":{"type":"string"}},"required":["name"],"additionalProperties":false}),
     ),
     schema(
-      "load_worker_template",
-      "Load a built-in worker template (generic, tester, reviewer, validator). Returns template content with placeholders to fill before use as system_prompt.",
-      json!({"type":"object","properties":{"name":{"type":"string","enum":["generic","tester","reviewer","validator"],"description":"Built-in worker template name"}},"required":["name"],"additionalProperties":false}),
-    ),
-    schema(
       "complete",
       "Mark the current task complete with a Markdown summary. If work is still open, first call returns a warning; call again with explicit Limitation and Intent to force stop.",
       json!({"type":"object","properties":{"summary":{"type":"string","description":"Markdown retrospective. Include Limitation and Intent if forcing early stop."}},"required":["summary"],"additionalProperties":false}),
@@ -240,7 +233,6 @@ pub fn is_read_only_tool(name: &str) -> bool {
       | "web_search"
       | "web_read"
       | "code_web_context"
-      | "load_worker_template"
       | "load_skill"
   )
 }
@@ -790,39 +782,16 @@ fn load_skill(agent: Option<&mut crate::agent::Agent>, args: &str) -> Result<Str
   ))
 }
 
-#[derive(Deserialize)]
-struct LoadWorkerTemplateArgs {
-  name: String,
-}
-
-fn load_worker_template(args: &str) -> Result<String> {
-  let args: LoadWorkerTemplateArgs = parse_args(args)?;
-  require_nonempty(&args.name, "name")?;
-  let template = crate::prompts::get_worker_template(&args.name).with_context(|| {
-    format!(
-      "unknown worker template: {}. Use generic, tester, reviewer, or validator.",
-      args.name
-    )
-  })?;
-  Ok(format!(
-    "<worker_template name=\"{}\">\n{}\n</worker_template>",
-    args.name, template
-  ))
-}
-
-#[derive(Deserialize)]
-struct DispatchWorkerArgs {
-  system_prompt: String,
-  task: String,
-}
-
 async fn dispatch_worker(args: &str) -> Result<String> {
-  let args: DispatchWorkerArgs = parse_args(args)?;
-  require_nonempty(&args.system_prompt, "system_prompt")?;
+  let args: crate::workers::DispatchWorkerArgs = parse_args(args)?;
   require_nonempty(&args.task, "task")?;
+  let (system_prompt, task_prompt) =
+    crate::workers::resolve_worker_prompts(&args.template, &args.task, &args.context)
+      .await
+      .context("architect failed for dispatch_worker")?;
   let result = crate::workers::run_worker_process(crate::workers::WorkerProcessArgs {
-    system_prompt: args.system_prompt,
-    task_prompt: args.task,
+    system_prompt,
+    task_prompt,
     stream_stderr: true,
   })
   .await;
@@ -923,7 +892,6 @@ mod tests {
     assert!(is_read_only_tool("web_search"));
     assert!(is_read_only_tool("web_read"));
     assert!(is_read_only_tool("code_web_context"));
-    assert!(is_read_only_tool("load_worker_template"));
     assert!(is_read_only_tool("load_skill"));
     assert!(!is_read_only_tool("write_file"));
     assert!(!is_read_only_tool("edit_hash_anchors"));
@@ -1049,18 +1017,20 @@ mod tests {
   }
 
   #[test]
-  fn dispatch_worker_schema_has_system_prompt_and_task() {
+  fn dispatch_worker_schema_has_task_template_and_context() {
     let tools = configured_coder_tools();
     let t = tools
       .iter()
       .find(|t| t.function.name == "dispatch_worker")
       .unwrap();
     let params = &t.function.parameters;
-    assert!(params["properties"]["system_prompt"].is_object());
     assert!(params["properties"]["task"].is_object());
+    assert!(params["properties"]["template"].is_object());
+    assert!(params["properties"]["context"].is_object());
     let required: Vec<String> = serde_json::from_value(params["required"].clone()).unwrap();
-    assert!(required.contains(&"system_prompt".to_string()));
     assert!(required.contains(&"task".to_string()));
+    assert!(!required.contains(&"template".to_string()));
+    assert!(!required.contains(&"context".to_string()));
   }
 
   #[test]

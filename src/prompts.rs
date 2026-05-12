@@ -9,17 +9,21 @@ pub const TENX_CODER_SYSTEM_PROMPT: &str = include_str!("../prompts/SYSTEM_PROMP
 
 pub const WORKER_SUMMARY_PROMPT: &str = "\n\n## Worker Report Protocol\n\nWhen done, call `worker_complete` with a concise Markdown summary:\n\n```json\n{\"summary\":\"...\"}\n```\n\nInclude in the summary:\n- What you accomplished\n- Files inspected, commands run, results\n- Decisions made\n- Files modified (list)\n- Blockers (omit if none)\n\nRules:\n- Concise fragments are preferred.\n- Never fabricate or embellish results. Report only what you actually observed or did.\n- Do not write intermediate analysis, planning, or decision documents to the repo.";
 
-pub const WORKER_TEMPLATE_GENERIC: &str = include_str!("../prompts/templates/generic.md");
-pub const WORKER_TEMPLATE_TESTER: &str = include_str!("../prompts/templates/tester.md");
-pub const WORKER_TEMPLATE_REVIEWER: &str = include_str!("../prompts/templates/reviewer.md");
-pub const WORKER_TEMPLATE_VALIDATOR: &str = include_str!("../prompts/templates/validator.md");
+pub const WORKER_TEMPLATE_GENERIC: &str = include_str!("../prompts/workers/generic.md");
+pub const WORKER_PROMPT_REVIEWER: &str = include_str!("../prompts/workers/reviewer.md");
+pub const WORKER_PROMPT_TESTER: &str = include_str!("../prompts/workers/tester.md");
+pub const WORKER_PROMPT_VALIDATOR: &str = include_str!("../prompts/workers/validator.md");
+pub const ARCHITECT_PROMPT: &str = include_str!("../prompts/ARCHITECT_PROMPT.md");
 
-pub fn get_worker_template(name: &str) -> Option<&'static str> {
+pub fn get_worker_template(_name: &str) -> &'static str {
+  WORKER_TEMPLATE_GENERIC
+}
+
+pub fn get_builtin_worker_prompt(name: &str) -> Option<&'static str> {
   match name {
-    "generic" => Some(WORKER_TEMPLATE_GENERIC),
-    "tester" => Some(WORKER_TEMPLATE_TESTER),
-    "reviewer" => Some(WORKER_TEMPLATE_REVIEWER),
-    "validator" => Some(WORKER_TEMPLATE_VALIDATOR),
+    "reviewer" => Some(WORKER_PROMPT_REVIEWER),
+    "tester" => Some(WORKER_PROMPT_TESTER),
+    "validator" => Some(WORKER_PROMPT_VALIDATOR),
     _ => None,
   }
 }

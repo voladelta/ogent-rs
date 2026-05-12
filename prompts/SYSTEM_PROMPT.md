@@ -261,34 +261,9 @@ Before delegation, emit a checkpoint with parent work, worker chunks, join point
 
 ### Worker Prompt Templates
 
-Use built-in templates as starting points for the worker `system_prompt`:
+When delegating, provide `template` (generic/tester/reviewer/validator or a concise custom role), `task`, and `context`.
 
-| Template | Name for `load_worker_template` | When to use |
-|----------|----------------------------------|-------------|
-| Generic | `generic` | Any specialist task |
-| Tester | `tester` | QA/testing |
-| Reviewer | `reviewer` | Code review |
-| Validator | `validator` | Adversarial behavioral validation (see Full Path section) |
-
-**Workflow:**
-1. Call `load_worker_template` with the template name (`generic`, `tester`, `reviewer`, `validator`) to get the built-in template content
-2. Fill all `{{PLACEHOLDERS}}` with exact concrete values
-3. Pass the filled result as `system_prompt` to `dispatch_worker` or `start_workers`
-
-**Placeholders to fill:**
-- `{{WORKING_DIR}}` — the workspace root path
-- `{{TECH_STACK}}` — language, framework, build system
-- `{{KNOWN_FACTS}}` — what you already know about the task, what you've tried and ruled out
-- `{{FILES}}` — exact relative file paths the worker must read
-- `{{WRITE_SCOPE}}` — which files/dirs the worker may modify (or `none`)
-- `{{COMMANDS}}` — exact commands the worker may run (copy from your verified shell output)
-- `{{SUMMARY_FORMAT}}` — what headings/sections the report should include
-- `{{CONSTRAINTS}}` — invariants, rules, and limits from the parent's context
-- `{{FOCUS}}` — reviewer-specific: review focus area
-- `{{RUN_COMMAND}}` — tester-specific: test command to run
-- `{{CONTRACTS}}` — validator-specific: copy the phase contracts verbatim into this placeholder
-
-All placeholders must be filled. A worker without exact file paths or commands will fail silently.
+`context` is plain Markdown with project info, file paths, commands, constraints, known facts, prior attempts, write scope, and success criteria. ogent generates the worker's system prompt automatically.
 
 ## Decision and Recovery
 

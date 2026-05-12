@@ -1,6 +1,7 @@
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 use std::collections::HashSet;
+use std::sync::OnceLock;
 
 use tokio::process::Command;
 use tokio::sync::Mutex;
@@ -22,11 +23,27 @@ pub struct WorkerProcessResult {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct DispatchWorkerArgs {
+  pub task: String,
+  #[serde(default = "default_template")]
+  pub template: String,
+  #[serde(default)]
+  pub context: String,
+}
+
+fn default_template() -> String {
+  "generic".to_string()
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct AsyncCoworkerArgs {
   #[serde(default)]
   pub name: String,
-  pub system_prompt: String,
-  pub task_prompt: String,
+  pub task: String,
+  #[serde(default = "default_template")]
+  pub template: String,
+  #[serde(default)]
+  pub context: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -65,21 +82,29 @@ impl WorkerManager {
 
   pub async fn start(&self, args: StartWorkersArgs) -> Result<String> {
     validate_start_workers_args(&args)?;
-    let mut inner = self.inner.lock().await;
-    inner.batches += 1;
-    let batch_id = format!("batch-{}", inner.batches);
-    let mut started = Vec::new();
-    for (i, coworker) in args.coworkers.into_iter().enumerate() {
-      inner.next_id += 1;
-      let id = format!("worker-{}", inner.next_id);
+    let mut resolved = Vec::new();
+    for (i, coworker) in args.coworkers.iter().enumerate() {
+      let (sys, task) =
+        resolve_worker_prompts(&coworker.template, &coworker.task, &coworker.context)
+          .await
+          .with_context(|| format!("architect failed for coworkers[{i}]"))?;
       let name = if coworker.name.trim().is_empty() {
         format!("coworker-{}", i + 1)
       } else {
         coworker.name.trim().to_string()
       };
+      resolved.push((name, sys, task));
+    }
+    let mut inner = self.inner.lock().await;
+    inner.batches += 1;
+    let batch_id = format!("batch-{}", inner.batches);
+    let mut started = Vec::new();
+    for (name, system_prompt, task_prompt) in resolved {
+      inner.next_id += 1;
+      let id = format!("worker-{}", inner.next_id);
       let run_args = WorkerProcessArgs {
-        system_prompt: coworker.system_prompt,
-        task_prompt: coworker.task_prompt,
+        system_prompt,
+        task_prompt,
         stream_stderr: false,
       };
       let done = tokio::spawn(async move { run_worker_process(run_args).await });
@@ -288,11 +313,8 @@ pub fn validate_start_workers_args(args: &StartWorkersArgs) -> Result<()> {
   }
   let mut seen = HashSet::new();
   for (i, c) in args.coworkers.iter().enumerate() {
-    if c.system_prompt.trim().is_empty() {
-      bail!("coworkers[{i}].system_prompt is required");
-    }
-    if c.task_prompt.trim().is_empty() {
-      bail!("coworkers[{i}].task_prompt is required");
+    if c.task.trim().is_empty() {
+      bail!("coworkers[{i}].task is required");
     }
     let name = c.name.trim();
     if !name.is_empty() && !seen.insert(name.to_string()) {
@@ -300,6 +322,88 @@ pub fn validate_start_workers_args(args: &StartWorkersArgs) -> Result<()> {
     }
   }
   Ok(())
+}
+
+static ARCHITECT_CLIENT: OnceLock<Result<crate::client::Client, String>> = OnceLock::new();
+
+fn get_architect_client() -> Result<&'static crate::client::Client> {
+  let result = ARCHITECT_CLIENT.get_or_init(|| {
+    let profile = crate::profiles::get_profile("ds-flash")
+      .ok_or_else(|| "architect profile 'ds-flash' not found".to_string())?;
+    crate::providers::new_client(profile).map_err(|e| e.to_string())
+  });
+  match result {
+    Ok(client) => Ok(client),
+    Err(e) => bail!("architect client init: {e}"),
+  }
+}
+
+pub async fn resolve_worker_prompts(
+  template: &str,
+  task: &str,
+  context: &str,
+) -> Result<(String, String)> {
+  let requested_template = normalize_template(template);
+  if let Some(builtin) = crate::prompts::get_builtin_worker_prompt(requested_template) {
+    let system_prompt = format!("{builtin}\n\n## Context\n\n{}", context.trim());
+    return Ok((system_prompt, task.trim().to_string()));
+  }
+
+  let client = get_architect_client()?;
+  let template_body = crate::prompts::get_worker_template(requested_template);
+  let user_content = format!(
+    "## Requested Template/Role\n\n{requested_template}\n\n## Template\n\n{template_body}\n\n## Task\n\n{}\n\n## Context\n\n{}",
+    task.trim(),
+    context.trim()
+  );
+  let messages = vec![
+    crate::types::Message {
+      role: "system".into(),
+      content: crate::prompts::ARCHITECT_PROMPT.to_string(),
+      ..Default::default()
+    },
+    crate::types::Message {
+      role: "user".into(),
+      content: user_content,
+      ..Default::default()
+    },
+  ];
+  let resp = client
+    .chat_json(&messages, &[])
+    .await
+    .context("architect LLM call failed")?;
+  parse_architect_output(&resp.content)
+}
+
+fn normalize_template(template: &str) -> &str {
+  let template = template.trim();
+  if template.is_empty() {
+    "generic"
+  } else {
+    template
+  }
+}
+
+fn parse_architect_output(text: &str) -> Result<(String, String)> {
+  let sys =
+    extract_tag(text, "system_prompt").context("architect output missing <system_prompt> block")?;
+  let task =
+    extract_tag(text, "task_prompt").context("architect output missing <task_prompt> block")?;
+  if sys.is_empty() {
+    bail!("architect produced empty system_prompt");
+  }
+  if task.is_empty() {
+    bail!("architect produced empty task_prompt");
+  }
+  Ok((sys, task))
+}
+
+fn extract_tag(text: &str, tag: &str) -> Option<String> {
+  let open = format!("<{tag}>");
+  let close = format!("</{tag}>");
+  let start = text.find(&open)? + open.len();
+  let end = text[start..].find(&close)? + start;
+  Some(text[start..end].trim().to_string())
 }
 
 #[cfg(test)]
@@ -317,13 +421,15 @@ mod tests {
       coworkers: vec![
         AsyncCoworkerArgs {
           name: "a".into(),
-          system_prompt: "s".into(),
-          task_prompt: "t".into(),
+          task: "do something".into(),
+          template: "generic".into(),
+          context: String::new(),
         },
         AsyncCoworkerArgs {
           name: "a".into(),
-          system_prompt: "s".into(),
-          task_prompt: "t".into(),
+          task: "do something else".into(),
+          template: "generic".into(),
+          context: String::new(),
         },
       ],
     };
@@ -359,5 +465,46 @@ mod tests {
     .unwrap();
     assert!(out.contains("WORKER FAILED"));
     assert!(out.contains("stderr text"));
+  }
+
+  #[test]
+  fn parse_architect_output_extracts_tags() {
+    let text = r#"Some preamble
+
+<system_prompt>
+Act as a specialist.
+</system_prompt>
+
+<task_prompt>
+Review the code.
+</task_prompt>
+
+Some trailing text"#;
+    let (sys, task) = parse_architect_output(text).unwrap();
+    assert_eq!(sys, "Act as a specialist.");
+    assert_eq!(task, "Review the code.");
+  }
+
+  #[test]
+  fn parse_architect_output_rejects_missing_tags() {
+    assert!(parse_architect_output("no tags here").is_err());
+    assert!(parse_architect_output("<system_prompt>hello</system_prompt>").is_err());
+  }
+
+  #[test]
+  fn extract_tag_returns_none_for_missing() {
+    assert!(extract_tag("no tags", "system_prompt").is_none());
+  }
+
+  #[tokio::test]
+  async fn resolve_worker_prompts_uses_builtin_without_architect() {
+    let (sys, task) =
+      resolve_worker_prompts("reviewer", "review src/lib.rs", "## Files\n- src/lib.rs")
+        .await
+        .unwrap();
+    assert!(sys.contains("Reviewer Worker"));
+    assert!(sys.contains("## Context"));
+    assert!(sys.contains("src/lib.rs"));
+    assert_eq!(task, "review src/lib.rs");
   }
 }

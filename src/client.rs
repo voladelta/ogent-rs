@@ -88,6 +88,40 @@ impl Client {
     Err(last_err.expect("at least one attempt"))
   }
 
+  /// Non-streaming chat. Sends `stream: false` and parses a single JSON response.
+  pub async fn chat_json(
+    &self,
+    messages: &[Message],
+    tools: &[Tool],
+  ) -> Result<ChatResponse, ClientError> {
+    let mut req_body = (self.build_req)(messages, tools);
+    if let Some(obj) = req_body.as_object_mut() {
+      obj.insert("stream".into(), serde_json::Value::Bool(false));
+    }
+    let resp = self
+      .http
+      .post(&self.url)
+      .bearer_auth(&self.api_key)
+      .json(&req_body)
+      .send()
+      .await
+      .map_err(ClientError::Http)?;
+    let status = resp.status();
+    let body = resp.text().await.map_err(ClientError::Http)?;
+    if !status.is_success() {
+      if status.as_u16() == 429 {
+        return Err(ClientError::RateLimited {
+          body: body.trim().to_string(),
+        });
+      }
+      return Err(ClientError::ApiError {
+        status: status.as_u16(),
+        body: body.trim().to_string(),
+      });
+    }
+    parse_json_response(&body)
+  }
+
   async fn chat_once(
     &self,
     req_body: &Value,
@@ -124,4 +158,32 @@ impl Client {
       .await
       .map_err(Into::into)
   }
+}
+
+fn parse_json_response(body: &str) -> Result<ChatResponse, ClientError> {
+  let v: serde_json::Value = serde_json::from_str(body).map_err(|e| ClientError::ApiError {
+    status: 0,
+    body: format!("json parse: {e}: {}", &body[..body.len().min(200)]),
+  })?;
+  let choice = &v["choices"][0]["message"];
+  let content = choice["content"].as_str().unwrap_or("").to_string();
+  let reasoning_content = choice["reasoning_content"]
+    .as_str()
+    .unwrap_or("")
+    .to_string();
+  let usage = v["usage"]
+    .as_object()
+    .map(|u| crate::types::Usage {
+      total_tokens: u
+        .get("total_tokens")
+        .and_then(serde_json::Value::as_i64)
+        .unwrap_or(0) as i32,
+    })
+    .unwrap_or_default();
+  Ok(ChatResponse {
+    content,
+    reasoning_content,
+    tool_calls: Vec::new(),
+    usage,
+  })
 }
