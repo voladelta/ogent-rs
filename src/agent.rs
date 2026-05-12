@@ -66,21 +66,8 @@ impl SteerState {
         let mut wait = wait_for_input;
 
         while let Ok(event) = tui.rx.try_recv() {
-          match agent.apply_steer_event(event, tui)? {
-            SteerAction::Exit => {
-              return Ok(Self::Exit(agent.messages.clone()));
-            }
-            SteerAction::Restart => {
-              ctx.turn = 1;
-              tui.log.push(
-                "[steer] commands: /complete /cancel /new /compact [/compact <focus>] /q"
-                  .to_string(),
-              );
-              return Ok(Self::Idle {
-                wait_for_input: true,
-              });
-            }
-            SteerAction::Continue => {}
+          if let Some(next) = Self::process_idle_event(agent, tui, ctx, event)? {
+            return Ok(next);
           }
           if agent.messages.len() > wait_baseline_len
             && matches!(agent.messages.last().map(|m| m.role.as_str()), Some("user"))
@@ -94,21 +81,8 @@ impl SteerState {
             let Some(event) = tui.rx.recv().await else {
               continue;
             };
-            match agent.apply_steer_event(event, tui)? {
-              SteerAction::Exit => {
-                return Ok(Self::Exit(agent.messages.clone()));
-              }
-              SteerAction::Restart => {
-                ctx.turn = 1;
-                tui.log.push(
-                  "[steer] commands: /complete /cancel /new /compact [/compact <focus>] /q"
-                    .to_string(),
-                );
-                return Ok(Self::Idle {
-                  wait_for_input: true,
-                });
-              }
-              SteerAction::Continue => {}
+            if let Some(next) = Self::process_idle_event(agent, tui, ctx, event)? {
+              return Ok(next);
             }
             if agent.messages.len() > wait_baseline_len
               && matches!(agent.messages.last().map(|m| m.role.as_str()), Some("user"))
@@ -201,7 +175,7 @@ impl SteerState {
                   agent.apply_steer_event(SteerEvent::New, tui)?;
                   chat.abort();
                   ctx.turn = 1;
-                  tui.log.push("[steer] commands: /complete /cancel /new /compact [/compact <focus>] /q".to_string());
+                  tui.log.push(STEER_COMMANDS.to_string());
                   return Ok(Self::Idle { wait_for_input: true });
                 }
                 SteerEvent::Exit => {
@@ -220,7 +194,7 @@ impl SteerState {
                       cancel.cancel();
                       chat.abort();
                       ctx.turn = 1;
-                  tui.log.push("[steer] commands: /complete /cancel /new /compact [/compact <focus>] /q".to_string());
+                  tui.log.push(STEER_COMMANDS.to_string());
                       return Ok(Self::Idle { wait_for_input: true });
                     }
                     SteerAction::Continue => {}
@@ -417,6 +391,25 @@ impl SteerState {
       }
     }
   }
+
+  fn process_idle_event(
+    agent: &mut Agent,
+    tui: &mut TuiHandle,
+    ctx: &mut SteerCtx,
+    event: SteerEvent,
+  ) -> Result<Option<Self>, AgentError> {
+    match agent.apply_steer_event(event, tui)? {
+      SteerAction::Exit => Ok(Some(Self::Exit(agent.messages.clone()))),
+      SteerAction::Restart => {
+        ctx.turn = 1;
+        tui.log.push(STEER_COMMANDS.to_string());
+        Ok(Some(Self::Idle {
+          wait_for_input: true,
+        }))
+      }
+      SteerAction::Continue => Ok(None),
+    }
+  }
 }
 
 #[derive(Debug, Clone)]
@@ -559,7 +552,7 @@ impl Agent {
   ) -> Result<Vec<Message>, AgentError> {
     tui
       .log
-      .push("[steer] commands: /complete /cancel /new /compact [/compact <focus>] /q");
+      .push(STEER_COMMANDS);
     let mut state = SteerState::Idle { wait_for_input };
     let mut ctx = SteerCtx { turn: 1 };
 
@@ -998,6 +991,9 @@ mod truncate_tests {
     assert_eq!(truncate("x─y", 2), "x...");
   }
 }
+
+const STEER_COMMANDS: &str =
+  "[steer] commands: /complete /cancel /new /compact [/compact <focus>] /q";
 
 const MANUAL_COMPLETE_REMINDER: &str = r#"Reminder: [manual_complete]
 The user requested completion from steer mode.

@@ -97,13 +97,11 @@ fn parse_frontmatter(content: &str) -> Option<&str> {
 }
 
 fn strip_frontmatter(content: &str) -> String {
-  parse_frontmatter(content).map_or_else(
-    || content.trim().to_string(),
-    |_| {
-      let end = content[3..].find("---").unwrap() + 6;
-      content[end..].trim().to_string()
-    },
-  )
+  let Some(fm) = parse_frontmatter(content) else {
+    return content.trim().to_string();
+  };
+  let start = 3 + fm.len() + 3;
+  content[start..].trim().to_string()
 }
 
 fn parse_skill_frontmatter(content: &str) -> (String, String, Option<crate::workflow::Workflow>) {
