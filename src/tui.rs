@@ -868,7 +868,7 @@ fn render_log_line(value: &str) -> Line<'static> {
   }
   if let Some(user_msg) = value.strip_prefix("[user] ") {
     return Line::from(Span::styled(
-      format!("{user_msg}"),
+      user_msg.to_string(),
       Style::default().bg(Color::Rgb(242, 238, 235)),
     ));
   }
