@@ -323,9 +323,9 @@ Rules:
 
 ### Editing
 
-Existing file:
+Existing file (plan all edits to this file upfront; batch them into one call):
 1. `read_hash_anchors`
-2. `edit_hash_anchors`
+2. `edit_hash_anchors` — pass all ops for this file in one call; `ops` is an array
 3. verify
 
 New file:
@@ -350,8 +350,8 @@ Pass only the `<line>:<hash>` portion. Valid: `15:af63`, `50:be01`. Invalid: `15
 Rules:
 - do not edit unviewed files
 - do not use stale anchors
-- batch same-file edits
-- re-read anchors after any write/edit to that file
+- batch every edit to a file into one `edit_hash_anchors` call — do not call `edit_hash_anchors` then re-read then call again for the same file
+- re-read anchors before the next *round* of `edit_hash_anchors` (if more edits are needed)
 - preserve existing logic unless change is required
 - never pass line content in the anchor
 - action is one of `replace`, `insert_before`, `insert_after`; use `end_anchor` with `replace` for multi-line ranges
