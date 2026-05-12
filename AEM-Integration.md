@@ -1,6 +1,6 @@
 # AEM Integration Design for ogent
 
-> Port the architectural concepts of Anchored Episodic Memory (AEM) into ogent to improve harness of the 10x coder agent after sessions.
+> Port the architectural concepts of Anchored Episodic Memory (AEM) into ogent to improve harness of the agent after sessions.
 
 > Reference repo: ~/Codehub/aem
 

@@ -1,10 +1,10 @@
 # Agent Guide
 
-How the 10x coder works internally: its phases, checkpoints, task tracking, skills, and coworker delegation.
+How the agent works internally: its phases, checkpoints, task tracking, skills, and coworker delegation.
 
-## 10x Coder
+## Agent
 
-The 10x coder works in **phases**, writing short in-session checkpoints and hiring specialist coworkers when needed.
+The agent works in **phases**, writing short in-session checkpoints and hiring specialist coworkers when needed.
 
 ### Checkpoints
 
@@ -61,7 +61,7 @@ Skills are loaded from:
 
 At startup, available skills are discovered and listed in the user message. The agent can call `load_skill` to inject a skill body into the next turn.
 
-The `colgrep` skill is preloaded: if their `SKILL.md` files exist in a skill root, ogent auto-injects their full body into the initial user message after the skills list. This gives the 10x coder semantic code search and repo context instructions without spending a turn on `load_skill`.
+The `colgrep` skill is preloaded: if their `SKILL.md` files exist in a skill root, ogent auto-injects their full body into the initial user message after the skills list. This gives the agent semantic code search and repo context instructions without spending a turn on `load_skill`.
 
 Skills may optionally define a **workflow** graph in YAML frontmatter. When loaded, ogent enforces the phase graph at runtime: transitions are validated, loops are bounded, and `complete` is gated to terminal phases only. See "Workflow Skills" below.
 
@@ -86,14 +86,14 @@ Recommended search behavior:
 
 ### Hiring coworkers
 
-The 10x coder uses `dispatch_worker` when:
+The agent uses `dispatch_worker` when:
 - The task has parallel independent work streams
 - A specialist perspective is needed (security review, docs, tests)
 - The task is large enough that splitting context helps
 
 **Golden rule:** Give the worker JUST ENOUGH context — but it must be the RIGHT context. A worker without file paths or commands will fail silently.
 
-**Worker prompt templates** in `prompts/templates/` (`generic`, `tester`, `reviewer`, `validator`) are starting points for the worker `system_prompt`. The 10x coder customizes one of them for the worker's role, scope, constraints, and summary format, then puts the concrete assignment in the separate `task` argument. All `{{PLACEHOLDERS}}` must be filled before dispatch.
+**Worker prompt templates** in `prompts/templates/` (`generic`, `tester`, `reviewer`, `validator`) are starting points for the worker `system_prompt`. The agent customizes one of them for the worker's role, scope, constraints, and summary format, then puts the concrete assignment in the separate `task` argument. All `{{PLACEHOLDERS}}` must be filled before dispatch.
 
 **Dispatch checklist:**
 - [ ] You actually need a worker (prefer direct action for <3 turns of work)

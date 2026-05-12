@@ -1,12 +1,12 @@
 # ogent
 
-`ogent` is a minimal task agent with thinking-mode LLMs, anchored file editing, autonomous 10x-coder execution, and TUI-based steering.
+`ogent` is a minimal task agent with thinking-mode LLMs, anchored file editing, autonomous agent execution, and TUI-based steering.
 
 ## Overview
 
 `ogent` is a terminal-based autonomous agent that turns user intent into file reads, edits, shell commands, tests, debugging, and worker delegation.
 
-The default **10x coder** mode owns the work directly. It delegates to worker subprocesses only when a specialist or parallel work stream adds value.
+The default **agent** mode owns the work directly. It delegates to worker subprocesses only when a specialist or parallel work stream adds value.
 
 The design priorities are:
 
@@ -38,7 +38,7 @@ cargo run -- "Add a divide function to src/math.rs"
 User prompt
     |
     v
-10x Coder (read -> plan -> act -> checkpoint)
+Agent (read -> plan -> act -> checkpoint)
     |
     v
 Need specialist? -> dispatch_worker / start_workers
@@ -47,16 +47,16 @@ Need specialist? -> dispatch_worker / start_workers
 Worker subprocess -> worker_complete({summary})
     |
     v
-10x Coder reads report -> integrate -> continue or finalize
+Agent reads report -> integrate -> continue or finalize
 ```
 
-The 10x coder is the default mode. It reads files, writes code, runs tests, debugs issues, and hires workers only when useful.
+The agent is the default mode. It reads files, writes code, runs tests, debugs issues, and hires workers only when useful.
 
 Workers run as child `ogent --worker` processes with a custom system prompt and task supplied by the parent agent.
 
 ## Documentation
 
-- [Agent Guide](docs/agent-guide.md) — 10x coder internals, checkpoints, task tracking, skills, and hiring coworkers
+- [Agent Guide](docs/agent-guide.md) — agent internals, checkpoints, task tracking, skills, and hiring coworkers
 - [Reference](docs/reference.md) — CLI flags, model profiles, tools, hashline editing, sessions, turn limits
 - [Steer Mode](docs/steer-mode.md) — Interactive TUI, commands, and navigation
 - [Architecture](ARCHITECTURE.md) — Module map, data flow, and design invariants

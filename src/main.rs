@@ -177,6 +177,9 @@ async fn main() -> Result<()> {
       session::append_journal(&agent.meta.session_id, summary)?;
     }
   }
+  if !args.worker && !args.temp {
+    eprintln!("\nogent resume {} to continue this session", agent.meta.session_id);
+  }
   Ok(())
 }
 

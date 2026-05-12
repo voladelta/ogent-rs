@@ -524,9 +524,7 @@ impl Agent {
   }
 
   pub async fn run_loop(&mut self) -> Result<Vec<Message>, AgentError> {
-    let mut turn = 1;
     loop {
-      eprintln!("\n--- turn {turn} | tokens: {} ---", self.total_tokens);
       self.refresh_workflow_reminder();
       let resp = self
         .client
@@ -540,7 +538,6 @@ impl Agent {
       if !has_more {
         return Ok(self.messages.clone());
       }
-      turn += 1;
     }
   }
 
