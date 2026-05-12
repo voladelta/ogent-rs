@@ -874,13 +874,7 @@ fn summary_has_limitation_and_intent(summary: &str) -> bool {
 fn clean_strings(values: Vec<String>) -> Vec<String> {
   values
     .into_iter()
-    .map(|mut s| {
-      let trimmed = s.trim();
-      if trimmed.len() != s.len() {
-        s = trimmed.to_string();
-      }
-      s
-    })
+    .map(|s| s.trim().to_string())
     .filter(|s| !s.is_empty())
     .collect()
 }

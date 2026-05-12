@@ -574,7 +574,6 @@ impl Agent {
     if self.completion_summary.is_some() {
       return Ok(true);
     }
-    let mut _pushed_worker_status = false;
     if let Some(msg) = self.worker_manager.status_message().await {
       if let Some(log) = ui_log {
         self.push_msg(user_msg(msg.clone()));
@@ -582,7 +581,6 @@ impl Agent {
       } else {
         self.push_msg(user_msg(msg));
       }
-      _pushed_worker_status = true;
       *has_more = true;
     }
     if *has_more {
@@ -817,7 +815,7 @@ impl Agent {
   }
 
   async fn run_tool_call(&mut self, tc: &ToolCall) -> (String, bool) {
-    let (output, success, _) = format_tool_result(
+    let (output, success) = format_tool_result(
       execute_tool(
         ToolContext { agent: Some(self) },
         &tc.function.name,
@@ -857,8 +855,6 @@ impl Agent {
       "Reminder: [context_budget] {body}"
     )));
   }
-
-
 
   fn report_tokens(&self) {
     eprintln!("\n\ntokens: {}", self.total_tokens);
@@ -936,16 +932,16 @@ fn tool_msg(content: impl Into<String>, tool_call_id: impl Into<String>) -> Mess
   }
 }
 
-fn format_tool_result(result: anyhow::Result<String>) -> (String, bool, bool) {
+fn format_tool_result(result: anyhow::Result<String>) -> (String, bool) {
   match result {
-    Ok(out) => (out, true, false),
-    Err(e) => (format!("ERROR: {e}"), false, false),
+    Ok(out) => (out, true),
+    Err(e) => (format!("ERROR: {e}"), false),
   }
 }
 
 async fn run_read_only_batch(batch: &[&ToolCall]) -> Result<Vec<ToolResult>, AgentError> {
   let futs = batch.iter().map(|tc| async {
-    let (output, success, _) = format_tool_result(
+    let (output, success) = format_tool_result(
       execute_tool(
         ToolContext { agent: None },
         &tc.function.name,
