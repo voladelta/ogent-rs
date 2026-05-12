@@ -101,8 +101,11 @@ cargo run -- --resume "Add more tests"
 # Resume from a specific session by name
 cargo run -- --resume --resume-session 1778216383-2028 "Add a main block"
 
-# Auto-compact context at 5% and continue automatically
-cargo run -- --autocompact 5 "Large refactoring task"
+# Auto-compact context at 50% and continue automatically
+cargo run -- --autocompact 50 "Large refactoring task"
+
+# Disable autocompact
+cargo run -- --autocompact -1 "Quick task"
 
 # Ephemeral session (no session state written to disk)
 cargo run -- --temp "Quick one-off query"

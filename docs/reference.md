@@ -16,7 +16,7 @@ Common options:
 | `--steer` | Start interactive TUI steering mode |
 | `--retry <n>` | Retry transient API errors. Default: `5` |
 | `--max-turns <n>` | Limit agent turns. Default: `-1` for unlimited |
-| `--autocompact <percent>` | Start compaction when remaining context crosses the threshold |
+| `--autocompact <percent>` | Auto-compact context when usage crosses threshold. Default: `80`. `-1` to disable |
 | `--resume` | Resume from the latest non-worker session (`.ogent/sessions/*.jsonl`) |
 | `--resume-session <name>` | Resume from a specific session file by name (without `.jsonl`) |
 | `--worker` | Internal worker mode. Reads system prompt from stdin |

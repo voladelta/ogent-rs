@@ -5,13 +5,12 @@
 ## Bird's Eye View
 
 The system has two layers: the agent loops and the main driver. The agent loops (`src/agent.rs`) implement turn logic, tool call dispatch, budget reminders, compaction, and handoff logic. The main driver (`src/main.rs`) parses CLI flags, loads profiles, sets up agent state, and starts the correct loop (`run_loop` or `steer_loop`). This split keeps agent logic contained and the entry point explicit.
-
 ## Codemap
 
 Coarse-grained modules and their responsibilities:
 
 - `main.rs` — CLI entry point, profile selection, session setup, loop selection.
-- `agent.rs` — Standard and steer loops, turn handling, compaction, handoff restoration.
+- `agent.rs` — Standard and steer loops, turn handling, compaction (in-session handoff to new child session), and task tracker preservation.
 - `client.rs` — HTTP streaming client with SSE parsing and retry behavior with exponential backoff.
 - `providers.rs` — DeepSeek, Kimi, and Z/GLM request builders.
 - `profiles.rs` — Named model profiles.

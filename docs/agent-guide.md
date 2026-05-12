@@ -22,6 +22,16 @@ At meaningful in-session boundaries, the agent may write a short `<checkpoint>` 
 
 Checkpoints help preserve working state across phase changes, delegation, and compaction. They are model-facing context notes only: runtime code does not parse them, save them as durable memory, or load them on future runs.
 
+### Compaction
+
+When context usage crosses the autocompact threshold (default 80%), or when the user runs `/compact [focus]`, the agent produces a handoff brief and spawns a new child session. The brief preserves:
+
+- Goal, what was done, current state, relevant excerpts, next steps
+- Full task tracker state (goal, phases, todos) so work resumes seamlessly
+- A reference to the parent session transcript (`.ogent/sessions/<id>/messages.jsonl`)
+
+The parent session is preserved on disk unchanged. The new child session starts fresh with the handoff brief as its first user message. Task tracker state is carried forward in memory.
+
 ### Runtime task tracking
 
 `ogent` now supports runtime-owned task tracking with a strict hierarchy:
