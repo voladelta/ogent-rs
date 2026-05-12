@@ -33,12 +33,10 @@ struct Args {
   worker: bool,
   #[arg(long, default_value_t = -1)]
   autocompact: i32,
-  #[arg(long, default_value_t = false)]
-  resume: bool,
+  #[arg(long)]
+  resume: Option<Option<String>>,
   #[arg(long, default_value_t = false)]
   temp: bool,
-  #[arg(long, value_name = "SESSION")]
-  resume_session: Option<String>,
   prompt: Vec<String>,
 }
 
@@ -69,13 +67,13 @@ async fn main() -> Result<()> {
     parent_session: None,
     profile: args.profile.clone(),
     mode: mode.to_string(),
-    flags: session::SessionFlags {
-      steer: args.steer,
-      worker: args.worker,
-      autocompact: args.autocompact,
-      resume: args.resume,
-      temp: args.temp,
-    },
+      flags: session::SessionFlags {
+        steer: args.steer,
+        worker: args.worker,
+        autocompact: args.autocompact,
+        resume: args.resume.is_some(),
+        temp: args.temp,
+      },
     usage: session::SessionUsage { total_tokens: 0 },
     prompt: None,
     start_ts: None,
@@ -83,7 +81,7 @@ async fn main() -> Result<()> {
   };
   let mut old_session_id: Option<String> = None;
 
-  let is_resume = args.resume;
+  let is_resume = args.resume.is_some();
   let prompt = args.prompt.join(" ");
   let wait_for_steer_input =
     args.steer && !args.worker && !is_resume && prompt.is_empty();
@@ -100,10 +98,10 @@ async fn main() -> Result<()> {
       None,
     )
   } else if is_resume {
-    let path = if let Some(name) = args.resume_session {
-      format!(".ogent/sessions/{name}.jsonl")
-    } else {
-      session::find_latest_session(".ogent/sessions").context("no session found")?
+    let path = match args.resume {
+      Some(Some(name)) => format!(".ogent/sessions/{name}.jsonl"),
+      Some(None) => session::find_latest_session(".ogent/sessions").context("no session found")?,
+      None => unreachable!(),
     };
     old_session_id = Some(
       path
