@@ -193,7 +193,11 @@ impl UiStatus {
   }
 
   pub fn set_compact_threshold(&self, threshold: i32) {
-    self.inner.lock().expect("ui status poisoned").compact_threshold = threshold;
+    self
+      .inner
+      .lock()
+      .expect("ui status poisoned")
+      .compact_threshold = threshold;
   }
 
   pub fn set_context_limit(&self, limit: usize) {
@@ -294,7 +298,8 @@ fn run_ui(
   .and_then(|()| terminal.show_cursor())
   .and_then(|()| disable_raw_mode());
 
-  result.or(restore.map_err(Into::into))
+  let _ = restore;
+  result
 }
 
 fn run_ui_loop(
@@ -528,9 +533,9 @@ pub fn parse_steer_event(line: &str) -> SteerEvent {
     "/cancel" => SteerEvent::Cancel,
     "/complete" => SteerEvent::Complete,
     "/compact" => SteerEvent::Compact(None),
-    s if s.starts_with("/compact ") => {
-      SteerEvent::Compact(Some(s.strip_prefix("/compact ").unwrap().trim().to_string()))
-    }
+    s if s.starts_with("/compact ") => SteerEvent::Compact(Some(
+      s.strip_prefix("/compact ").unwrap().trim().to_string(),
+    )),
     "/new" => SteerEvent::New,
     "/q" | "/quit" | "quit" | "exit" => SteerEvent::Exit,
     s if s.starts_with("/profile ") => {
@@ -666,16 +671,10 @@ fn draw(
 
     let mut bar = format!(
       "{} | {} | tokens {}",
-      status_snapshot.profile,
-      status_snapshot.model,
-      status_snapshot.tokens,
+      status_snapshot.profile, status_snapshot.model, status_snapshot.tokens,
     );
     if status_snapshot.compact_threshold >= 0 && status_snapshot.context_limit > 0 {
-      let pct = if status_snapshot.context_limit > 0 {
-        status_snapshot.tokens as usize * 100 / status_snapshot.context_limit
-      } else {
-        0
-      };
+      let pct = status_snapshot.tokens as usize * 100 / status_snapshot.context_limit;
       bar.push_str(&format!(
         " | compact@{}% [{}% used]",
         status_snapshot.compact_threshold, pct
@@ -946,7 +945,10 @@ mod tests {
     assert_eq!(parse_steer_event("/cancel"), SteerEvent::Cancel);
     assert_eq!(parse_steer_event("/complete"), SteerEvent::Complete);
     assert_eq!(parse_steer_event("/compact"), SteerEvent::Compact(None));
-    assert_eq!(parse_steer_event("/compact fix auth"), SteerEvent::Compact(Some("fix auth".into())));
+    assert_eq!(
+      parse_steer_event("/compact fix auth"),
+      SteerEvent::Compact(Some("fix auth".into()))
+    );
     assert_eq!(parse_steer_event("/new"), SteerEvent::New);
     assert_eq!(parse_steer_event("/q"), SteerEvent::Exit);
     assert_eq!(parse_steer_event("/quit"), SteerEvent::Exit);

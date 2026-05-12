@@ -47,10 +47,7 @@ async fn main() -> Result<()> {
     .with_context(|| format!("unknown profile: {}", args.profile))?;
   let client = providers::new_client(profile)?;
   let compact = if args.autocompact >= 0 {
-    CompactState::new(
-      f64::from(args.autocompact) / 100.0,
-      profile.context_limit,
-    )
+    CompactState::new(f64::from(args.autocompact) / 100.0, profile.context_limit)
   } else {
     CompactState::disabled()
   };
@@ -67,13 +64,13 @@ async fn main() -> Result<()> {
     parent_session: None,
     profile: args.profile.clone(),
     mode: mode.to_string(),
-      flags: session::SessionFlags {
-        steer: args.steer,
-        worker: args.worker,
-        autocompact: args.autocompact,
-        resume: args.resume.is_some(),
-        temp: args.temp,
-      },
+    flags: session::SessionFlags {
+      steer: args.steer,
+      worker: args.worker,
+      autocompact: args.autocompact,
+      resume: args.resume.is_some(),
+      temp: args.temp,
+    },
     usage: session::SessionUsage { total_tokens: 0 },
     prompt: None,
     start_ts: None,
@@ -83,10 +80,14 @@ async fn main() -> Result<()> {
 
   let is_resume = args.resume.is_some();
   let prompt = args.prompt.join(" ");
-  let wait_for_steer_input =
-    args.steer && !args.worker && !is_resume && prompt.is_empty();
+  let wait_for_steer_input = args.steer && !args.worker && !is_resume && prompt.is_empty();
 
-  let (mut messages, tools, mut task_tracker, workflow_state) = if args.worker {
+  let (messages, tools, task_tracker, workflow_state): (
+    Vec<Message>,
+    Vec<crate::types::Tool>,
+    Option<crate::task_tracker::TaskTracker>,
+    Option<_>,
+  ) = if args.worker {
     let system_prompt = read_stdin().await?.trim().to_string();
     if system_prompt.is_empty() {
       bail!("--worker requires system prompt on stdin");
@@ -94,7 +95,7 @@ async fn main() -> Result<()> {
     (
       build_worker_messages(&system_prompt, &prompt, &session_id),
       tools::configured_worker_tools(),
-      None as Option<crate::task_tracker::TaskTracker>,
+      None,
       None,
     )
   } else if is_resume {
@@ -119,24 +120,14 @@ async fn main() -> Result<()> {
         ..Default::default()
       });
     }
-    (
-      loaded,
-      tools::configured_coder_tools(args.steer),
-      None,
-      None,
-    )
+    (loaded, tools::configured_coder_tools(), None, None)
   } else {
     if prompt.is_empty() && !args.steer {
       bail!("usage: ogent [--profile ...] [--steer] <prompt>");
     }
     let mut messages = prompts::build_messages(&prompt);
-    let workflow_state = prompts::enrich_initial_messages(&mut messages);
-    (
-      messages,
-      tools::configured_coder_tools(args.steer),
-      None,
-      workflow_state,
-    )
+    prompts::enrich_initial_messages(&mut messages);
+    (messages, tools::configured_coder_tools(), None, None)
   };
   if !prompt.is_empty() {
     meta.prompt = Some(prompt.clone());
@@ -151,16 +142,6 @@ async fn main() -> Result<()> {
       );
     }
   }
-  if let Some(tracker) = task_tracker.as_mut()
-    && let Some(reminder) = tracker.take_reminder()
-  {
-    messages.push(Message {
-      role: "user".into(),
-      content: reminder,
-      ..Default::default()
-    });
-  }
-
   let mut agent = Agent::new(
     client,
     messages,
@@ -173,40 +154,27 @@ async fn main() -> Result<()> {
   if args.worker || is_resume || !prompt.is_empty() {
     agent.dirty = true;
   }
-    let loop_result = if args.steer {
+  let loop_result = if args.steer {
     let tui = tui::start(args.profile.clone(), profile.model.to_string())?;
     if args.autocompact >= 0 {
       tui.status.set_compact_threshold(args.autocompact);
       tui.status.set_context_limit(profile.context_limit);
     }
-    agent
-      .steer_loop(tui, wait_for_steer_input)
-      .await
+    agent.steer_loop(tui, wait_for_steer_input).await
   } else {
     agent.run_loop().await
   };
 
-  let final_messages = match loop_result {
-    Ok(msgs) => msgs,
-    Err(e) => {
-      if agent.dirty && !agent.meta.flags.temp {
-        agent.meta.usage.total_tokens = agent.total_tokens;
-        session::write_meta(&agent.meta)?;
-        session::persist_session(&agent.messages, &agent.meta.session_id)?;
-      }
-      return Err(e.into());
-    }
-  };
-  if agent.dirty && !agent.meta.flags.temp {
-    agent.meta.usage.total_tokens = agent.total_tokens;
-    session::write_meta(&agent.meta)?;
-    session::persist_session(&final_messages, &agent.meta.session_id)?;
-    if let Some(summary) = agent.completion_summary.as_deref() {
-      if args.worker {
-        print!("{summary}");
-      } else {
-        session::append_journal(&agent.meta.session_id, summary)?;
-      }
+  if let Err(e) = loop_result {
+    agent.persist_if_dirty()?;
+    return Err(e.into());
+  }
+  agent.persist_if_dirty()?;
+  if let Some(summary) = agent.completion_summary.as_deref() {
+    if args.worker {
+      print!("{summary}");
+    } else {
+      session::append_journal(&agent.meta.session_id, summary)?;
     }
   }
   Ok(())

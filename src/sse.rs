@@ -89,10 +89,10 @@ fn flush_tool_calls(acc: &mut Vec<AccToolCall>, result: &mut ChatResponse) {
 }
 
 async fn send_event(tx: &mut Option<tokio::sync::mpsc::Sender<StreamEvent>>, ev: StreamEvent) {
-  if let Some(t) = tx {
-    if t.send(ev).await.is_err() {
-      *tx = None;
-    }
+  if let Some(t) = tx
+    && t.send(ev).await.is_err()
+  {
+    *tx = None;
   }
 }
 

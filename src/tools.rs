@@ -31,32 +31,68 @@ pub async fn execute_tool(mut ctx: ToolContext<'_>, name: &str, args: &str) -> R
     "code_web_context" => code_web_context(args).await,
 
     "set_goal" => {
-      let agent = ctx.agent.as_deref_mut().context("set_goal requires an active agent")?;
+      let agent = ctx
+        .agent
+        .as_deref_mut()
+        .context("set_goal requires an active agent")?;
       set_goal(agent, args)
     }
     "revise_goal" => {
-      let agent = ctx.agent.as_deref_mut().context("revise_goal requires an active agent")?;
+      let agent = ctx
+        .agent
+        .as_deref_mut()
+        .context("revise_goal requires an active agent")?;
       revise_goal(agent, args)
     }
     "update_phase" => {
-      let agent = ctx.agent.as_deref_mut().context("update_phase requires an active agent")?;
+      let agent = ctx
+        .agent
+        .as_deref_mut()
+        .context("update_phase requires an active agent")?;
       update_phase(agent, args)
     }
     "update_todo" => {
-      let agent = ctx.agent.as_deref_mut().context("update_todo requires an active agent")?;
+      let agent = ctx
+        .agent
+        .as_deref_mut()
+        .context("update_todo requires an active agent")?;
       update_todo(agent, args)
     }
     "load_skill" => load_skill(ctx.agent.as_deref_mut(), args),
     "load_worker_template" => load_worker_template(args),
     "dispatch_worker" => dispatch_worker(args).await,
-    "start_workers" => start_workers(ctx.agent.as_deref_mut(), args).await,
-    "check_workers" => check_workers(ctx.agent.as_deref_mut(), args).await,
+    "start_workers" => {
+      start_workers(
+        ctx
+          .agent
+          .as_deref_mut()
+          .context("start_workers requires an active agent")?,
+        args,
+      )
+      .await
+    }
+    "check_workers" => {
+      check_workers(
+        ctx
+          .agent
+          .as_deref_mut()
+          .context("check_workers requires an active agent")?,
+        args,
+      )
+      .await
+    }
     "worker_complete" => {
-      let agent = ctx.agent.as_deref_mut().context("worker_complete requires an active agent")?;
+      let agent = ctx
+        .agent
+        .as_deref_mut()
+        .context("worker_complete requires an active agent")?;
       worker_complete(agent, args)
     }
     "complete" => {
-      let agent = ctx.agent.as_deref_mut().context("complete requires an active agent")?;
+      let agent = ctx
+        .agent
+        .as_deref_mut()
+        .context("complete requires an active agent")?;
       complete(agent, args)
     }
     _ => bail!("unknown tool: {name}"),
@@ -66,7 +102,7 @@ pub async fn execute_tool(mut ctx: ToolContext<'_>, name: &str, args: &str) -> R
 static CODER_TOOLS: OnceLock<Vec<Tool>> = OnceLock::new();
 static WORKER_TOOLS: OnceLock<Vec<Tool>> = OnceLock::new();
 
-pub fn configured_coder_tools(_steer: bool) -> Vec<Tool> {
+pub fn configured_coder_tools() -> Vec<Tool> {
   CODER_TOOLS.get_or_init(build_coder_tools).clone()
 }
 
@@ -148,7 +184,6 @@ fn build_coder_tools() -> Vec<Tool> {
       "Wait for all active async coworkers and return their reports.",
       json!({"type":"object","properties":{},"additionalProperties":false}),
     ),
-
     schema(
       "set_goal",
       "Initialize the single top-level Goal for this session. Call once at the start of complex tasks to enable progress tracking.",
@@ -231,7 +266,6 @@ fn schema(name: &str, description: &str, parameters: Value) -> Tool {
     },
   }
 }
-
 
 fn exa_client() -> &'static reqwest::Client {
   static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
@@ -601,8 +635,6 @@ async fn exa_post(url: &str, body: Value) -> Result<Value> {
   Ok(v)
 }
 
-
-
 #[derive(Deserialize)]
 struct SetGoalArgs {
   goal: String,
@@ -687,20 +719,17 @@ fn update_phase(agent: &mut crate::agent::Agent, args: &str) -> Result<String> {
   let Some(tracker) = agent.task_tracker.as_mut() else {
     bail!("set_goal must be called before update_phase");
   };
-      if let Some(ref mut ws) = agent.workflow_state {
-      if args.status == Status::InProgress {
-        ws.transition_to(&args.phase_id)?;
-      } else if args.status == Status::Completed
-        && ws.current_phase.as_deref() != Some(&args.phase_id)
-      {
-        if let Err(e) = ws.transition_to(&args.phase_id) {
-          match e {
-            crate::workflow::WorkflowError::MaxVisitsExceeded { .. } => bail!("{e}"),
-            _ => {}
-          }
-        }
-      }
+  if let Some(ref mut ws) = agent.workflow_state {
+    if args.status == Status::InProgress {
+      ws.transition_to(&args.phase_id)?;
+    } else if args.status == Status::Completed
+      && ws.current_phase.as_deref() != Some(&args.phase_id)
+      && let Err(e @ crate::workflow::WorkflowError::MaxVisitsExceeded { .. }) =
+        ws.transition_to(&args.phase_id)
+    {
+      bail!("{e}");
     }
+  }
   tracker.update_phase(PhaseUpdate {
     id: args.phase_id.trim().to_string(),
     title: args.title.trim().to_string(),
@@ -800,19 +829,13 @@ async fn dispatch_worker(args: &str) -> Result<String> {
   crate::workers::format_dispatch_worker_result(result)
 }
 
-async fn start_workers(agent: Option<&mut crate::agent::Agent>, args: &str) -> Result<String> {
+async fn start_workers(agent: &mut crate::agent::Agent, args: &str) -> Result<String> {
   let args: crate::workers::StartWorkersArgs = parse_args(args)?;
-  match agent {
-    Some(agent) => agent.worker_manager.start(args).await,
-    None => crate::workers::WorkerManager::new().start(args).await,
-  }
+  agent.worker_manager.start(args).await
 }
 
-async fn check_workers(agent: Option<&mut crate::agent::Agent>, _args: &str) -> Result<String> {
-  Ok(match agent {
-    Some(agent) => agent.worker_manager.check().await,
-    None => crate::workers::WorkerManager::new().check().await,
-  })
+async fn check_workers(agent: &mut crate::agent::Agent, _args: &str) -> Result<String> {
+  Ok(agent.worker_manager.check().await)
 }
 
 #[derive(Deserialize)]
@@ -910,7 +933,7 @@ mod tests {
 
   #[test]
   fn configured_coder_tools_includes_expected() {
-    let tools = configured_coder_tools(false);
+    let tools = configured_coder_tools();
     let names: Vec<_> = tools.iter().map(|t| t.function.name.as_str()).collect();
     assert!(names.contains(&"read_file"));
     assert!(names.contains(&"write_file"));
@@ -936,7 +959,7 @@ mod tests {
 
   #[test]
   fn tool_names_unique_within_coder_tools() {
-    let tools = configured_coder_tools(false);
+    let tools = configured_coder_tools();
     let mut seen = std::collections::HashSet::new();
     for t in &tools {
       assert!(
@@ -969,7 +992,7 @@ mod tests {
 
   #[test]
   fn read_file_schema_has_path_required() {
-    let tools = configured_coder_tools(false);
+    let tools = configured_coder_tools();
     let t = tools
       .iter()
       .find(|t| t.function.name == "read_file")
@@ -983,7 +1006,7 @@ mod tests {
 
   #[test]
   fn edit_hash_anchors_schema_has_ops_array() {
-    let tools = configured_coder_tools(false);
+    let tools = configured_coder_tools();
     let t = tools
       .iter()
       .find(|t| t.function.name == "edit_hash_anchors")
@@ -998,7 +1021,7 @@ mod tests {
 
   #[test]
   fn update_phase_schema_includes_contracts() {
-    let tools = configured_coder_tools(false);
+    let tools = configured_coder_tools();
     let t = tools
       .iter()
       .find(|t| t.function.name == "update_phase")
@@ -1016,7 +1039,7 @@ mod tests {
 
   #[test]
   fn bash_schema_has_command_and_timeout() {
-    let tools = configured_coder_tools(false);
+    let tools = configured_coder_tools();
     let t = tools.iter().find(|t| t.function.name == "bash").unwrap();
     let params = &t.function.parameters;
     assert!(params["properties"]["command"].is_object());
@@ -1027,7 +1050,7 @@ mod tests {
 
   #[test]
   fn dispatch_worker_schema_has_system_prompt_and_task() {
-    let tools = configured_coder_tools(false);
+    let tools = configured_coder_tools();
     let t = tools
       .iter()
       .find(|t| t.function.name == "dispatch_worker")
@@ -1042,7 +1065,7 @@ mod tests {
 
   #[test]
   fn complete_schema_has_summary_required() {
-    let tools = configured_coder_tools(false);
+    let tools = configured_coder_tools();
     let t = tools
       .iter()
       .find(|t| t.function.name == "complete")

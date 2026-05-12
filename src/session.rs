@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionMeta {
@@ -169,21 +170,18 @@ fn load_jsonl_file(path: &PathBuf) -> Result<Vec<Message>> {
     .collect()
 }
 
-pub fn timestamp() -> String {
-  use std::time::{SystemTime, UNIX_EPOCH};
+fn elapsed_since_epoch() -> std::time::Duration {
   SystemTime::now()
     .duration_since(UNIX_EPOCH)
     .unwrap_or_default()
-    .as_secs()
-    .to_string()
+}
+
+pub fn timestamp() -> String {
+  elapsed_since_epoch().as_secs().to_string()
 }
 
 pub fn timestamp_ms() -> u64 {
-  use std::time::{SystemTime, UNIX_EPOCH};
-  SystemTime::now()
-    .duration_since(UNIX_EPOCH)
-    .unwrap_or_default()
-    .as_millis() as u64
+  elapsed_since_epoch().as_millis() as u64
 }
 
 #[cfg(test)]

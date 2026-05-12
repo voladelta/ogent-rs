@@ -72,9 +72,10 @@ impl SteerState {
             }
             SteerAction::Restart => {
               ctx.turn = 1;
-              tui
-                .log
-                .push("[steer] commands: /complete /cancel /new /compact [/compact <focus>] /q".to_string());
+              tui.log.push(
+                "[steer] commands: /complete /cancel /new /compact [/compact <focus>] /q"
+                  .to_string(),
+              );
               return Ok(Self::Idle {
                 wait_for_input: true,
               });
@@ -93,14 +94,15 @@ impl SteerState {
             let Some(event) = tui.rx.recv().await else {
               continue;
             };
-          match agent.apply_steer_event(event, tui)? {
+            match agent.apply_steer_event(event, tui)? {
               SteerAction::Exit => {
                 return Ok(Self::Exit(agent.messages.clone()));
               }
               SteerAction::Restart => {
                 ctx.turn = 1;
                 tui.log.push(
-                  "[steer] commands: /complete /cancel /new /compact [/compact <focus>] /q".to_string(),
+                  "[steer] commands: /complete /cancel /new /compact [/compact <focus>] /q"
+                    .to_string(),
                 );
                 return Ok(Self::Idle {
                   wait_for_input: true,
@@ -289,9 +291,7 @@ impl SteerState {
             .push("[steer] task complete; send a message to continue or /q to quit".to_string());
           agent.completion_summary = None;
 
-          if agent.compact.compacting
-            && agent.compact.threshold > 0.0
-          {
+          if agent.compact.compacting && agent.compact.threshold > 0.0 {
             let ratio = agent.total_tokens as f64 / agent.compact.context_limit as f64;
             if ratio >= agent.compact.threshold {
               let mut compact_msg = String::from(
@@ -310,7 +310,9 @@ impl SteerState {
                 ));
               }
               agent.push_msg(user_msg(compact_msg));
-              tui.log.push("[compact] autocompact triggered, requesting handoff brief...");
+              tui
+                .log
+                .push("[compact] autocompact triggered, requesting handoff brief...");
               agent.pending_compact = Some(None);
               ctx.turn += 1;
               return Ok(Self::StartTurn);
@@ -322,26 +324,25 @@ impl SteerState {
           });
         }
 
-        let should_exit = agent
-          .finish_turn(
-            &mut has_more,
-            Some(&tui.log),
-          )
-          .await?;
+        let should_exit = agent.finish_turn(&mut has_more, Some(&tui.log)).await?;
 
         if should_exit {
           return Ok(Self::Exit(agent.messages.clone()));
         }
 
         if let Some(task_prompt) = agent.pending_compact.take() {
-          let handoff = agent.messages.iter()
+          let handoff = agent
+            .messages
+            .iter()
             .rev()
             .find(|m| m.role == "assistant")
             .map(|m| m.content.clone())
             .unwrap_or_default();
 
           if handoff.is_empty() {
-            tui.log.push("[compact] model returned empty response, not compacting");
+            tui
+              .log
+              .push("[compact] model returned empty response, not compacting");
           } else {
             let parent_id = agent.meta.session_id.clone();
 
@@ -399,7 +400,9 @@ impl SteerState {
           }
 
           ctx.turn += 1;
-          return Ok(Self::Idle { wait_for_input: true });
+          return Ok(Self::Idle {
+            wait_for_input: true,
+          });
         }
 
         if !has_more {
@@ -501,6 +504,15 @@ impl Agent {
     self.messages.push(msg);
   }
 
+  pub fn persist_if_dirty(&mut self) -> anyhow::Result<()> {
+    if self.dirty && !self.meta.flags.temp {
+      self.meta.usage.total_tokens = self.total_tokens;
+      session::write_meta(&self.meta)?;
+      session::persist_session(&self.messages, &self.meta.session_id)?;
+    }
+    Ok(())
+  }
+
   fn refresh_workflow_reminder(&mut self) {
     const WORKFLOW_MARKER: &str = "\n\n[Workflow]";
     if let Some(ref ws) = self.workflow_state {
@@ -519,9 +531,7 @@ impl Agent {
     }
   }
 
-  pub async fn run_loop(
-    &mut self,
-  ) -> Result<Vec<Message>, AgentError> {
+  pub async fn run_loop(&mut self) -> Result<Vec<Message>, AgentError> {
     let mut turn = 1;
     loop {
       eprintln!("\n--- turn {turn} | tokens: {} ---", self.total_tokens);
@@ -532,10 +542,7 @@ impl Agent {
         .await?;
 
       let mut has_more = self.handle_turn_response(resp).await?;
-      if self
-        .finish_turn(&mut has_more, None)
-        .await?
-      {
+      if self.finish_turn(&mut has_more, None).await? {
         return Ok(self.messages.clone());
       }
       if !has_more {
@@ -554,9 +561,7 @@ impl Agent {
       .log
       .push("[steer] commands: /complete /cancel /new /compact [/compact <focus>] /q");
     let mut state = SteerState::Idle { wait_for_input };
-    let mut ctx = SteerCtx {
-      turn: 1,
-    };
+    let mut ctx = SteerCtx { turn: 1 };
 
     loop {
       state = match state.step(self, &mut tui, &mut ctx).await? {
@@ -635,10 +640,10 @@ impl Agent {
         self.meta.start_ts = None;
         self.meta.end_ts = None;
         let mut messages = crate::prompts::build_messages("");
-        let workflow_state = crate::prompts::enrich_initial_messages(&mut messages);
+        crate::prompts::enrich_initial_messages(&mut messages);
         self.messages = messages;
         self.dirty = false;
-        self.workflow_state = workflow_state;
+        self.workflow_state = None;
         self.total_tokens = 0;
         self.worker_manager = WorkerManager::new();
         self.completion_summary = None;
@@ -680,20 +685,20 @@ impl Agent {
           self.pending_compact = Some(task_prompt);
         }
       }
-      SteerEvent::Profile(name) => {
-        match crate::profiles::get_profile(&name) {
-          Some(p) => {
-            self.client = crate::providers::new_client(p)?;
-            self.meta.profile = name.clone();
-            self.compact.context_limit = p.context_limit;
-            tui.status.set_profile(name, p.model.to_string());
-            tui.log.push(format!("[steer] profile → {}", self.meta.profile));
-          }
-          None => {
-            tui.log.push(format!("[steer] unknown profile: {name}"));
-          }
+      SteerEvent::Profile(name) => match crate::profiles::get_profile(&name) {
+        Some(p) => {
+          self.client = crate::providers::new_client(p)?;
+          self.meta.profile = name.clone();
+          self.compact.context_limit = p.context_limit;
+          tui.status.set_profile(name, p.model.to_string());
+          tui
+            .log
+            .push(format!("[steer] profile → {}", self.meta.profile));
         }
-      }
+        None => {
+          tui.log.push(format!("[steer] unknown profile: {name}"));
+        }
+      },
       SteerEvent::Exit => return Ok(SteerAction::Exit),
     }
     Ok(SteerAction::Continue)
@@ -851,9 +856,7 @@ impl Agent {
         "Context budget at {pct}%.\nEXHAUSTED.\nDo not write more files, delegate, or start new work.\nCall `complete` IMMEDIATELY with a summary of completed files, current state, verification state, blockers, and next steps."
       ),
     };
-    self.push_msg(user_msg(format!(
-      "Reminder: [context_budget] {body}"
-    )));
+    self.push_msg(user_msg(format!("Reminder: [context_budget] {body}")));
   }
 
   fn report_tokens(&self) {
@@ -886,7 +889,6 @@ impl Agent {
       self.push_msg(user_msg(reminder));
     }
   }
-
 }
 
 fn user_msg(content: impl Into<String>) -> Message {
@@ -1103,9 +1105,7 @@ mod dirty_state_machine_tests {
   async fn cancel_does_not_change_dirty() {
     let mut agent = dummy_agent();
     let tui = crate::tui::TuiHandle::test_handle();
-    let action = agent
-      .apply_steer_event(SteerEvent::Cancel, &tui)
-      .unwrap();
+    let action = agent.apply_steer_event(SteerEvent::Cancel, &tui).unwrap();
     assert!(matches!(action, SteerAction::Continue));
     assert!(!agent.dirty);
   }
@@ -1114,9 +1114,7 @@ mod dirty_state_machine_tests {
   async fn complete_on_empty_session_stays_clean() {
     let mut agent = dummy_agent();
     let tui = crate::tui::TuiHandle::test_handle();
-    let action = agent
-      .apply_steer_event(SteerEvent::Complete, &tui)
-      .unwrap();
+    let action = agent.apply_steer_event(SteerEvent::Complete, &tui).unwrap();
     assert!(matches!(action, SteerAction::Continue));
     assert!(!agent.dirty);
     assert_eq!(agent.messages.len(), 2); // no extra message pushed
@@ -1128,9 +1126,7 @@ mod dirty_state_machine_tests {
     let tui = crate::tui::TuiHandle::test_handle();
     agent.push_msg(assistant_msg_with_reasoning("ok", ""));
     assert!(agent.dirty);
-    let action = agent
-      .apply_steer_event(SteerEvent::Complete, &tui)
-      .unwrap();
+    let action = agent.apply_steer_event(SteerEvent::Complete, &tui).unwrap();
     assert!(matches!(action, SteerAction::Continue));
     assert!(agent.dirty);
     assert_eq!(agent.messages.len(), 4); // system + user + assistant + complete reminder
@@ -1140,9 +1136,7 @@ mod dirty_state_machine_tests {
   async fn exit_returns_exit_action() {
     let mut agent = dummy_agent();
     let tui = crate::tui::TuiHandle::test_handle();
-    let action = agent
-      .apply_steer_event(SteerEvent::Exit, &tui)
-      .unwrap();
+    let action = agent.apply_steer_event(SteerEvent::Exit, &tui).unwrap();
     assert!(matches!(action, SteerAction::Exit));
   }
 
@@ -1151,9 +1145,7 @@ mod dirty_state_machine_tests {
     let mut agent = dummy_agent();
     let tui = crate::tui::TuiHandle::test_handle();
     let old_id = agent.meta.session_id.clone();
-    let action = agent
-      .apply_steer_event(SteerEvent::New, &tui)
-      .unwrap();
+    let action = agent.apply_steer_event(SteerEvent::New, &tui).unwrap();
     assert!(matches!(action, SteerAction::Restart));
     assert!(!agent.dirty);
     assert_eq!(agent.meta.prompt, None);
@@ -1170,9 +1162,7 @@ mod dirty_state_machine_tests {
     agent.push_msg(user_msg("hello"));
     let old_id = agent.meta.session_id.clone();
 
-    let action = agent
-      .apply_steer_event(SteerEvent::New, &tui)
-      .unwrap();
+    let action = agent.apply_steer_event(SteerEvent::New, &tui).unwrap();
     assert!(matches!(action, SteerAction::Restart));
 
     // old session should have been persisted
@@ -1263,7 +1253,10 @@ mod dirty_state_machine_tests {
       .unwrap();
     assert!(matches!(action, SteerAction::Continue));
     assert!(agent.pending_compact.is_some());
-    assert_eq!(agent.pending_compact.as_ref().unwrap().as_deref(), Some("fix auth"));
+    assert_eq!(
+      agent.pending_compact.as_ref().unwrap().as_deref(),
+      Some("fix auth")
+    );
     let last = agent.messages.last().unwrap();
     assert!(last.content.contains("fix auth"));
   }

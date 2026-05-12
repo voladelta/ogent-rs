@@ -5,9 +5,9 @@ use tokio::time::{Duration, sleep};
 use crate::sse::parse_sse_response;
 use crate::types::{ChatResponse, Message, Tool};
 
-pub const MAX_RETRIES: usize = 5;
+const MAX_RETRIES: usize = 5;
 
-pub type BuildReq = Arc<dyn Fn(&[Message], &[Tool]) -> Value + Send + Sync>;
+type BuildReq = Arc<dyn Fn(&[Message], &[Tool]) -> Value + Send + Sync>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ClientError {

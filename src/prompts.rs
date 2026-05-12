@@ -165,7 +165,7 @@ pub fn build_messages(prompt: &str) -> Vec<Message> {
   ]
 }
 
-pub fn enrich_initial_messages(messages: &mut [Message]) -> Option<crate::workflow::WorkflowState> {
+pub fn enrich_initial_messages(messages: &mut [Message]) {
   append_to_last_user_message(messages, &discover_skills_message());
   if let Ok((name, root, body, _)) = load_skill_content("colgrep") {
     append_to_last_user_message(
@@ -173,8 +173,6 @@ pub fn enrich_initial_messages(messages: &mut [Message]) -> Option<crate::workfl
       &format!("<skill name=\"{name}\" root=\"{root}\">\n{body}\n</skill>"),
     );
   }
-
-  None
 }
 
 fn append_to_last_user_message(messages: &mut [Message], content: &str) {

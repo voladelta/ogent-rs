@@ -134,21 +134,11 @@ pub fn new_client(profile: &Profile) -> Result<Client> {
   }
 }
 
-fn make_client<F>(
-  url: &str,
-  key_env: &str,
-  build: F,
-  timeout_secs: u64,
-) -> Result<Client>
+fn make_client<F>(url: &str, key_env: &str, build: F, timeout_secs: u64) -> Result<Client>
 where
   F: Fn(&[Message], &[Tool]) -> serde_json::Value + Send + Sync + 'static,
 {
-  Ok(Client::new(
-    url,
-    env_key(key_env)?,
-    build,
-    timeout_secs,
-  )?)
+  Ok(Client::new(url, env_key(key_env)?, build, timeout_secs)?)
 }
 
 fn env_key(name: &str) -> Result<String> {
