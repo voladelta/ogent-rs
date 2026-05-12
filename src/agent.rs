@@ -41,32 +41,25 @@ enum SteerState {
   Exit(Vec<Message>),
 }
 
-struct SteerCtx {
-  turn: i32,
-}
+struct SteerCtx;
 
 impl SteerState {
   async fn step(
     self,
     agent: &mut Agent,
     tui: &mut TuiHandle,
-    ctx: &mut SteerCtx,
+    _ctx: &mut SteerCtx,
   ) -> Result<Self, AgentError> {
     match self {
       Self::Exit(msgs) => Ok(Self::Exit(msgs)),
 
       Self::Idle { wait_for_input } => {
         tui.status.set_state(AgentState::Idle);
-        if agent.next_turn_reset {
-          ctx.turn = 1;
-          agent.next_turn_reset = false;
-        }
-
         let wait_baseline_len = agent.messages.len();
         let mut wait = wait_for_input;
 
         while let Ok(event) = tui.rx.try_recv() {
-          if let Some(next) = Self::process_idle_event(agent, tui, ctx, event)? {
+          if let Some(next) = Self::process_idle_event(agent, tui, _ctx, event)? {
             return Ok(next);
           }
           if agent.messages.len() > wait_baseline_len
@@ -81,7 +74,7 @@ impl SteerState {
             let Some(event) = tui.rx.recv().await else {
               continue;
             };
-            if let Some(next) = Self::process_idle_event(agent, tui, ctx, event)? {
+            if let Some(next) = Self::process_idle_event(agent, tui, _ctx, event)? {
               return Ok(next);
             }
             if agent.messages.len() > wait_baseline_len
@@ -173,7 +166,6 @@ impl SteerState {
                   cancel.cancel();
                   agent.apply_steer_event(SteerEvent::New, tui)?;
                   chat.abort();
-                  ctx.turn = 1;
                   tui.log.push(STEER_COMMANDS.to_string());
                   return Ok(Self::Idle { wait_for_input: true });
                 }
@@ -192,8 +184,7 @@ impl SteerState {
                     SteerAction::Restart => {
                       cancel.cancel();
                       chat.abort();
-                      ctx.turn = 1;
-                  tui.log.push(STEER_COMMANDS.to_string());
+                      tui.log.push(STEER_COMMANDS.to_string());
                       return Ok(Self::Idle { wait_for_input: true });
                     }
                     SteerAction::Continue => {}
@@ -235,7 +226,6 @@ impl SteerState {
             if let Some(msg) = steer_msg {
               agent.push_msg(user_msg(msg.clone()));
               tui.log.push(format!("[steer] {}", truncate(&msg, 200)));
-              ctx.turn += 1;
               return Ok(Self::StartTurn);
             }
             return Ok(Self::Exit(agent.messages.clone()));
@@ -287,7 +277,6 @@ impl SteerState {
                 .log
                 .push("[compact] autocompact triggered, requesting handoff brief...");
               agent.pending_compact = Some(None);
-              ctx.turn += 1;
               return Ok(Self::StartTurn);
             }
           }
@@ -353,7 +342,7 @@ impl SteerState {
             agent.messages = new_messages;
             agent.total_tokens = 0;
             agent.dirty = true;
-            agent.next_turn_reset = true;
+
             agent.compact.compacting = false;
             agent.compact.urgency = 0;
             agent.completion_summary = None;
@@ -372,20 +361,17 @@ impl SteerState {
             tui.status.set_tokens(0);
           }
 
-          ctx.turn += 1;
           return Ok(Self::Idle {
             wait_for_input: true,
           });
         }
 
         if !has_more {
-          ctx.turn += 1;
           return Ok(Self::Idle {
             wait_for_input: true,
           });
         }
 
-        ctx.turn += 1;
         Ok(Self::StartTurn)
       }
     }
@@ -394,13 +380,12 @@ impl SteerState {
   fn process_idle_event(
     agent: &mut Agent,
     tui: &mut TuiHandle,
-    ctx: &mut SteerCtx,
+    _ctx: &mut SteerCtx,
     event: SteerEvent,
   ) -> Result<Option<Self>, AgentError> {
     match agent.apply_steer_event(event, tui)? {
       SteerAction::Exit => Ok(Some(Self::Exit(agent.messages.clone()))),
       SteerAction::Restart => {
-        ctx.turn = 1;
         tui.log.push(STEER_COMMANDS.to_string());
         Ok(Some(Self::Idle {
           wait_for_input: true,
@@ -452,7 +437,7 @@ pub struct Agent {
   pub complete_open_work_warned: bool,
   pub meta: session::SessionMeta,
   pub dirty: bool,
-  pub next_turn_reset: bool,
+
   pub pending_compact: Option<Option<String>>,
 }
 
@@ -486,7 +471,7 @@ impl Agent {
       complete_open_work_warned: false,
       meta,
       dirty: false,
-      next_turn_reset: false,
+
       pending_compact: None,
     }
   }
@@ -552,7 +537,7 @@ impl Agent {
   ) -> Result<Vec<Message>, AgentError> {
     tui.log.push(STEER_COMMANDS);
     let mut state = SteerState::Idle { wait_for_input };
-    let mut ctx = SteerCtx { turn: 1 };
+    let mut ctx = SteerCtx;
 
     loop {
       state = match state.step(self, &mut tui, &mut ctx).await? {
