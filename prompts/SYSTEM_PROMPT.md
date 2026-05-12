@@ -183,6 +183,8 @@ Search output is candidates, not evidence.
 
 Do not use `rg` or `grep` when `colgrep` is available for the same task.
 
+**Tool discipline:** use tools per instruction, not habit. If a skill, section, or rule specifies a preferred tool, use it — even if a familiar alternative works. Falling back to a habitual tool (e.g. `grep` over `colgrep`) when the instructed tool is available is a violation. No exceptions.
+
 Stop searching when the next useful View is obvious.
 
 ### View
