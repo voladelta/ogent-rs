@@ -119,12 +119,12 @@ fn build_coder_tools() -> Vec<Tool> {
     schema(
       "dispatch_worker",
       "Hire a specialist coworker with a behavior-shaping system_prompt and a concrete task assignment. The worker runs as a separate process and returns a Markdown summary.",
-      json!({"type":"object","properties":{"system_prompt":{"type":"string","description":"Complete behavior-shaping system prompt for the worker: role, permissions, read/write scope, constraints, commands, and summary format"},"task":{"type":"string","description":"Concrete task-shaping user prompt for the worker: exact assignment, expected output, success criteria, and immediate next step"},"max_turns":{"type":"integer","description":"Optional max turns for the worker (-1=unlimited). If omitted, worker has no turn limit."}},"required":["system_prompt","task"],"additionalProperties":false}),
+      json!({"type":"object","properties":{"system_prompt":{"type":"string","description":"Complete behavior-shaping system prompt for the worker: role, permissions, read/write scope, constraints, commands, and summary format"},"task":{"type":"string","description":"Concrete task-shaping user prompt for the worker: exact assignment, expected output, success criteria, and immediate next step"}},"required":["system_prompt","task"],"additionalProperties":false}),
     ),
     schema(
       "start_workers",
       "Start a batch of specialist coworkers asynchronously and return immediately with worker IDs.",
-      json!({"type":"object","properties":{"coworkers":{"type":"array","minItems":1,"items":{"type":"object","properties":{"name":{"type":"string","description":"Optional short unique label for status"},"system_prompt":{"type":"string","description":"Behavior-shaping system prompt: role, permissions, read/write scope, constraints, commands, and summary format"},"task_prompt":{"type":"string","description":"Concrete task prompt: assignment, expected output, success criteria, and immediate next step"},"max_turns":{"type":"integer","description":"Optional max turns for this worker. If omitted or <=0, worker has no turn limit."}},"required":["system_prompt","task_prompt"],"additionalProperties":false}}},"required":["coworkers"],"additionalProperties":false}),
+      json!({"type":"object","properties":{"coworkers":{"type":"array","minItems":1,"items":{"type":"object","properties":{"name":{"type":"string","description":"Optional short unique label for status"},"system_prompt":{"type":"string","description":"Behavior-shaping system prompt: role, permissions, read/write scope, constraints, commands, and summary format"},"task_prompt":{"type":"string","description":"Concrete task prompt: assignment, expected output, success criteria, and immediate next step"}},"required":["system_prompt","task_prompt"],"additionalProperties":false}}},"required":["coworkers"],"additionalProperties":false}),
     ),
     schema(
       "check_workers",
@@ -804,8 +804,6 @@ fn load_worker_template(args: &str) -> Result<String> {
 struct DispatchWorkerArgs {
   system_prompt: String,
   task: String,
-  #[serde(default)]
-  max_turns: i32,
 }
 
 async fn dispatch_worker(args: &str) -> Result<String> {
@@ -815,7 +813,6 @@ async fn dispatch_worker(args: &str) -> Result<String> {
   let result = crate::workers::run_worker_process(crate::workers::WorkerProcessArgs {
     system_prompt: args.system_prompt,
     task_prompt: args.task,
-    max_turns: args.max_turns,
     stream_stderr: true,
   })
   .await;

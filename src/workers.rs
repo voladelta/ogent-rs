@@ -11,7 +11,6 @@ use crate::prompts::WORKER_SUMMARY_PROMPT;
 pub struct WorkerProcessArgs {
   pub system_prompt: String,
   pub task_prompt: String,
-  pub max_turns: i32,
   pub stream_stderr: bool,
 }
 
@@ -28,8 +27,6 @@ pub struct AsyncCoworkerArgs {
   pub name: String,
   pub system_prompt: String,
   pub task_prompt: String,
-  #[serde(default)]
-  pub max_turns: i32,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -83,7 +80,6 @@ impl WorkerManager {
       let run_args = WorkerProcessArgs {
         system_prompt: coworker.system_prompt,
         task_prompt: coworker.task_prompt,
-        max_turns: coworker.max_turns,
         stream_stderr: false,
       };
       let done = tokio::spawn(async move { run_worker_process(run_args).await });
@@ -187,9 +183,6 @@ pub async fn run_worker_process(args: WorkerProcessArgs) -> WorkerProcessResult 
   let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("ogent"));
   let mut cmd = Command::new(exe);
   cmd.arg("--worker");
-  if args.max_turns > 0 {
-    cmd.arg(format!("--max-turns={}", args.max_turns));
-  }
   cmd.arg(&args.task_prompt);
   cmd.current_dir(crate::workspace::workspace_root());
   cmd.stdin(std::process::Stdio::piped());
@@ -316,13 +309,11 @@ mod tests {
           name: "a".into(),
           system_prompt: "s".into(),
           task_prompt: "t".into(),
-          max_turns: 0,
         },
         AsyncCoworkerArgs {
           name: "a".into(),
           system_prompt: "s".into(),
           task_prompt: "t".into(),
-          max_turns: 0,
         },
       ],
     };

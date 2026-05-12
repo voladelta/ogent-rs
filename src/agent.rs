@@ -45,7 +45,6 @@ enum SteerState {
 
 struct SteerCtx {
   turn: i32,
-  max_turns: i32,
 }
 
 impl SteerState {
@@ -123,18 +122,8 @@ impl SteerState {
       }
 
       Self::StartTurn => {
-        if ctx.max_turns > 0 && ctx.turn > ctx.max_turns {
-          tui.log.push(format!(
-            "[steer] reached max turns ({}); exiting cleanly. Resume with ogent --resume.",
-            ctx.max_turns
-          ));
-          return Ok(Self::Exit(agent.messages.clone()));
-        }
-
-        agent.meta.turn = ctx.turn;
-        tui.status.set_turn_tokens(ctx.turn, agent.total_tokens);
+        tui.status.set_tokens(agent.total_tokens);
         tui.log.push(format!("--- turn {} ---", ctx.turn));
-        agent.push_turn_budget_reminder(ctx.max_turns, ctx.turn);
         agent.refresh_workflow_reminder();
 
         let cancel = tokio_util::sync::CancellationToken::new();
@@ -291,7 +280,7 @@ impl SteerState {
           .await?;
         tui.log.end_stream();
         tui.status.set_state(AgentState::Idle);
-        tui.status.set_turn_tokens(ctx.turn, agent.total_tokens);
+        tui.status.set_tokens(agent.total_tokens);
         Ok(Self::FinishTurn { has_more })
       }
 
@@ -316,8 +305,6 @@ impl SteerState {
           .finish_turn(
             &mut has_more,
             Some(&tui.log),
-            ctx.max_turns,
-            ctx.turn,
           )
           .await?;
 
@@ -384,7 +371,6 @@ pub struct Agent {
   pub task_tracker: Option<TaskTracker>,
   pub workflow_state: Option<crate::workflow::WorkflowState>,
   pub complete_open_work_warned: bool,
-  last_turn_budget_reminder_turn: Option<i32>,
   pub meta: session::SessionMeta,
   pub dirty: bool,
   pub next_turn_reset: bool,
@@ -418,7 +404,6 @@ impl Agent {
       task_tracker,
       workflow_state,
       complete_open_work_warned: false,
-      last_turn_budget_reminder_turn: None,
       meta,
       dirty: false,
       next_turn_reset: false,
@@ -450,18 +435,10 @@ impl Agent {
 
   pub async fn run_loop(
     &mut self,
-    max_turns: i32,
   ) -> Result<Vec<Message>, AgentError> {
     let mut turn = 1;
     loop {
-      self.meta.turn = turn;
-      if max_turns > 0 && turn > max_turns {
-        self.report_tokens();
-        eprintln!("\nReached max turns ({max_turns}). Session saved. Resume with ogent --resume.");
-        return Ok(self.messages.clone());
-      }
       eprintln!("\n--- turn {turn} | tokens: {} ---", self.total_tokens);
-      self.push_turn_budget_reminder(max_turns, turn);
       self.refresh_workflow_reminder();
       let resp = self
         .client
@@ -474,7 +451,7 @@ impl Agent {
         Err(e) => return Err(e),
       };
       if self
-        .finish_turn(&mut has_more, None, max_turns, turn)
+        .finish_turn(&mut has_more, None)
         .await?
       {
         return Ok(self.messages.clone());
@@ -488,7 +465,6 @@ impl Agent {
 
   pub async fn steer_loop(
     &mut self,
-    max_turns: i32,
     mut tui: TuiHandle,
     wait_for_input: bool,
   ) -> Result<Vec<Message>, AgentError> {
@@ -498,7 +474,6 @@ impl Agent {
     let mut state = SteerState::Idle { wait_for_input };
     let mut ctx = SteerCtx {
       turn: 1,
-      max_turns,
     };
 
     loop {
@@ -513,8 +488,6 @@ impl Agent {
     &mut self,
     has_more: &mut bool,
     ui_log: Option<&crate::tui::UiLog>,
-    max_turns: i32,
-    turn: i32,
   ) -> Result<bool, AgentError> {
     if !self.compact.last_handoff_path.is_empty() {
       if self.handle_handoff().await? {
@@ -539,7 +512,6 @@ impl Agent {
     if *has_more {
       self.check_compact();
       self.push_task_tracking_reminder();
-      self.push_turn_budget_reminder(max_turns, turn + 1);
     }
     Ok(false)
   }
@@ -584,7 +556,6 @@ impl Agent {
         let old_id = self.meta.session_id.clone();
         self.meta.session_id = session::generate_session_id();
         self.meta.parent_session = Some(old_id);
-        self.meta.turn = 0;
         self.meta.usage = session::SessionUsage { total_tokens: 0 };
         self.meta.prompt = None;
         self.meta.start_ts = None;
@@ -598,12 +569,11 @@ impl Agent {
         self.worker_manager = WorkerManager::new();
         self.completion_summary = None;
         self.complete_open_work_warned = false;
-        self.last_turn_budget_reminder_turn = None;
         self.compact.last_handoff_path = String::new();
         self.compact.compacting = false;
         self.compact.urgency = 0;
         tui.log.clear();
-        tui.status.set_turn_tokens(0, 0);
+        tui.status.set_tokens(0);
         tui.log.push("[steer] new session started");
         return Ok(SteerAction::Restart);
       }
@@ -636,7 +606,7 @@ impl Agent {
       SteerEvent::Profile(name) => {
         match crate::profiles::get_profile(&name) {
           Some(p) => {
-            self.client = crate::providers::new_client(p, self.meta.flags.retry)?;
+            self.client = crate::providers::new_client(p)?;
             self.meta.profile = name.clone();
             self.compact.context_limit = p.context_limit;
             tui.status.set_profile(name, p.model.to_string());
@@ -856,7 +826,6 @@ impl Agent {
     let parent_id = self.meta.session_id.clone();
     self.meta.session_id = session::generate_session_id();
     self.meta.parent_session = Some(parent_id);
-    self.meta.turn = 0;
     self.meta.usage = session::SessionUsage { total_tokens: 0 };
     self.meta.prompt = None;
     self.meta.start_ts = None;
@@ -902,15 +871,6 @@ impl Agent {
     }
   }
 
-  fn push_turn_budget_reminder(&mut self, max_turns: i32, turn: i32) {
-    if self.last_turn_budget_reminder_turn == Some(turn) {
-      return;
-    }
-    if let Some(reminder) = turn_budget_reminder(max_turns, turn) {
-      self.push_msg(user_msg(reminder));
-      self.last_turn_budget_reminder_turn = Some(turn);
-    }
-  }
 }
 
 fn user_msg(content: impl Into<String>) -> Message {
@@ -1047,106 +1007,6 @@ Summarize the current session retrospectively and call `complete` with structure
 - what to do better next time
 - optional evidence: files touched, tests run, git head"#;
 
-fn turn_budget_reminder(max_turns: i32, turn: i32) -> Option<String> {
-  if max_turns <= 0 || turn <= 0 || turn > max_turns {
-    return None;
-  }
-  let remaining = max_turns - turn + 1;
-
-  let msg = match remaining {
-    1 => {
-      "This is the FINAL turn. If the task is done, call `complete`. Otherwise call `handoff` for the human to review and resume. Do not call tools that require follow-up verification."
-    }
-    2 => {
-      "Two turns left. Do not start new work. Call `complete` if done, or `handoff` for the human to resume."
-    }
-    3 => {
-      "Three turns left. If done, call `complete`. Otherwise finish the current chunk and prepare to `handoff` for human review and resume."
-    }
-    _ if max_turns >= 10 && remaining == max_turns / 2 => {
-      "Half the turn budget is used. If useful work is parallelizable and delegatable, delegate coworkers now. Keep the critical path local."
-    }
-    _ if max_turns >= 10 && remaining == max_turns / 4 && max_turns / 4 >= 5 => {
-      "Three-quarters of the turn budget is used. Focus on verification, tracking updates, completion, or a necessary handoff. Avoid new exploratory delegation."
-    }
-    _ if turn == 1 => {
-      "Use turns deliberately. If useful work is parallelizable and delegatable, delegate coworkers now while keeping the critical path local."
-    }
-    _ => return None,
-  };
-
-  Some(format!(
-    "Reminder: [turn_budget] You are on turn {turn} of {max_turns}. {remaining} turn{} remain including this one.\n{msg}",
-    if remaining == 1 { "" } else { "s" }
-  ))
-}
-
-#[cfg(test)]
-mod turn_budget_tests {
-  use super::turn_budget_reminder;
-
-  #[test]
-  fn turn_budget_emits_first_turn() {
-    let r = turn_budget_reminder(20, 1).expect("first turn should be shown");
-    assert!(r.contains("turn 1 of 20"));
-    assert!(r.contains("Use turns deliberately"));
-  }
-
-  #[test]
-  fn turn_budget_fires_50_percent() {
-    let r = turn_budget_reminder(20, 11).expect("50% should fire");
-    assert!(r.contains("Half the turn budget"));
-    assert!(r.contains("delegate coworkers now"));
-  }
-
-  #[test]
-  fn turn_budget_fires_25_percent() {
-    let r = turn_budget_reminder(20, 16).expect("25% should fire");
-    assert!(r.contains("Three-quarters of the turn budget"));
-  }
-
-  #[test]
-  fn turn_budget_skips_mid_turns() {
-    assert!(turn_budget_reminder(20, 10).is_none());
-    assert!(turn_budget_reminder(20, 12).is_none());
-    assert!(turn_budget_reminder(20, 14).is_none());
-  }
-
-  #[test]
-  fn turn_budget_fires_3_2_1() {
-    assert!(turn_budget_reminder(20, 18).is_some());
-    assert!(turn_budget_reminder(20, 19).is_some());
-    assert!(turn_budget_reminder(20, 20).is_some());
-  }
-
-  #[test]
-  fn turn_budget_final_turn_is_explicit() {
-    let r = turn_budget_reminder(3, 3).expect("final turn should be shown");
-    assert!(r.contains("FINAL turn"));
-    assert!(r.contains("handoff"));
-  }
-
-  #[test]
-  fn turn_budget_two_left() {
-    let r = turn_budget_reminder(5, 4).expect("two-left should fire");
-    assert!(r.contains("Two turns left"));
-    assert!(r.contains("handoff"));
-  }
-
-  #[test]
-  fn turn_budget_ignores_unbounded_runs() {
-    assert!(turn_budget_reminder(-1, 1).is_none());
-    assert!(turn_budget_reminder(0, 1).is_none());
-  }
-
-  #[test]
-  fn turn_budget_small_budget_no_percentages() {
-    assert!(turn_budget_reminder(8, 4).is_none()); // would be 50% at remaining=4
-    assert!(turn_budget_reminder(8, 6).is_some()); // remaining=3
-    assert!(turn_budget_reminder(8, 8).is_some()); // remaining=1
-  }
-}
-
 #[cfg(test)]
 mod dirty_state_machine_tests {
   use super::*;
@@ -1158,7 +1018,6 @@ mod dirty_state_machine_tests {
     Client::new(
       "http://localhost",
       "dummy".into(),
-      0,
       |_, _| serde_json::Value::Null,
       30,
     )
@@ -1172,14 +1031,11 @@ mod dirty_state_machine_tests {
       parent_session: None,
       profile: "test".into(),
       mode: "steer".into(),
-      max_turns: -1,
-      turn: 0,
       flags: session::SessionFlags {
         steer: true,
         worker: false,
         autocompact: -1,
         handoff: false,
-        retry: 0,
         continue_flag: false,
         resume: false,
         temp: false,

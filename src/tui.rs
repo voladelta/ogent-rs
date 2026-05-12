@@ -157,7 +157,6 @@ pub struct UiStatus {
 struct StatusInner {
   profile: String,
   model: String,
-  turn: i32,
   tokens: i32,
   state: AgentState,
 }
@@ -168,16 +167,14 @@ impl UiStatus {
       inner: Arc::new(Mutex::new(StatusInner {
         profile,
         model,
-        turn: 0,
         tokens: 0,
         state: AgentState::Idle,
       })),
     }
   }
 
-  pub fn set_turn_tokens(&self, turn: i32, tokens: i32) {
+  pub fn set_tokens(&self, tokens: i32) {
     let mut s = self.inner.lock().expect("ui status poisoned");
-    s.turn = turn;
     s.tokens = tokens;
   }
 
@@ -653,10 +650,9 @@ fn draw(
     frame.render_widget(Clear, frame.area());
 
     let mut bar = format!(
-      "{} | {} | turn {} | tokens {}",
+      "{} | {} | tokens {}",
       status_snapshot.profile,
       status_snapshot.model,
-      status_snapshot.turn,
       status_snapshot.tokens,
     );
     truncate_to_width(&mut bar, chunks[0].width.saturating_sub(1) as usize);

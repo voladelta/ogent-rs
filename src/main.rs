@@ -29,12 +29,8 @@ struct Args {
   profile: String,
   #[arg(long, default_value_t = false)]
   steer: bool,
-  #[arg(long = "retry", default_value_t = 5)]
-  retry: usize,
   #[arg(long, default_value_t = false)]
   worker: bool,
-  #[arg(long = "max-turns", default_value_t = -1)]
-  max_turns: i32,
   #[arg(long, default_value_t = -1)]
   autocompact: i32,
   #[arg(long, default_value_t = false)]
@@ -55,7 +51,7 @@ async fn main() -> Result<()> {
   let args = Args::parse();
   let profile = profiles::get_profile(&args.profile)
     .with_context(|| format!("unknown profile: {}", args.profile))?;
-  let client = providers::new_client(profile, args.retry)?;
+  let client = providers::new_client(profile)?;
   let compact = if args.autocompact >= 0 {
     CompactState::new(
       f64::from(args.autocompact) / 100.0,
@@ -78,14 +74,11 @@ async fn main() -> Result<()> {
     parent_session: None,
     profile: args.profile.clone(),
     mode: mode.to_string(),
-    max_turns: args.max_turns,
-    turn: 0,
     flags: session::SessionFlags {
       steer: args.steer,
       worker: args.worker,
       autocompact: args.autocompact,
       handoff: args.handoff,
-      retry: args.retry,
       continue_flag: args.continue_flag,
       resume: args.resume,
       temp: args.temp,
@@ -215,10 +208,10 @@ async fn main() -> Result<()> {
     let loop_result = if args.steer {
     let tui = tui::start(args.profile.clone(), profile.model.to_string())?;
     agent
-      .steer_loop(args.max_turns, tui, wait_for_steer_input)
+      .steer_loop(tui, wait_for_steer_input)
       .await
   } else {
-    agent.run_loop(args.max_turns).await
+    agent.run_loop().await
   };
 
   let final_messages = match loop_result {

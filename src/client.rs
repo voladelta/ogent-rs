@@ -5,6 +5,8 @@ use tokio::time::{Duration, sleep};
 use crate::sse::parse_sse_response;
 use crate::types::{ChatResponse, Message, Tool};
 
+pub const MAX_RETRIES: usize = 5;
+
 pub type BuildReq = Arc<dyn Fn(&[Message], &[Tool]) -> Value + Send + Sync>;
 
 #[derive(Debug, thiserror::Error)]
@@ -37,14 +39,12 @@ pub struct Client {
   url: String,
   api_key: String,
   build_req: BuildReq,
-  max_retries: usize,
 }
 
 impl Client {
   pub fn new<F>(
     url: &str,
     api_key: String,
-    max_retries: usize,
     build_req: F,
     request_timeout_secs: u64,
   ) -> Result<Self, ClientError>
@@ -62,7 +62,6 @@ impl Client {
       url: url.to_string(),
       api_key,
       build_req: Arc::new(build_req),
-      max_retries,
     })
   }
 
@@ -75,7 +74,7 @@ impl Client {
   ) -> Result<ChatResponse, ClientError> {
     let req_body = (self.build_req)(messages, tools);
     let mut last_err = None;
-    for attempt in 0..=self.max_retries {
+    for attempt in 0..=MAX_RETRIES {
       if attempt > 0 {
         let delay_secs = 2u64.saturating_pow((attempt - 1) as u32).min(60);
         sleep(Duration::from_secs(delay_secs)).await;

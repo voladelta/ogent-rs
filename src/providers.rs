@@ -63,14 +63,13 @@ struct ZThinking {
   clear_thinking: bool,
 }
 
-pub fn new_client(profile: &Profile, max_retries: usize) -> Result<Client> {
+pub fn new_client(profile: &Profile) -> Result<Client> {
   match profile.backend {
     "kimi" => {
       let model = profile.model;
       make_client(
         KIMI_URL,
         "BASETEN_API_KEY",
-        max_retries,
         move |messages, tools| {
           serde_json::to_value(KimiRequest {
             model,
@@ -93,7 +92,6 @@ pub fn new_client(profile: &Profile, max_retries: usize) -> Result<Client> {
       make_client(
         Z_URL,
         "Z_API_KEY",
-        max_retries,
         move |messages, tools| {
           serde_json::to_value(ZRequest {
             model,
@@ -117,7 +115,6 @@ pub fn new_client(profile: &Profile, max_retries: usize) -> Result<Client> {
       make_client(
         DEEPSEEK_URL,
         "DEEPSEEK_API_KEY",
-        max_retries,
         move |messages, tools| {
           serde_json::to_value(DeepSeekRequest {
             model,
@@ -140,7 +137,6 @@ pub fn new_client(profile: &Profile, max_retries: usize) -> Result<Client> {
 fn make_client<F>(
   url: &str,
   key_env: &str,
-  max_retries: usize,
   build: F,
   timeout_secs: u64,
 ) -> Result<Client>
@@ -150,7 +146,6 @@ where
   Ok(Client::new(
     url,
     env_key(key_env)?,
-    max_retries,
     build,
     timeout_secs,
   )?)
