@@ -95,8 +95,14 @@ cargo run -- "Add auth module, then review it for security issues"
 # Parallel worker-friendly task
 cargo run -- "Add tests for src/auth.rs and write README documentation"
 
-# Resume from the latest session
-cargo run -- --resume "Add more tests"
+# Resume the latest session and save back into that same session
+cargo run -- resume "Add more tests"
+
+# Resume a specific session and save back into that same session
+cargo run -- resume 1778216383-2028 "Add more tests"
+
+# Fork a specific session into a new child session
+cargo run -- fork 1778216383-2028 "Try a different approach"
 
 # Auto-compact context at 50% and continue automatically
 cargo run -- --autocompact 50 "Large refactoring task"

@@ -16,11 +16,19 @@ Common options:
 | `--steer` | Start interactive TUI steering mode |
 | `--retry <n>` | Retry transient API errors. Default: `5` |
 | `--autocompact <percent>` | Auto-compact context when usage crosses threshold. Default: `80`. `-1` to disable |
-| `--resume` | Resume from the latest non-worker session (`.ogent/sessions/*.jsonl`) |
+| `--resume [<session>]` | Resume the latest or named non-worker session and save back into that same session |
+| `--fork [<session>]` | Load the latest or named non-worker session, then save the run into a new child session |
 | `--worker` | Internal worker mode. Reads system prompt from stdin |
 | `--temp` | Ephemeral mode: run without persisting session state to disk |
 
-Non-steer mode requires a prompt unless `--resume` is used.
+Non-steer mode requires a prompt unless `--resume` or `--fork` is used.
+
+`resume` and `fork` can also be used as command-style aliases when they are the first argument after `ogent`:
+
+```bash
+ogent resume 1778216383-2028 "Continue this session"
+ogent fork 1778216383-2028 "Try a different approach"
+```
 
 ## Profiles
 
@@ -126,12 +134,32 @@ When the coder calls `complete`, its structured Markdown summary is appended to 
 
 ### Resume from Session
 
+Resume continues the selected session in place. If you resume `1778216383-2028`, the next save also goes to `1778216383-2028`.
+
 ```bash
 # Resume the latest non-worker session
-cargo run -- --resume "Now add a type hint to the function"
+cargo run -- resume "Now add a type hint to the function"
 
 # Resume a specific session by name (without .jsonl)
+cargo run -- resume 1778216383-2028 "Add a main block"
+
+# Flag form is equivalent
 cargo run -- --resume 1778216383-2028 "Add a main block"
+```
+
+### Fork from Session
+
+Fork loads the selected session as context, then writes the run to a new session id. The new session records the source session as `parent_session`.
+
+```bash
+# Fork the latest non-worker session
+cargo run -- fork "Try a different implementation"
+
+# Fork a specific session by name (without .jsonl)
+cargo run -- fork 1778216383-2028 "Try a different implementation"
+
+# Flag form is equivalent
+cargo run -- --fork 1778216383-2028 "Try a different implementation"
 ```
 
 ## Turn Limits
