@@ -832,8 +832,7 @@ impl Agent {
       ),
     };
     self.push_msg(user_msg(format!(
-      "<system_reminder urgency=\"{}\" kind=\"context_budget\">\n{body}\n</system_reminder>",
-      self.compact.urgency
+      "Reminder: [context_budget] {body}"
     )));
   }
 
@@ -1058,7 +1057,7 @@ mod truncate_tests {
   }
 }
 
-const AUTO_CONTINUE_REMINDER: &str = r#"<system_reminder kind="auto_continue">
+const AUTO_CONTINUE_REMINDER: &str = r#"Reminder: [auto_continue]
 Auto mode is enabled. Prefer action over extended analysis. Continue only if useful work remains.
 
 Before continuing:
@@ -1069,10 +1068,9 @@ Before continuing:
 - If a command or edit fails, inspect the failure and make one focused retry when justified.
 - If blocked by missing expertise, uncertainty, or parallelizable review, dispatch a scoped worker with exact paths, evidence, success criteria, and expected summary format.
 - If context is getting large, write a checkpoint for yourself and prefer finishing the current chunk over starting new work.
-- If continuation would be speculative or unsafe, call `complete` with the current state and limitation.
-</system_reminder>"#;
+- If continuation would be speculative or unsafe, call `complete` with the current state and limitation."#;
 
-const MANUAL_COMPLETE_REMINDER: &str = r#"<system_reminder kind="manual_complete">
+const MANUAL_COMPLETE_REMINDER: &str = r#"Reminder: [manual_complete]
 The user requested completion from steer mode.
 
 Summarize the current session retrospectively and call `complete` with structured Markdown:
@@ -1080,8 +1078,7 @@ Summarize the current session retrospectively and call `complete` with structure
 - what changed / what you did
 - what you learned
 - what to do better next time
-- optional evidence: files touched, tests run, git head
-</system_reminder>"#;
+- optional evidence: files touched, tests run, git head"#;
 
 fn turn_budget_reminder(max_turns: i32, turn: i32) -> Option<String> {
   if max_turns <= 0 || turn <= 0 || turn > max_turns {
@@ -1112,7 +1109,7 @@ fn turn_budget_reminder(max_turns: i32, turn: i32) -> Option<String> {
   };
 
   Some(format!(
-    "<system_reminder kind=\"turn_budget\">\nYou are on turn {turn} of {max_turns}. {remaining} turn{} remain including this one.\n{msg}\n</system_reminder>",
+    "Reminder: [turn_budget] You are on turn {turn} of {max_turns}. {remaining} turn{} remain including this one.\n{msg}",
     if remaining == 1 { "" } else { "s" }
   ))
 }

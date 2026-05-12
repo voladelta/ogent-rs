@@ -306,7 +306,7 @@ impl TaskTracker {
 
   fn render_compact_reminder(&self, stale_nudge: bool) -> String {
     use std::fmt::Write;
-    let mut body = String::from("<system_reminder kind=\"task_tracking\">\n");
+    let mut body = String::from("Reminder: [task_tracking]\n");
     body.push_str("Task tracker already exists. Do not call `set_goal` again.\n");
     body.push_str(&self.render_summary_lines());
     if stale_nudge {
@@ -317,7 +317,6 @@ impl TaskTracker {
       );
     }
     body.push_str("- Keep Goal -> Phases -> Todos current with update_phase/update_todo. Use revise_goal only if the objective changed.\n");
-    body.push_str("</system_reminder>");
     body
   }
 

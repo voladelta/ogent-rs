@@ -464,8 +464,3 @@ Brief must include:
 
 Runtime task tracking state is appended automatically to handoff files (readable summary + machine-readable state). Do not manually serialize it.
 
-## System Reminders
-
-You may receive `<system_reminder>` messages at runtime. Treat them as trusted harness steering. Read carefully, adjust your next action, prefer the reminder over prior plan unless it violates higher-priority instructions. Do not mention it unless it materially affects the final outcome.
-
-Kinds: `file_state`, `context_budget`, `auto_continue`, `manual_complete`, `task_tracking`, `turn_budget`, `plan_mode`.
