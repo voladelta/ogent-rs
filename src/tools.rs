@@ -13,6 +13,7 @@ use crate::agent::Agent;
 use crate::hashline::{EditOp, apply_anchor_edits, render_hashlines};
 use crate::task_tracker::{Complexity, GoalState, PhaseUpdate, Status, TaskTracker, TodoUpdate};
 use crate::types::{Tool, ToolFunction};
+use crate::workflow::CheckStatus;
 
 pub struct ToolContext<'a> {
   pub agent: Option<&'a mut Agent>,
@@ -58,6 +59,34 @@ pub async fn execute_tool(mut ctx: ToolContext<'_>, name: &str, args: &str) -> R
         .context("update_todo requires an active agent")?;
       update_todo(agent, args)
     }
+    "workflow_status" => {
+      let agent = ctx
+        .agent
+        .as_deref_mut()
+        .context("workflow_status requires an active agent")?;
+      workflow_status(agent, args)
+    }
+    "workflow_enter_step" => {
+      let agent = ctx
+        .agent
+        .as_deref_mut()
+        .context("workflow_enter_step requires an active agent")?;
+      workflow_enter_step(agent, args)
+    }
+    "workflow_record_check" => {
+      let agent = ctx
+        .agent
+        .as_deref_mut()
+        .context("workflow_record_check requires an active agent")?;
+      workflow_record_check(agent, args)
+    }
+    "workflow_run_check" => {
+      let agent = ctx
+        .agent
+        .as_deref_mut()
+        .context("workflow_run_check requires an active agent")?;
+      workflow_run_check(agent, args).await
+    }
     "load_skill" => load_skill(ctx.agent.as_deref_mut(), args),
     "dispatch_worker" => dispatch_worker(args).await,
     "start_workers" => {
@@ -99,10 +128,17 @@ pub async fn execute_tool(mut ctx: ToolContext<'_>, name: &str, args: &str) -> R
 }
 
 static CODER_TOOLS: OnceLock<Vec<Tool>> = OnceLock::new();
+static CODER_TOOLS_WITH_WORKFLOW: OnceLock<Vec<Tool>> = OnceLock::new();
 static WORKER_TOOLS: OnceLock<Vec<Tool>> = OnceLock::new();
 
-pub fn configured_coder_tools() -> Vec<Tool> {
-  CODER_TOOLS.get_or_init(build_coder_tools).clone()
+pub fn configured_coder_tools(workflow_enabled: bool) -> Vec<Tool> {
+  if workflow_enabled {
+    CODER_TOOLS_WITH_WORKFLOW
+      .get_or_init(|| build_coder_tools(true))
+      .clone()
+  } else {
+    CODER_TOOLS.get_or_init(|| build_coder_tools(false)).clone()
+  }
 }
 
 pub fn configured_worker_tools() -> Vec<Tool> {
@@ -118,10 +154,14 @@ const WORKER_EXCLUDED: &[&str] = &[
   "revise_goal",
   "update_phase",
   "update_todo",
+  "workflow_status",
+  "workflow_enter_step",
+  "workflow_record_check",
+  "workflow_run_check",
 ];
 
-fn build_coder_tools() -> Vec<Tool> {
-  vec![
+fn build_coder_tools(workflow_enabled: bool) -> Vec<Tool> {
+  let mut tools = vec![
     schema(
       "read_file",
       "Read a file from the local filesystem. Use start and end as 1-indexed line numbers; omit both for the full file.",
@@ -212,11 +252,40 @@ fn build_coder_tools() -> Vec<Tool> {
       "Mark the current task complete with a Markdown summary. If work is still open, first call returns a warning; call again with explicit Limitation and Intent to force stop.",
       json!({"type":"object","properties":{"summary":{"type":"string","description":"Markdown retrospective. Include Limitation and Intent if forcing early stop."}},"required":["summary"],"additionalProperties":false}),
     ),
+  ];
+  if workflow_enabled {
+    tools.extend(build_workflow_tools());
+  }
+  tools
+}
+
+fn build_workflow_tools() -> Vec<Tool> {
+  vec![
+    schema(
+      "workflow_status",
+      "Show the active workflow state.",
+      json!({"type":"object","properties":{},"additionalProperties":false}),
+    ),
+    schema(
+      "workflow_enter_step",
+      "Move to a workflow step. Enforces start, allowed next transitions, gates, required checks, and max_visits. If a goal tracker exists, mirrors the step as an in-progress phase.",
+      json!({"type":"object","properties":{"step_id":{"type":"string"},"reason":{"type":"string","description":"Required when leaving a gated step; otherwise optional."}},"required":["step_id"],"additionalProperties":false}),
+    ),
+    schema(
+      "workflow_record_check",
+      "Record manual workflow check evidence. Passed/failed checks require evidence. Waived checks require waiver_reason and waiver_risk.",
+      json!({"type":"object","properties":{"step_id":{"type":"string"},"check_id":{"type":"string"},"status":{"type":"string","enum":["passed","failed","waived"]},"evidence":{"type":"string"},"waiver_reason":{"type":"string"},"waiver_risk":{"type":"string"}},"required":["step_id","check_id","status"],"additionalProperties":false}),
+    ),
+    schema(
+      "workflow_run_check",
+      "Run a command workflow check and record command, exit code, output excerpt, and pass/fail status. Uses the check's configured command unless command is supplied.",
+      json!({"type":"object","properties":{"step_id":{"type":"string"},"check_id":{"type":"string"},"command":{"type":"string"},"timeout_seconds":{"type":"integer","description":"Max seconds. Default: 120 if 0 or omitted. Max: 600."}},"required":["step_id","check_id"],"additionalProperties":false}),
+    ),
   ]
 }
 
 fn build_worker_tools() -> Vec<Tool> {
-  let mut tools: Vec<Tool> = build_coder_tools()
+  let mut tools: Vec<Tool> = build_coder_tools(false)
     .into_iter()
     .filter(|t| !WORKER_EXCLUDED.contains(&t.function.name.as_str()))
     .collect();
@@ -420,6 +489,28 @@ async fn bash(args: &str) -> Result<String> {
         bail!("exit err: {}\n{combined}", out.status);
       }
       Ok(combined)
+    }
+  }
+}
+
+async fn run_workflow_command(command: &str, secs: u64) -> Result<(i32, String)> {
+  require_nonempty(command, "command")?;
+  check_bash_cds(command)?;
+  let mut cmd = Command::new("sh");
+  cmd
+    .arg("-c")
+    .arg(command)
+    .current_dir(crate::workspace::workspace_root())
+    .stdout(Stdio::piped())
+    .stderr(Stdio::piped());
+  let output = timeout(Duration::from_secs(secs), cmd.output()).await;
+  match output {
+    Err(_) => bail!("command timed out after {secs}s"),
+    Ok(Err(e)) => bail!("exec: {e}"),
+    Ok(Ok(out)) => {
+      let mut combined = String::from_utf8_lossy(&out.stdout).into_owned();
+      combined.push_str(&String::from_utf8_lossy(&out.stderr));
+      Ok((out.status.code().unwrap_or(-1), combined))
     }
   }
 }
@@ -711,17 +802,6 @@ fn update_phase(agent: &mut crate::agent::Agent, args: &str) -> Result<String> {
   let Some(tracker) = agent.task_tracker.as_mut() else {
     bail!("set_goal must be called before update_phase");
   };
-  if let Some(ref mut ws) = agent.workflow_state {
-    if args.status == Status::InProgress {
-      ws.transition_to(&args.phase_id)?;
-    } else if args.status == Status::Completed
-      && ws.current_phase.as_deref() != Some(&args.phase_id)
-      && let Err(e @ crate::workflow::WorkflowError::MaxVisitsExceeded { .. }) =
-        ws.transition_to(&args.phase_id)
-    {
-      bail!("{e}");
-    }
-  }
   tracker.update_phase(PhaseUpdate {
     id: args.phase_id.trim().to_string(),
     title: args.title.trim().to_string(),
@@ -763,6 +843,139 @@ fn update_todo(agent: &mut crate::agent::Agent, args: &str) -> Result<String> {
   Ok(tracker.render_tool_snapshot())
 }
 
+fn workflow_status(agent: &mut crate::agent::Agent, _args: &str) -> Result<String> {
+  Ok(
+    agent
+      .workflow_state
+      .as_ref()
+      .map(crate::workflow::WorkflowState::render_status)
+      .unwrap_or_else(|| "No active workflow.".to_string()),
+  )
+}
+
+#[derive(Deserialize)]
+struct WorkflowEnterStepArgs {
+  step_id: String,
+  #[serde(default)]
+  reason: String,
+}
+
+fn workflow_enter_step(agent: &mut crate::agent::Agent, args: &str) -> Result<String> {
+  let args: WorkflowEnterStepArgs = parse_args(args)?;
+  require_nonempty(&args.step_id, "step_id")?;
+  let Some(ws) = agent.workflow_state.as_mut() else {
+    bail!("no active workflow; start ogent with --workflow to enable workflow enforcement");
+  };
+  ws.enter_step(&args.step_id, &args.reason, crate::session::timestamp_ms())?;
+  if let Some(tracker) = agent.task_tracker.as_mut()
+    && let Some(step) = ws.definition.steps.get(args.step_id.trim())
+  {
+    tracker.update_phase(PhaseUpdate {
+      id: args.step_id.trim().to_string(),
+      title: if step.title.trim().is_empty() {
+        args.step_id.trim().to_string()
+      } else {
+        step.title.trim().to_string()
+      },
+      status: Status::InProgress,
+      complexity: Complexity::Medium,
+      notes: step.instructions.trim().to_string(),
+      contracts: None,
+    });
+  }
+  Ok(ws.render_status())
+}
+
+#[derive(Deserialize)]
+struct WorkflowRecordCheckArgs {
+  step_id: String,
+  check_id: String,
+  status: CheckStatus,
+  #[serde(default)]
+  evidence: String,
+  #[serde(default)]
+  waiver_reason: String,
+  #[serde(default)]
+  waiver_risk: String,
+}
+
+fn workflow_record_check(agent: &mut crate::agent::Agent, args: &str) -> Result<String> {
+  let args: WorkflowRecordCheckArgs = parse_args(args)?;
+  require_nonempty(&args.step_id, "step_id")?;
+  require_nonempty(&args.check_id, "check_id")?;
+  let Some(ws) = agent.workflow_state.as_mut() else {
+    bail!("no active workflow; start ogent with --workflow to enable workflow enforcement");
+  };
+  ws.record_check(
+    args.step_id.trim(),
+    args.check_id.trim(),
+    args.status,
+    &args.evidence,
+    &args.waiver_reason,
+    &args.waiver_risk,
+    crate::session::timestamp_ms(),
+  )?;
+  Ok(ws.render_status())
+}
+
+#[derive(Deserialize)]
+struct WorkflowRunCheckArgs {
+  step_id: String,
+  check_id: String,
+  #[serde(default)]
+  command: String,
+  #[serde(default)]
+  timeout_seconds: u64,
+}
+
+async fn workflow_run_check(agent: &mut crate::agent::Agent, args: &str) -> Result<String> {
+  let args: WorkflowRunCheckArgs = parse_args(args)?;
+  require_nonempty(&args.step_id, "step_id")?;
+  require_nonempty(&args.check_id, "check_id")?;
+  let command = {
+    let Some(ws) = agent.workflow_state.as_ref() else {
+      bail!("no active workflow; start ogent with --workflow to enable workflow enforcement");
+    };
+    if args.command.trim().is_empty() {
+      ws.command_for_check(args.step_id.trim(), args.check_id.trim())?
+        .context("workflow check has no configured command; supply command")?
+    } else {
+      args.command.trim().to_string()
+    }
+  };
+  let secs = if args.timeout_seconds == 0 {
+    120
+  } else {
+    args.timeout_seconds
+  };
+  if secs > 600 {
+    bail!("timeout_seconds must be <= 600");
+  }
+  let (exit_code, output) = run_workflow_command(&command, secs).await?;
+  let output_excerpt = truncate_output(&output, 4000);
+  let evidence = if output_excerpt.trim().is_empty() {
+    format!("command `{command}` exited with code {exit_code} and produced no output")
+  } else {
+    format!("command `{command}` exited with code {exit_code}\n{output_excerpt}")
+  };
+  let Some(ws) = agent.workflow_state.as_mut() else {
+    bail!("no active workflow; start ogent with --workflow to enable workflow enforcement");
+  };
+  ws.record_command_check(
+    args.step_id.trim(),
+    args.check_id.trim(),
+    &command,
+    exit_code,
+    &evidence,
+    crate::session::timestamp_ms(),
+  )?;
+  Ok(format!(
+    "{}\n\nCommand exit_code={exit_code}\n{}",
+    ws.render_status(),
+    output_excerpt
+  ))
+}
+
 #[derive(Deserialize)]
 struct LoadSkillArgs {
   name: String,
@@ -771,12 +984,8 @@ struct LoadSkillArgs {
 fn load_skill(agent: Option<&mut crate::agent::Agent>, args: &str) -> Result<String> {
   let args: LoadSkillArgs = parse_args(args)?;
   require_nonempty(&args.name, "name")?;
-  let (name, root, body, workflow) = crate::prompts::load_skill_content(&args.name)?;
-  if let Some(agent) = agent
-    && let Some(wf) = workflow
-  {
-    agent.workflow_state = Some(crate::workflow::WorkflowState::new(wf));
-  }
+  let _ = agent;
+  let (name, root, body) = crate::prompts::load_skill_content(&args.name)?;
   Ok(format!(
     "<skill name=\"{name}\" root=\"{root}\">\n{body}\n</skill>"
   ))
@@ -815,22 +1024,8 @@ struct CompleteArgs {
 fn complete(agent: &mut crate::agent::Agent, args: &str) -> Result<String> {
   let args: CompleteArgs = parse_args(args)?;
   require_nonempty(&args.summary, "summary")?;
-  // Workflow gate
-  if let Some(ref ws) = agent.workflow_state
-    && let Some(ref phase) = ws.current_phase
-    && let Some(def) = ws.definition.phases.get(phase)
-    && !def.terminal
-  {
-    if !agent.complete_open_work_warned {
-      agent.complete_open_work_warned = true;
-      return Ok(format!(
-        "WARNING: Workflow not complete. Current phase '{}' is not terminal. Allowed exits: {:?}. Call complete again with explicit Limitation and Intent if you must stop.",
-        phase, def.next
-      ));
-    }
-    if !summary_has_limitation_and_intent(&args.summary) {
-      bail!("Workflow incomplete; second complete requires explicit Limitation and Intent");
-    }
+  if let Some(ref ws) = agent.workflow_state {
+    ws.ensure_current_step_is_terminal()?;
   }
   if agent
     .task_tracker
@@ -871,6 +1066,17 @@ fn clean_strings(values: Vec<String>) -> Vec<String> {
     .collect()
 }
 
+fn truncate_output(s: &str, n: usize) -> String {
+  if s.len() <= n {
+    return s.to_string();
+  }
+  let mut out = s.to_string();
+  let end = out.floor_char_boundary(n);
+  out.truncate(end);
+  out.push_str("\n...[truncated]");
+  out
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -901,7 +1107,7 @@ mod tests {
 
   #[test]
   fn configured_coder_tools_includes_expected() {
-    let tools = configured_coder_tools();
+    let tools = configured_coder_tools(false);
     let names: Vec<_> = tools.iter().map(|t| t.function.name.as_str()).collect();
     assert!(names.contains(&"read_file"));
     assert!(names.contains(&"write_file"));
@@ -910,6 +1116,17 @@ mod tests {
     assert!(names.contains(&"set_goal"));
     assert!(names.contains(&"update_phase"));
     assert!(names.contains(&"update_todo"));
+    assert!(!names.contains(&"workflow_status"));
+  }
+
+  #[test]
+  fn workflow_tools_are_conditional() {
+    let tools = configured_coder_tools(true);
+    let names: Vec<_> = tools.iter().map(|t| t.function.name.as_str()).collect();
+    assert!(names.contains(&"workflow_status"));
+    assert!(names.contains(&"workflow_enter_step"));
+    assert!(names.contains(&"workflow_record_check"));
+    assert!(names.contains(&"workflow_run_check"));
   }
 
   #[test]
@@ -927,7 +1144,7 @@ mod tests {
 
   #[test]
   fn tool_names_unique_within_coder_tools() {
-    let tools = configured_coder_tools();
+    let tools = configured_coder_tools(true);
     let mut seen = std::collections::HashSet::new();
     for t in &tools {
       assert!(
@@ -960,7 +1177,7 @@ mod tests {
 
   #[test]
   fn read_file_schema_has_path_required() {
-    let tools = configured_coder_tools();
+    let tools = configured_coder_tools(false);
     let t = tools
       .iter()
       .find(|t| t.function.name == "read_file")
@@ -974,7 +1191,7 @@ mod tests {
 
   #[test]
   fn edit_hash_anchors_schema_has_ops_array() {
-    let tools = configured_coder_tools();
+    let tools = configured_coder_tools(false);
     let t = tools
       .iter()
       .find(|t| t.function.name == "edit_hash_anchors")
@@ -989,7 +1206,7 @@ mod tests {
 
   #[test]
   fn update_phase_schema_includes_contracts() {
-    let tools = configured_coder_tools();
+    let tools = configured_coder_tools(false);
     let t = tools
       .iter()
       .find(|t| t.function.name == "update_phase")
@@ -1007,7 +1224,7 @@ mod tests {
 
   #[test]
   fn bash_schema_has_command_and_timeout() {
-    let tools = configured_coder_tools();
+    let tools = configured_coder_tools(false);
     let t = tools.iter().find(|t| t.function.name == "bash").unwrap();
     let params = &t.function.parameters;
     assert!(params["properties"]["command"].is_object());
@@ -1018,7 +1235,7 @@ mod tests {
 
   #[test]
   fn dispatch_worker_schema_has_task_template_and_context() {
-    let tools = configured_coder_tools();
+    let tools = configured_coder_tools(false);
     let t = tools
       .iter()
       .find(|t| t.function.name == "dispatch_worker")
@@ -1035,7 +1252,7 @@ mod tests {
 
   #[test]
   fn complete_schema_has_summary_required() {
-    let tools = configured_coder_tools();
+    let tools = configured_coder_tools(false);
     let t = tools
       .iter()
       .find(|t| t.function.name == "complete")

@@ -327,6 +327,9 @@ impl SteerState {
               agent.meta.usage.total_tokens = agent.total_tokens;
               session::write_meta(&agent.meta)?;
               session::persist_session(&agent.messages, &agent.meta.session_id)?;
+              if let Some(workflow_state) = &agent.workflow_state {
+                session::write_workflow_state(&agent.meta.session_id, workflow_state)?;
+              }
             }
 
             let mut new_messages = crate::prompts::build_messages("");
@@ -367,6 +370,9 @@ impl SteerState {
             if !agent.meta.flags.temp {
               session::write_meta(&agent.meta)?;
               session::persist_session(&agent.messages, &agent.meta.session_id)?;
+              if let Some(workflow_state) = &agent.workflow_state {
+                session::write_workflow_state(&agent.meta.session_id, workflow_state)?;
+              }
             }
 
             tui.log.clear();
@@ -502,6 +508,9 @@ impl Agent {
       self.meta.usage.total_tokens = self.total_tokens;
       session::write_meta(&self.meta)?;
       session::persist_session(&self.messages, &self.meta.session_id)?;
+      if let Some(workflow_state) = &self.workflow_state {
+        session::write_workflow_state(&self.meta.session_id, workflow_state)?;
+      }
     }
     Ok(())
   }
@@ -620,6 +629,9 @@ impl Agent {
           self.meta.usage.total_tokens = self.total_tokens;
           session::write_meta(&self.meta)?;
           session::persist_session(&self.messages, &self.meta.session_id)?;
+          if let Some(workflow_state) = &self.workflow_state {
+            session::write_workflow_state(&self.meta.session_id, workflow_state)?;
+          }
         }
         let old_id = self.meta.session_id.clone();
         self.meta.session_id = session::generate_session_id();
@@ -633,6 +645,7 @@ impl Agent {
         self.messages = messages;
         self.dirty = false;
         self.workflow_state = None;
+        self.tools = crate::tools::configured_coder_tools(false);
         self.total_tokens = 0;
         self.worker_manager = WorkerManager::new();
         self.completion_summary = None;

@@ -1,4 +1,5 @@
 use crate::types::Message;
+use crate::workflow::WorkflowState;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
@@ -73,6 +74,25 @@ pub fn persist_session(messages: &[Message], session_id: &str) -> Result<()> {
     file.write_all(b"\n")?;
   }
   Ok(())
+}
+
+pub fn write_workflow_state(session_id: &str, state: &WorkflowState) -> Result<()> {
+  let dir = session_dir(session_id);
+  fs::create_dir_all(&dir)?;
+  let data = serde_json::to_string_pretty(state)?;
+  fs::write(dir.join("workflow-state.json"), data)?;
+  Ok(())
+}
+
+pub fn read_workflow_state(session_id: &str) -> Result<Option<WorkflowState>> {
+  let path = session_dir(session_id).join("workflow-state.json");
+  if !path.exists() {
+    return Ok(None);
+  }
+  let data = fs::read_to_string(&path)
+    .with_context(|| format!("read workflow state for session {session_id}"))?;
+  let state = serde_json::from_str(&data).context("invalid workflow-state.json")?;
+  Ok(Some(state))
 }
 
 pub fn append_journal(session_id: &str, summary: &str) -> Result<()> {

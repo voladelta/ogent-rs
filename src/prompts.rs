@@ -38,16 +38,14 @@ pub fn skill_roots() -> Vec<PathBuf> {
   dirs
 }
 
-pub fn load_skill_content(
-  skill_name: &str,
-) -> Result<(String, String, String, Option<crate::workflow::Workflow>)> {
+pub fn load_skill_content(skill_name: &str) -> Result<(String, String, String)> {
   for dir in skill_roots() {
     let root = dir.join(skill_name);
     let path = root.join("SKILL.md");
     let Ok(content) = fs::read_to_string(&path) else {
       continue;
     };
-    let (name, _, workflow) = parse_skill_frontmatter(&content);
+    let (name, _) = parse_skill_frontmatter(&content);
     return Ok((
       if name.is_empty() {
         skill_name.to_string()
@@ -56,7 +54,6 @@ pub fn load_skill_content(
       },
       root.display().to_string(),
       strip_frontmatter(&content),
-      workflow,
     ));
   }
   bail!("skill {skill_name} not found in local .ogent/skills, .skills, or ~/.ogent/skills")
@@ -76,7 +73,7 @@ pub fn discover_skills_message() -> String {
       let Ok(content) = fs::read_to_string(entry.path().join("SKILL.md")) else {
         continue;
       };
-      let (name, desc, _) = parse_skill_frontmatter(&content);
+      let (name, desc) = parse_skill_frontmatter(&content);
       if name.is_empty() || !seen.insert(name.clone()) {
         continue;
       }
@@ -111,18 +108,14 @@ fn strip_frontmatter(content: &str) -> String {
   content[start..].trim().to_string()
 }
 
-fn parse_skill_frontmatter(content: &str) -> (String, String, Option<crate::workflow::Workflow>) {
+fn parse_skill_frontmatter(content: &str) -> (String, String) {
   let Some(fm) = parse_frontmatter(content) else {
-    return (String::new(), String::new(), None);
+    return (String::new(), String::new());
   };
   let mut name = String::new();
   let mut description = String::new();
-  let mut workflow = None;
 
   if let Ok(value) = serde_yaml::from_str::<serde_yaml::Value>(fm) {
-    if let Some(w) = value.get("workflow") {
-      workflow = serde_yaml::from_value(w.clone()).ok();
-    }
     if let Some(n) = value.get("name").and_then(|v| v.as_str()) {
       name = n.to_string();
     }
@@ -138,7 +131,7 @@ fn parse_skill_frontmatter(content: &str) -> (String, String, Option<crate::work
       }
     }
   }
-  (name, description, workflow)
+  (name, description)
 }
 
 fn xml_escape(s: &str) -> String {
@@ -172,7 +165,7 @@ pub fn build_messages(prompt: &str) -> Vec<Message> {
 
 pub fn enrich_initial_messages(messages: &mut [Message]) {
   append_to_last_user_message(messages, &discover_skills_message());
-  if let Ok((name, root, body, _)) = load_skill_content("colgrep") {
+  if let Ok((name, root, body)) = load_skill_content("colgrep") {
     append_to_last_user_message(
       messages,
       &format!("<skill name=\"{name}\" root=\"{root}\">\n{body}\n</skill>"),

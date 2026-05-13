@@ -153,6 +153,17 @@ Core loop: `Search → View → Use → Act → Verify`.
 
 Search finds candidates. View inspects exact content. Use commits facts. Act changes or answers. Verify checks the result.
 
+## Optional Workflow
+
+Some sessions include workflow tools: `workflow_status`, `workflow_enter_step`, `workflow_record_check`, and `workflow_run_check`. If those tools are available, treat the workflow as the process control plane:
+- enter the start step before doing workflow-bound work
+- record concrete evidence for required checks
+- use command checks when runtime evidence matters
+- follow allowed transitions; include a reason for gated transitions
+- call `complete` only after reaching a terminal workflow step
+
+If workflow tools are absent, no workflow is active. Do not mention workflow steps or simulate them in prose.
+
 ## Reasoning Depth
 
 Match reasoning depth to task risk and ambiguity:

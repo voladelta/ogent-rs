@@ -41,6 +41,8 @@ struct Args {
   fork: Option<Option<String>>,
   #[arg(long, default_value_t = false)]
   temp: bool,
+  #[arg(long)]
+  workflow: Option<String>,
   prompt: Vec<String>,
 }
 
@@ -133,14 +135,42 @@ async fn main() -> Result<()> {
         ..Default::default()
       });
     }
-    (loaded, tools::configured_coder_tools(), None, None)
+    let mut workflow_state =
+      session::read_workflow_state(old_session_id.as_ref().expect("loaded session id"))?;
+    if workflow_state.is_none()
+      && let Some(selector) = args.workflow.as_deref()
+    {
+      workflow_state = Some(crate::workflow::WorkflowState::new(
+        crate::workflow::load_workflow(selector)
+          .with_context(|| format!("load workflow {selector}"))?,
+      ));
+    }
+    (
+      loaded,
+      tools::configured_coder_tools(workflow_state.is_some()),
+      None,
+      workflow_state,
+    )
   } else {
     if prompt.is_empty() && !args.steer {
       bail!("usage: ogent [--profile ...] [--steer] <prompt>");
     }
     let mut messages = prompts::build_messages(&prompt);
     prompts::enrich_initial_messages(&mut messages);
-    (messages, tools::configured_coder_tools(), None, None)
+    let workflow_state = if let Some(selector) = args.workflow.as_deref() {
+      Some(crate::workflow::WorkflowState::new(
+        crate::workflow::load_workflow(selector)
+          .with_context(|| format!("load workflow {selector}"))?,
+      ))
+    } else {
+      None
+    };
+    (
+      messages,
+      tools::configured_coder_tools(workflow_state.is_some()),
+      None,
+      workflow_state,
+    )
   };
   if !prompt.is_empty() {
     meta.prompt = Some(prompt.clone());

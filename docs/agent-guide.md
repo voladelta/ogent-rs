@@ -63,7 +63,40 @@ At startup, available skills are discovered and listed in the user message. The 
 
 The `colgrep` skill is preloaded: if their `SKILL.md` files exist in a skill root, ogent auto-injects their full body into the initial user message after the skills list. This gives the agent semantic code search and repo context instructions without spending a turn on `load_skill`.
 
-Skills may optionally define a **workflow** graph in YAML frontmatter. When loaded, ogent enforces the phase graph at runtime: transitions are validated, loops are bounded, and `complete` is gated to terminal phases only. See "Workflow Skills" below.
+Skills do not define or activate workflows. Skills are reusable capability instructions. Workflows are optional session control policies loaded explicitly with `--workflow`.
+
+### Workflows
+
+Workflows are optional. Start a session with one active workflow when the task benefits from enforced steps, evidence checks, or bounded loops:
+
+```bash
+ogent --workflow common-sw "fix parser panic"
+ogent --workflow workflows/iteration.yaml --steer
+```
+
+If no workflow is supplied, ogent behaves normally.
+
+Workflow state is persisted in `.ogent/sessions/<id>/workflow-state.json` and reloaded on resume/fork. The model sees only the current workflow context before each turn.
+
+Workflow tools are included in the model tool schema only when a workflow is active:
+- `workflow_status`
+- `workflow_enter_step`
+- `workflow_record_check`
+- `workflow_run_check`
+
+Workflow enforcement:
+- first step must be the workflow `start`
+- transitions must follow `next`
+- gated transitions require a reason
+- required checks must pass or be waived before leaving a step
+- `max_visits` bounds loops
+- `complete` requires a terminal workflow step
+
+Workflow and goal tracking are separate:
+- Goal/task tracker = objective and progress display
+- Workflow = process control and evidence gates
+
+When a workflow step is entered and a task tracker exists, ogent mirrors the step as the current tracker phase for visibility.
 
 Install the search CLIs you want the agent to use for efficient codebase discovery:
 
@@ -119,45 +152,6 @@ Skills are **domain knowledge packages** stored as `.ogent/skills/<name>/SKILL.m
 ```
 
 Each `SKILL.md` has YAML frontmatter (`name`, `description`) and Markdown instructions. The description helps the agent decide when to apply the skill. The full body is loaded only when triggered (progressive disclosure).
-
-### Workflow Skills
-
-Skills can optionally define a directed phase graph that ogent enforces at runtime. This keeps the agent bound to a workflow instead of improvising turn-by-turn.
-
-Add a `workflow:` block to the skill frontmatter:
-
-```yaml
----
-name: my-flow
-description: TDD-style implementation flow
-workflow:
-  phases:
-    write_test:
-      next: [implement]
-    implement:
-      next: [run_test]
-    run_test:
-      next: [done, refactor]
-      gate: true          # requires explicit branch choice
-    refactor:
-      next: [run_test]
-      max_visits: 3       # hard loop budget
-    done:
-      terminal: true      # only here can complete succeed
----
-```
-
-**Fields:**
-- `phases`: map of phase IDs to `PhaseDef`
-- `next`: list of allowed next phases
-- `terminal`: if `true`, `complete` is allowed only from this phase
-- `gate`: if `true`, the LLM sees a reminder to explicitly choose a branch
-- `max_visits`: reject transitions after N visits (loop budget)
-
-**Enforcement points:**
-1. **`update_phase`** — when status is `in_progress`, the target phase must be in `next` of the current phase. Illegal transitions return a tool error.
-2. **`complete`** — if the current phase is not terminal, `complete` is rejected with the allowed exit phases listed.
-3. **System prompt injection** — before every LLM call, ogent appends `[Workflow] Phase: X. Visits: N. Next: [...].` to the system prompt so the agent is anchored.
 
 ```bash
 mkdir -p .ogent/skills/my-skill
