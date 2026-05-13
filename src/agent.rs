@@ -345,6 +345,7 @@ impl SteerState {
               content,
               ..Default::default()
             });
+            crate::prompts::enrich_initial_messages(&mut new_messages);
 
             agent.meta.session_id = session::generate_session_id();
             agent.meta.parent_session = Some(parent_id.clone());
