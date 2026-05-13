@@ -83,6 +83,16 @@ pub struct CheckResult {
   pub timestamp_ms: u64,
 }
 
+pub struct ManualCheckInput<'a> {
+  pub step_id: &'a str,
+  pub check_id: &'a str,
+  pub status: CheckStatus,
+  pub evidence: &'a str,
+  pub waiver_reason: &'a str,
+  pub waiver_risk: &'a str,
+  pub timestamp_ms: u64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TransitionRecord {
   #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -331,25 +341,18 @@ impl WorkflowState {
     Ok(())
   }
 
-  pub fn record_check(
-    &mut self,
-    step_id: &str,
-    check_id: &str,
-    status: CheckStatus,
-    evidence: &str,
-    waiver_reason: &str,
-    waiver_risk: &str,
-    timestamp_ms: u64,
-  ) -> Result<(), WorkflowError> {
+  pub fn record_check(&mut self, input: ManualCheckInput<'_>) -> Result<(), WorkflowError> {
+    let step_id = input.step_id;
+    let check_id = input.check_id;
     let check = self.find_check(step_id, check_id)?;
-    if status != CheckStatus::Waived && evidence.trim().is_empty() {
+    if input.status != CheckStatus::Waived && input.evidence.trim().is_empty() {
       return Err(WorkflowError::EvidenceRequired {
         step: step_id.to_string(),
         check: check_id.to_string(),
       });
     }
-    if status == CheckStatus::Waived
-      && (waiver_reason.trim().is_empty() || waiver_risk.trim().is_empty())
+    if input.status == CheckStatus::Waived
+      && (input.waiver_reason.trim().is_empty() || input.waiver_risk.trim().is_empty())
     {
       return Err(WorkflowError::WaiverDetailsRequired {
         step: step_id.to_string(),
@@ -359,13 +362,13 @@ impl WorkflowState {
     let result = CheckResult {
       step_id: step_id.to_string(),
       check_id: check.id.clone(),
-      status,
-      evidence: evidence.trim().to_string(),
-      waiver_reason: waiver_reason.trim().to_string(),
-      waiver_risk: waiver_risk.trim().to_string(),
+      status: input.status,
+      evidence: input.evidence.trim().to_string(),
+      waiver_reason: input.waiver_reason.trim().to_string(),
+      waiver_risk: input.waiver_risk.trim().to_string(),
       command: None,
       exit_code: None,
-      timestamp_ms,
+      timestamp_ms: input.timestamp_ms,
     };
     self
       .check_results
@@ -630,15 +633,15 @@ mod tests {
   fn invalid_transition_rejected() {
     let mut ws = WorkflowState::new(test_workflow());
     ws.enter_step("intake", "", 1).unwrap();
-    ws.record_check(
-      "intake",
-      "scope",
-      CheckStatus::Passed,
-      "scope ok",
-      "",
-      "",
-      2,
-    )
+    ws.record_check(ManualCheckInput {
+      step_id: "intake",
+      check_id: "scope",
+      status: CheckStatus::Passed,
+      evidence: "scope ok",
+      waiver_reason: "",
+      waiver_risk: "",
+      timestamp_ms: 2,
+    })
     .unwrap();
     let err = ws.enter_step("verify", "", 3).unwrap_err();
     assert!(err.to_string().contains("invalid transition"));
@@ -663,37 +666,37 @@ mod tests {
   fn gate_requires_reason() {
     let mut ws = WorkflowState::new(test_workflow());
     ws.enter_step("intake", "", 1).unwrap();
-    ws.record_check(
-      "intake",
-      "scope",
-      CheckStatus::Passed,
-      "scope ok",
-      "",
-      "",
-      2,
-    )
+    ws.record_check(ManualCheckInput {
+      step_id: "intake",
+      check_id: "scope",
+      status: CheckStatus::Passed,
+      evidence: "scope ok",
+      waiver_reason: "",
+      waiver_risk: "",
+      timestamp_ms: 2,
+    })
     .unwrap();
     ws.enter_step("execute", "", 3).unwrap();
-    ws.record_check(
-      "execute",
-      "work_done",
-      CheckStatus::Passed,
-      "work ok",
-      "",
-      "",
-      4,
-    )
+    ws.record_check(ManualCheckInput {
+      step_id: "execute",
+      check_id: "work_done",
+      status: CheckStatus::Passed,
+      evidence: "work ok",
+      waiver_reason: "",
+      waiver_risk: "",
+      timestamp_ms: 4,
+    })
     .unwrap();
     ws.enter_step("verify", "", 5).unwrap();
-    ws.record_check(
-      "verify",
-      "verification",
-      CheckStatus::Passed,
-      "tests ok",
-      "",
-      "",
-      6,
-    )
+    ws.record_check(ManualCheckInput {
+      step_id: "verify",
+      check_id: "verification",
+      status: CheckStatus::Passed,
+      evidence: "tests ok",
+      waiver_reason: "",
+      waiver_risk: "",
+      timestamp_ms: 6,
+    })
     .unwrap();
     let err = ws.enter_step("review", "", 7).unwrap_err();
     assert!(err.to_string().contains("requires a reason"));
@@ -711,48 +714,48 @@ mod tests {
   fn terminal_step_allows_complete() {
     let mut ws = WorkflowState::new(test_workflow());
     ws.enter_step("intake", "", 1).unwrap();
-    ws.record_check(
-      "intake",
-      "scope",
-      CheckStatus::Passed,
-      "scope ok",
-      "",
-      "",
-      2,
-    )
+    ws.record_check(ManualCheckInput {
+      step_id: "intake",
+      check_id: "scope",
+      status: CheckStatus::Passed,
+      evidence: "scope ok",
+      waiver_reason: "",
+      waiver_risk: "",
+      timestamp_ms: 2,
+    })
     .unwrap();
     ws.enter_step("execute", "", 3).unwrap();
-    ws.record_check(
-      "execute",
-      "work_done",
-      CheckStatus::Passed,
-      "work ok",
-      "",
-      "",
-      4,
-    )
+    ws.record_check(ManualCheckInput {
+      step_id: "execute",
+      check_id: "work_done",
+      status: CheckStatus::Passed,
+      evidence: "work ok",
+      waiver_reason: "",
+      waiver_risk: "",
+      timestamp_ms: 4,
+    })
     .unwrap();
     ws.enter_step("verify", "", 5).unwrap();
-    ws.record_check(
-      "verify",
-      "verification",
-      CheckStatus::Passed,
-      "tests ok",
-      "",
-      "",
-      6,
-    )
+    ws.record_check(ManualCheckInput {
+      step_id: "verify",
+      check_id: "verification",
+      status: CheckStatus::Passed,
+      evidence: "tests ok",
+      waiver_reason: "",
+      waiver_risk: "",
+      timestamp_ms: 6,
+    })
     .unwrap();
     ws.enter_step("review", "tests passed", 7).unwrap();
-    ws.record_check(
-      "review",
-      "self_review",
-      CheckStatus::Passed,
-      "diff ok",
-      "",
-      "",
-      8,
-    )
+    ws.record_check(ManualCheckInput {
+      step_id: "review",
+      check_id: "self_review",
+      status: CheckStatus::Passed,
+      evidence: "diff ok",
+      waiver_reason: "",
+      waiver_risk: "",
+      timestamp_ms: 8,
+    })
     .unwrap();
     ws.enter_step("done", "ready", 9).unwrap();
     ws.ensure_current_step_is_terminal().unwrap();

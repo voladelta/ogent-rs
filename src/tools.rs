@@ -13,7 +13,7 @@ use crate::agent::Agent;
 use crate::hashline::{EditOp, apply_anchor_edits, render_hashlines};
 use crate::task_tracker::{Complexity, GoalState, PhaseUpdate, Status, TaskTracker, TodoUpdate};
 use crate::types::{Tool, ToolFunction};
-use crate::workflow::CheckStatus;
+use crate::workflow::{CheckStatus, ManualCheckInput};
 
 pub struct ToolContext<'a> {
   pub agent: Option<&'a mut Agent>,
@@ -906,15 +906,15 @@ fn workflow_record_check(agent: &mut crate::agent::Agent, args: &str) -> Result<
   let Some(ws) = agent.workflow_state.as_mut() else {
     bail!("no active workflow; start ogent with --workflow to enable workflow enforcement");
   };
-  ws.record_check(
-    args.step_id.trim(),
-    args.check_id.trim(),
-    args.status,
-    &args.evidence,
-    &args.waiver_reason,
-    &args.waiver_risk,
-    crate::session::timestamp_ms(),
-  )?;
+  ws.record_check(ManualCheckInput {
+    step_id: args.step_id.trim(),
+    check_id: args.check_id.trim(),
+    status: args.status,
+    evidence: &args.evidence,
+    waiver_reason: &args.waiver_reason,
+    waiver_risk: &args.waiver_risk,
+    timestamp_ms: crate::session::timestamp_ms(),
+  })?;
   Ok(ws.render_status())
 }
 
