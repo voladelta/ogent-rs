@@ -507,4 +507,16 @@ Some trailing text"#;
     assert!(sys.contains("src/lib.rs"));
     assert_eq!(task, "review src/lib.rs");
   }
+
+  #[tokio::test]
+  async fn resolve_worker_prompts_uses_coder_builtin() {
+    let (coder_sys, coder_task) =
+      resolve_worker_prompts("coder", "edit src/lib.rs", "## Write Scope\n- src/lib.rs")
+        .await
+        .unwrap();
+    assert!(coder_sys.contains("implementation worker"));
+    assert!(coder_sys.contains("## Context"));
+    assert!(coder_sys.contains("src/lib.rs"));
+    assert_eq!(coder_task, "edit src/lib.rs");
+  }
 }

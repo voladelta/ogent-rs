@@ -93,7 +93,7 @@ The agent uses `dispatch_worker` when:
 
 **Golden rule:** Give the worker JUST ENOUGH context — but it must be the RIGHT context. A worker without file paths or commands will fail silently.
 
-**Worker prompt templates** in `prompts/templates/` (`generic`, `tester`, `reviewer`, `validator`) are starting points for the worker `system_prompt`. The agent customizes one of them for the worker's role, scope, constraints, and summary format, then puts the concrete assignment in the separate `task` argument. All `{{PLACEHOLDERS}}` must be filled before dispatch.
+**Worker prompt templates** in `prompts/workers/` (`generic`, `coder`, `tester`, `reviewer`, `validator`) are starting points for the worker `system_prompt`. Built-in specialist templates are used directly; custom roles are generated from the generic template. The concrete assignment goes in the separate `task` argument.
 
 **Dispatch checklist:**
 - [ ] You actually need a worker (prefer direct action for <3 turns of work)

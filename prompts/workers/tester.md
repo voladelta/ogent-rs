@@ -10,7 +10,12 @@ Follow these rules:
 5. Report exact failures with command output excerpts.
 6. Do not patch production code unless explicitly assigned to do so.
 7. If a file, command, or fact is missing, report the blocker instead of guessing.
-8. Finish by calling `worker_complete` with a concise Markdown summary.
+
+## Reporting
+
+Finish by calling `worker_complete` with a concise Markdown summary. Report only
+observed work and results. Do not fabricate, embellish, or include hidden
+reasoning.
 
 Use this report shape:
 

@@ -169,13 +169,13 @@ fn build_coder_tools() -> Vec<Tool> {
     ),
     schema(
       "dispatch_worker",
-      "Hire a specialist coworker. ogent generates the worker's system prompt via an architect LLM call using the template and context you provide. The worker runs as a separate process and returns a Markdown summary.",
-      json!({"type":"object","properties":{"task":{"type":"string","description":"What the worker should accomplish — exact assignment, expected output, success criteria"},"template":{"type":"string","description":"Worker template or concise custom role: generic, tester, reviewer, validator, etc. Default: generic."},"context":{"type":"string","description":"Markdown context for the worker: project info, files, commands, constraints, known facts"}},"required":["task"],"additionalProperties":false}),
+      "Hire a specialist coworker. ogent generates the worker's system prompt via an architect LLM call using the template and context you provide. Built-in templates bypass architect generation. The worker runs as a separate process and returns a Markdown summary.",
+      json!({"type":"object","properties":{"task":{"type":"string","description":"What the worker should accomplish — exact assignment, expected output, success criteria"},"template":{"type":"string","description":"Worker template or concise custom role: generic, coder, tester, reviewer, validator, etc. Default: generic."},"context":{"type":"string","description":"Markdown context for the worker: project info, files, commands, constraints, known facts"}},"required":["task"],"additionalProperties":false}),
     ),
     schema(
       "start_workers",
-      "Start a batch of specialist coworkers asynchronously. ogent generates each worker's system prompt via an architect LLM call.",
-      json!({"type":"object","properties":{"coworkers":{"type":"array","minItems":1,"items":{"type":"object","properties":{"name":{"type":"string","description":"Optional short unique label for status"},"task":{"type":"string","description":"What the worker should accomplish"},"template":{"type":"string","description":"Worker template or concise custom role: generic, tester, reviewer, validator, etc. Default: generic."},"context":{"type":"string","description":"Markdown context: project info, files, commands, constraints, known facts"}},"required":["task"],"additionalProperties":false}}},"required":["coworkers"],"additionalProperties":false}),
+      "Start a batch of specialist coworkers asynchronously. ogent generates each worker's system prompt via an architect LLM call unless a built-in template is used.",
+      json!({"type":"object","properties":{"coworkers":{"type":"array","minItems":1,"items":{"type":"object","properties":{"name":{"type":"string","description":"Optional short unique label for status"},"task":{"type":"string","description":"What the worker should accomplish"},"template":{"type":"string","description":"Worker template or concise custom role: generic, coder, tester, reviewer, validator, etc. Default: generic."},"context":{"type":"string","description":"Markdown context: project info, files, commands, constraints, known facts"}},"required":["task"],"additionalProperties":false}}},"required":["coworkers"],"additionalProperties":false}),
     ),
     schema(
       "check_workers",

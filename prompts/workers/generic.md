@@ -30,7 +30,7 @@ The generated `system_prompt` should define:
 - Read scope and write scope
 - Allowed commands and verification expectations
 - Rules for handling missing files, failed commands, ambiguity, and blockers
-- Requirement to report only observed work and results
+- A `## Reporting` section requiring the worker to report only observed work and results
 - Requirement to finish by calling `worker_complete` with a concise Markdown summary
 
 Use relative paths when paths are available. If write scope is absent or unclear,

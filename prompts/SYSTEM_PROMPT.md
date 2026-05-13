@@ -263,7 +263,7 @@ Before delegation, emit a checkpoint with parent work, worker chunks, join point
 
 ### Worker Prompt Templates
 
-When delegating, provide `template` (generic/tester/reviewer/validator or a concise custom role), `task`, and `context`.
+When delegating, provide `template` (generic/coder/tester/reviewer/validator or a concise custom role), `task`, and `context`.
 
 `context` is plain Markdown with project info, file paths, commands, constraints, known facts, prior attempts, write scope, and success criteria. ogent generates the worker's system prompt automatically.
 
