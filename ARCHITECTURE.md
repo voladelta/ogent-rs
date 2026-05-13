@@ -48,7 +48,7 @@ agent.rs
     +--> session.rs -> .ogent/sessions
 ```
 
-User prompt or steer input enters through `main.rs`, which builds initial messages and creates an `Agent`. If `--workflow <name-or-path>` is supplied, `main.rs` loads and validates one active workflow before selecting the tool schema. `run_loop` or `steer_loop` calls `client.chat`, which streams an SSE response. Tool calls in the response are executed through `tools.rs`. Workers are spawned via `workers.rs` as child `ogent --worker` processes. Sessions and optional workflow state are persisted via `session.rs`.
+User prompt or steer input enters through `main.rs`, which builds initial messages and creates an `Agent`. If `--workflow <name-or-path>` is supplied, `main.rs` loads and validates one active workflow before selecting the tool schema. Built-in workflow names resolve to YAML files in `workflows/`; explicit file paths are also supported. `run_loop` or `steer_loop` calls `client.chat`, which streams an SSE response. Tool calls in the response are executed through `tools.rs`. Workers are spawned via `workers.rs` as child `ogent --worker` processes. Sessions and optional workflow state are persisted via `session.rs`.
 
 ## Invariants and Boundaries
 

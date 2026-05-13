@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Workflow {
@@ -549,72 +550,27 @@ fn empty_dash(s: &str) -> &str {
 }
 
 pub fn load_workflow(selector: &str) -> anyhow::Result<Workflow> {
-  let content = if selector == "common-sw" {
-    COMMON_SW_WORKFLOW.to_string()
-  } else {
-    std::fs::read_to_string(selector)?
-  };
+  let content = std::fs::read_to_string(resolve_workflow_path(selector)?)?;
   let workflow: Workflow = serde_yaml::from_str(&content)?;
   workflow.validate()?;
   Ok(workflow)
 }
 
-const COMMON_SW_WORKFLOW: &str = r#"id: common-sw
-name: Common Software Work
-version: 1
-start: intake
-instructions: |
-  Use this workflow to keep software work bounded, verified, and reviewable.
-  Keep evidence concrete. Waive checks only with reason and risk.
-steps:
-  intake:
-    title: Intake
-    instructions: |
-      Understand the request, scope, relevant files, and verification path.
-    next: [execute]
-    checks:
-      - id: scope
-        type: manual
-        required: true
-  execute:
-    title: Execute
-    instructions: |
-      Do the requested work: code, review, debug, document, or analyze.
-    next: [verify]
-    checks:
-      - id: work_done
-        type: manual
-        required: true
-  verify:
-    title: Verify
-    instructions: |
-      Run the relevant check or record why it cannot be run.
-    next: [repair, review]
-    gate: true
-    checks:
-      - id: verification
-        type: manual
-        required: true
-  repair:
-    title: Repair
-    instructions: |
-      Fix failed verification. Keep changes narrow.
-    next: [verify]
-    max_visits: 5
-  review:
-    title: Review
-    instructions: |
-      Review final diff/output for correctness, scope, and residual risk.
-    next: [execute, done]
-    gate: true
-    checks:
-      - id: self_review
-        type: manual
-        required: true
-  done:
-    title: Done
-    terminal: true
-"#;
+fn resolve_workflow_path(selector: &str) -> anyhow::Result<PathBuf> {
+  let explicit = PathBuf::from(selector);
+  if explicit.exists() {
+    return Ok(explicit);
+  }
+  let builtin = Path::new(env!("CARGO_MANIFEST_DIR"))
+    .join("workflows")
+    .join(format!("{selector}.yaml"));
+  if builtin.exists() {
+    return Ok(builtin);
+  }
+  anyhow::bail!(
+    "workflow '{selector}' not found. Use a file path or a built-in workflow name from workflows/"
+  )
+}
 
 #[cfg(test)]
 mod tests {

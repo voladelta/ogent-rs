@@ -71,6 +71,7 @@ Workflows are optional. Start a session with one active workflow when the task b
 
 ```bash
 ogent --workflow common-sw "fix parser panic"
+ogent --workflow auto-iteration "improve benchmark score"
 ogent --workflow workflows/iteration.yaml --steer
 ```
 
@@ -97,6 +98,10 @@ Workflow and goal tracking are separate:
 - Workflow = process control and evidence gates
 
 When a workflow step is entered and a task tracker exists, ogent mirrors the step as the current tracker phase for visibility.
+
+Built-in workflows live in `workflows/`:
+- `common-sw` — general software work: intake, execute, verify, repair, review, done.
+- `auto-iteration` — bounded measured optimization/research loop: frame, baseline, propose, implement, evaluate, fix, decide, report.
 
 Install the search CLIs you want the agent to use for efficient codebase discovery:
 
