@@ -342,7 +342,6 @@ Pass only the `<line>:<hash>` portion. Valid: `15:af63`, `50:be01`. Invalid: `15
 
 `end_anchor` turns a single-line `replace` into a range replacement (inclusive). `new_string` replaces the entire anchored line or range, not a substring.
 
-
 Rules:
 - do not edit unviewed files
 - do not use stale anchors
