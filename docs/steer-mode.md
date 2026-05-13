@@ -20,15 +20,15 @@ Supported commands:
 | `/cancel` | Cancel the in-flight model request |
 | `/compact` | Compact the session: ask the model for a handoff brief, then spawn a new child session with the summary. The parent session is preserved on disk |
 | `/compact <focus>` | Compact and focus the new session on a specific task |
-| `/new` | Restart the session from scratch: clear history (except system prompt), reset turns/tokens/workers, and wait for input |
+| `/profile <name>` | Switch to a different model profile (e.g., `/profile kimi`) |
+| `/new` | Restart the session from scratch: clear history (except system prompt), reset tokens/workers, and wait for input |
 | `/q`, `/quit`, `quit`, `exit`, `Esc`, `Ctrl-C` | Exit steer mode |
 | any other text | Abort the in-flight model request, append the text as a new user message, and re-prompt |
 
 Navigation:
 
-- `Up` / `Down`: scroll one line
-- `PageUp` / `PageDown`: scroll one page
-- `Home` / `End`: jump to top or follow bottom
+- `Up` / `Down`: move cursor in the input box; when at the edge, scroll the log one line
+- `PageUp` / `PageDown`: scroll the log one page
 - mouse wheel: scroll log
 
 If you run steer mode without an initial prompt, the TUI waits for your first message:

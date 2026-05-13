@@ -14,7 +14,6 @@ Common options:
 |---|---|
 | `--profile <name>` | Model profile. Default: `ds-flash` |
 | `--steer` | Start interactive TUI steering mode |
-| `--retry <n>` | Retry transient API errors. Default: `5` |
 | `--autocompact <percent>` | Auto-compact context when usage crosses threshold. Default: `80`. `-1` to disable |
 | `--resume [<session>]` | Resume the latest or named non-worker session and save back into that same session |
 | `--fork [<session>]` | Load the latest or named non-worker session, then save the run into a new child session |
@@ -51,17 +50,17 @@ cargo run -- --profile kimi "Explain this repository"
 
 | Tool | Description |
 |---|---|
-| `read_file` | Read a workspace file or allowed config file such as `~/.ogent` (1 MB max). Optional `start`/`end` line range (0-indexed, inclusive/exclusive) |
+| `read_file` | Read a workspace file or allowed config file such as `~/.ogent` (1 MB max). Optional `start`/`end` line range (1-indexed, inclusive) |
 | `write_file` | Write a new file; creates parent directories. Existing files require `overwrite_existing=true`; prefer `edit_hash_anchors` for normal edits |
-| `read_hash_anchors` | Read workspace files with `line:hash\|content` prefixes for anchored editing. Optional `start`/`end` line range (0-indexed, inclusive/exclusive) |
+| `read_hash_anchors` | Read workspace files with `line:hash\|content` prefixes for anchored editing. Optional `start`/`end` line range (1-indexed, inclusive) |
 | `edit_hash_anchors` | Anchored edits via an `ops` array. Batch multiple edits to the same file in one call so anchors are resolved against one snapshot |
 | `bash` | Run a shell command in the workspace; returns combined stdout/stderr. Default timeout: 120s; max timeout: 600s |
 | `repo_map` | Display a tree map of the workspace or allowed config roots such as `~/.ogent`. Use instead of `bash` with `ls`/`eza` |
 | `web_search` | Search the web via Exa; returns titles, URLs, and highlights |
 | `web_read` | Read page content from URLs via Exa; returns full text as markdown |
-| `code_web_context` | Semantic code search across the web (GitHub, docs, Stack Overflow) |
+| `code_web_context` | Search real code for syntax, APIs, and patterns to avoid hallucinating implementation details. Not for general web search or URL reading |
 | `load_skill` | Load a skill from `.ogent/skills/`, `.skills/`, or `~/.ogent/skills/` and inject its content |
-| `dispatch_worker` | Hire a specialist coworker. system_prompt shapes worker behavior/scope; task states the concrete assignment. The worker runs as a separate process and returns a Markdown summary |
+| `dispatch_worker` | Hire a specialist coworker. `template` selects the worker role (generic, coder, tester, reviewer, validator); `task` states the concrete assignment. ogent generates the system prompt via an architect LLM call unless a built-in template is used. The worker runs as a separate process and returns a Markdown summary |
 | `start_workers` | Start a batch of specialist coworkers asynchronously and return worker IDs immediately |
 | `check_workers` | Wait for active async coworkers, collect their summaries/errors, and clear the batch |
 | `set_goal` | Initialize runtime task tracking with one Goal (single-use) |
@@ -100,8 +99,8 @@ Each op supports:
 
 - `action="replace"` with `anchor` for one line
 - `action="replace"` with `anchor` and `end_anchor` for a range
-- `action="before"` with `anchor` to insert before a line
-- `action="after"` with `anchor` to insert after a line
+- `action="insert_before"` with `anchor` to insert before a line
+- `action="insert_after"` with `anchor` to insert after a line
 
 Example:
 
@@ -109,7 +108,7 @@ Example:
 edit_hash_anchors(
   path="src/main.rs",
   ops=[
-    {"anchor":"10:abc1","action":"before","new_string":"// header"},
+    {"anchor":"10:abc1","action":"insert_before","new_string":"// header"},
     {"anchor":"20:def2","action":"replace","new_string":"updated"},
     {"anchor":"30:9a8b","end_anchor":"34:cc02","action":"replace","new_string":"replacement block"}
   ]
@@ -120,7 +119,7 @@ Hash is FNV-1a 64-bit truncated to 4 hex chars.
 
 ## Retry Behavior
 
-`--retry=5` is the default. Transient API errors retry with exponential backoff (`1s, 2s, 4s, 8s...` up to 60s max).
+Transient API errors retry with exponential backoff (`1s, 2s, 4s, 8s...` up to 60s max). Up to 5 retries.
 
 HTTP `429 Rate Limit` is terminal and is not retried.
 
@@ -162,29 +161,22 @@ cargo run -- fork 1778216383-2028 "Try a different implementation"
 cargo run -- --fork 1778216383-2028 "Try a different implementation"
 ```
 
-## Turn Limits
+## Context Budget Reminders
 
-Worker limits can be set by the parent agent through the `max_turns` field in `dispatch_worker` or async worker specs.
+When `--autocompact` is enabled and token usage crosses the threshold, the agent receives escalating reminders:
 
-### Turn Budget Reminders
-
-The agent receives contextual reminders at key points in the turn budget to guide behavior:
-
-| Reminder | When | Guidance |
+| Urgency | Trigger | Guidance |
 |---|---|---|
-| Turn 1 | Always | "Use turns deliberately. Delegate coworkers now if work is parallelizable." |
-| 50% used | `max_turns >= 10`, remaining = `max_turns/2` | "If useful work is parallelizable and delegatable, delegate coworkers now." |
-| 75% used | `max_turns >= 10`, remaining = `max_turns/4` (>= 5) | "Focus on verification and completion. Avoid new delegation." |
-| 3 left | `remaining == 3` | "Finish current chunk and prepare to summarize for human review." |
-| 2 left | `remaining == 2` | "No new work. `complete` or prepare a summary." |
-| FINAL | `remaining == 1` | "`complete` if done. Otherwise summarize progress for human review." |
+| 1 | Ratio >= threshold | "Finish the current chunk. Do not start unrelated work." |
+| 2 | Ratio >= threshold (again) | "Approaching the limit. Finish only critical in-progress work. Do not delegate new work." |
+| 3+ | Ratio >= threshold (again) | "EXHAUSTED. Do not write more files, delegate, or start new work. Call `complete` immediately." |
 
-These reminders help the agent avoid overcommitting on the final turns and prioritize completion when the turn budget is exhausted.
+These are injected as user-visible reminders, not hard stops.
 
 ## Token Reporting
 
-After each run, prompt/completion/total tokens are reported:
+After each run, total tokens are reported:
 
 ```
-tokens: prompt=4057 completion=625 total=4682
+tokens: 4682
 ```

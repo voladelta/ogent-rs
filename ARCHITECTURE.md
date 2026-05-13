@@ -4,7 +4,7 @@
 
 ## Bird's Eye View
 
-The system has two layers: the agent loops and the main driver. The agent loops (`src/agent.rs`) implement turn logic, tool call dispatch, budget reminders, compaction, and handoff logic. The main driver (`src/main.rs`) parses CLI flags, loads profiles, sets up agent state, and starts the correct loop (`run_loop` or `steer_loop`). This split keeps agent logic contained and the entry point explicit.
+The system has two layers: the agent loops and the main driver. The agent loops (`src/agent.rs`) implement turn logic, tool call dispatch, context-budget reminders, compaction, and handoff logic. The main driver (`src/main.rs`) parses CLI flags, loads profiles, sets up agent state, and starts the correct loop (`run_loop` or `steer_loop`). This split keeps agent logic contained and the entry point explicit.
 ## Codemap
 
 Coarse-grained modules and their responsibilities:

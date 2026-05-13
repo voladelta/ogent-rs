@@ -97,7 +97,7 @@ The agent uses `dispatch_worker` when:
 
 **Dispatch checklist:**
 - [ ] You actually need a worker (prefer direct action for <3 turns of work)
-- [ ] `system_prompt` defines role, allowed tools/actions, read/write scope, constraints, commands, and summary format
+- [ ] `template` selects the worker role and defines behavior/scope; built-in templates (generic, coder, tester, reviewer, validator) are used directly, custom roles are generated from the generic template
 - [ ] `task` states the exact assignment, expected output, success criteria, and immediate next step
 - [ ] All file paths are exact relative paths
 - [ ] Commands are exact and copied into the worker scope

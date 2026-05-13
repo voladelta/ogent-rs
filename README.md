@@ -57,7 +57,7 @@ Workers run as child `ogent --worker` processes with a custom system prompt and 
 ## Documentation
 
 - [Agent Guide](docs/agent-guide.md) — agent internals, checkpoints, task tracking, skills, and hiring coworkers
-- [Reference](docs/reference.md) — CLI flags, model profiles, tools, hashline editing, sessions, turn limits
+- [Reference](docs/reference.md) — CLI flags, model profiles, tools, hashline editing, sessions, context budget
 - [Steer Mode](docs/steer-mode.md) — Interactive TUI, commands, and navigation
 - [Architecture](ARCHITECTURE.md) — Module map, data flow, and design invariants
 
