@@ -97,18 +97,17 @@ update_phase("implement", completed)
 
 ### 3. Validate
 
-Dispatch a validator worker (different `profile`, adversarial check). Self-validation with curl/manual checks does not count.
+Dispatch a validator worker (adversarial check). Self-validation with curl/manual checks does not count.
 
 Validator rules:
-1. Use a **different model profile** than the worker when possible. Set `profile` in `dispatch_worker`.
-2. The validator sees **only contracts + files + commands**, not your implementation reasoning.
-3. The validator uses the structured handoff format (Commands Run, Contracts Satisfied, Contracts Failed, Blockers).
-4. You read the structured report and diagnose root cause from the per-contract failures.
-5. Never skip. Never self-validate after a previous rejection.
+1. The validator sees **only contracts + files + commands**, not your implementation reasoning.
+2. The validator uses the structured handoff format (Commands Run, Contracts Satisfied, Contracts Failed, Blockers).
+3. You read the structured report and diagnose root cause from the per-contract failures.
+4. Never skip. Never self-validate after a previous rejection.
 
 ```
 update_phase("validate", in_progress)
-dispatch_worker({profile: "different-model", ...})
+dispatch_worker({template: "validator", task: "...", context: "..."})
 update_phase("validate", completed)
 ```
 

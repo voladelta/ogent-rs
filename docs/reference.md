@@ -125,9 +125,7 @@ HTTP `429 Rate Limit` is terminal and is not retried.
 
 ## Session Persistence
 
-After each run, the full conversation is written to `.ogent/sessions/*.jsonl`.
-
-Worker sessions include `worker` in the filename.
+After each run, the full conversation is written to `.ogent/sessions/<id>/messages.jsonl` (inside a directory with `meta.json`).
 
 When the coder calls `complete`, its structured Markdown summary is appended to `.ogent/journal.md`. Journal entries are retrospective experience notes, not instructions loaded into future runs. If tracked work is still open, the first `complete` call returns a warning; a second `complete` must include explicit limitation and intent.
 

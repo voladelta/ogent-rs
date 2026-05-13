@@ -52,7 +52,7 @@ Agent reads report -> integrate -> continue or finalize
 
 The agent is the default mode. It reads files, writes code, runs tests, debugs issues, and hires workers only when useful.
 
-Workers run as child `ogent --worker` processes with a custom system prompt and task supplied by the parent agent.
+Workers run as child `ogent --worker` processes. The parent provides a `template` (worker role), `task` (concrete assignment), and `context` (project info, files, constraints); ogent generates the worker's system prompt via an architect LLM call unless a built-in template is used.
 
 ## Documentation
 

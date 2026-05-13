@@ -16,7 +16,7 @@ Supported commands:
 
 | Input | Effect |
 |---|---|
-| `/complete` | Ask the agent to summarize the session, call `complete`, save the journal entry, and exit |
+| `/complete` | Ask the agent to summarize the session and call `complete` |
 | `/cancel` | Cancel the in-flight model request |
 | `/compact` | Compact the session: ask the model for a handoff brief, then spawn a new child session with the summary. The parent session is preserved on disk |
 | `/compact <focus>` | Compact and focus the new session on a specific task |
