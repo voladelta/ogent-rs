@@ -31,7 +31,7 @@ pub fn get_builtin_worker_prompt(name: &str) -> Option<&'static str> {
 }
 
 pub fn skill_roots() -> Vec<PathBuf> {
-  let mut dirs = vec![PathBuf::from(".ogent/skills"), PathBuf::from(".skills")];
+  let mut dirs = vec![PathBuf::from(".ogent/skills"), PathBuf::from(".agents/skills"), PathBuf::from(".skills")];
   if let Some(home) = std::env::var_os("HOME") {
     dirs.push(PathBuf::from(home).join(".ogent/skills"));
   }
@@ -56,7 +56,7 @@ pub fn load_skill_content(skill_name: &str) -> Result<(String, String, String)> 
       strip_frontmatter(&content),
     ));
   }
-  bail!("skill {skill_name} not found in local .ogent/skills, .skills, or ~/.ogent/skills")
+  bail!("skill {skill_name} not found in local .ogent/skills, .agents/skills, .skills, or ~/.ogent/skills")
 }
 
 pub fn discover_skills_message() -> String {
