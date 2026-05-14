@@ -15,7 +15,7 @@ mod workflow;
 mod workspace;
 
 use anyhow::{Context, Result, bail};
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 use std::env;
 use std::io::{self, Write};
 
@@ -152,8 +152,11 @@ async fn main() -> Result<()> {
       workflow_state,
     )
   } else {
-    if prompt.is_empty() && !args.steer {
-      bail!("usage: ogent [--profile ...] [--steer] <prompt>");
+    if prompt.is_empty() && !args.steer && !args.worker && !is_loaded_session {
+      let mut cmd = Args::command();
+      cmd.print_help()?;
+      println!();
+      return Ok(());
     }
     let mut messages = prompts::build_messages(&prompt);
     prompts::enrich_initial_messages(&mut messages);

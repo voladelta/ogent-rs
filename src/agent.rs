@@ -653,14 +653,16 @@ impl Agent {
         self.compact.compacting = false;
         self.compact.urgency = 0;
         self.pending_compact = CompactPending::None;
+        self.task_tracker = None;
         tui.log.clear();
         tui.status.set_tokens(0);
         tui.log.push("[steer] new session started");
         return Ok(SteerAction::Restart);
       }
       SteerEvent::Compact(task_prompt) => {
-        if !self.dirty {
-          tui.log.push("[steer] nothing to compact; session is empty");
+        let has_assistant = self.messages.iter().any(|m| m.role == "assistant");
+        if !has_assistant {
+          tui.log.push("[steer] nothing to compact; no assistant response yet");
         } else {
           let mut compact_msg = String::from(
             "Produce a handoff brief for continuing this work in a fresh context window.\n\n\
@@ -1234,6 +1236,7 @@ mod dirty_state_machine_tests {
     let mut agent = dummy_agent();
     let tui = crate::tui::TuiHandle::test_handle();
     agent.push_msg(user_msg("hello"));
+    agent.push_msg(assistant_msg_with_reasoning("ok", ""));
     let old_id = agent.meta.session_id.clone();
     let old_len = agent.messages.len();
 
@@ -1255,6 +1258,7 @@ mod dirty_state_machine_tests {
     let mut agent = dummy_agent();
     let tui = crate::tui::TuiHandle::test_handle();
     agent.push_msg(user_msg("hello"));
+    agent.push_msg(assistant_msg_with_reasoning("ok", ""));
 
     let action = agent
       .apply_steer_event(SteerEvent::Compact(Some("fix auth".into())), &tui)
@@ -1263,5 +1267,24 @@ mod dirty_state_machine_tests {
     assert!(matches!(agent.pending_compact, CompactPending::WithFocus(ref s) if s == "fix auth"));
     let last = agent.messages.last().unwrap();
     assert!(last.content.contains("fix auth"));
+  }
+
+  #[tokio::test]
+  async fn new_clears_task_tracker() {
+    let mut agent = dummy_agent();
+    let tui = crate::tui::TuiHandle::test_handle();
+    agent.task_tracker = Some(crate::task_tracker::TaskTracker::new(
+      crate::task_tracker::GoalState {
+        title: "test".into(),
+        status: crate::task_tracker::Status::InProgress,
+        complexity: crate::task_tracker::Complexity::Simple,
+        success_criteria: Vec::new(),
+        notes: String::new(),
+      },
+    ));
+    agent.push_msg(user_msg("hello"));
+    let action = agent.apply_steer_event(SteerEvent::New, &tui).unwrap();
+    assert!(matches!(action, SteerAction::Restart));
+    assert!(agent.task_tracker.is_none());
   }
 }
