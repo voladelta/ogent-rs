@@ -325,7 +325,6 @@ fn run_ui_loop(
   let mut follow_bottom = true;
   let mut file_selector: Option<FileSelector> = None;
   let mut selector_start: Option<ratatui_textarea::DataCursor> = None;
-  let mut all_files: Option<Vec<String>> = None;
   let mut cursor_visible = false;
 
   let mut prev_generation = log.generation().wrapping_sub(1);
@@ -416,13 +415,11 @@ fn run_ui_loop(
                 break;
               }
               KeyCode::Char('@') => {
-                if all_files.is_none() {
-                  all_files = Some(collect_workspace_files());
-                }
+                let all_files = collect_workspace_files();
                 selector_start = Some(textarea.cursor());
                 let input = key_event_to_input(&key);
                 textarea.input_without_shortcuts(input);
-                file_selector = Some(FileSelector::new(all_files.as_ref().unwrap().clone()));
+                file_selector = Some(FileSelector::new(all_files));
               }
               KeyCode::Enter => {
                 if key.modifiers.contains(KeyModifiers::SHIFT) {
@@ -625,7 +622,15 @@ fn collect_files_recursive(root: &std::path::Path, dir: &std::path::Path, files:
       if path.is_dir() {
         match name_str.as_ref() {
           "target" | "node_modules" | "__pycache__" | "build" | "dist" | "out" => {}
-          _ => collect_files_recursive(root, &path, files),
+          _ => {
+            if let Ok(rel) = path.strip_prefix(root) {
+              let rel_str = rel.to_string_lossy().replace('\\', "/") + "/";
+              if rel_str.len() > 1 {
+                files.push(rel_str);
+              }
+            }
+            collect_files_recursive(root, &path, files);
+          }
         }
       } else if let Ok(rel) = path.strip_prefix(root) {
         let rel_str = rel.to_string_lossy().replace('\\', "/");
