@@ -58,7 +58,7 @@ cargo run -- --profile kimi "Explain this repository"
 | `repo_map` | Display a tree map of the workspace or allowed config roots such as `~/.ogent`. Use instead of `bash` with `ls`/`eza` |
 | `web_search` | Search the web via Exa; returns titles, URLs, and highlights |
 | `web_read` | Read page content from URLs via Exa; returns full text as markdown |
-| `code_web_context` | Search real code for syntax, APIs, and patterns to avoid hallucinating implementation details. Not for general web search or URL reading |
+| `web_code_context` | Search real code for syntax, APIs, and patterns to avoid hallucinating implementation details. Not for general web search or URL reading |
 | `load_skill` | Load a skill from `.ogent/skills/`, `.skills/`, or `~/.ogent/skills/` and inject its content |
 | `dispatch_worker` | Hire a specialist coworker. `template` selects the worker role (generic, coder, tester, reviewer, validator); `task` states the concrete assignment. ogent generates the system prompt via an architect LLM call unless a built-in template is used. The worker runs as a separate process and returns a Markdown summary |
 | `start_workers` | Start a batch of specialist coworkers asynchronously and return worker IDs immediately |

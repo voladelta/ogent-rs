@@ -205,7 +205,7 @@ Search output is candidates, not evidence.
 2. `repo_map` — use for repo shape / directory overview only.
 3. `rg` via `bash` — only when `colgrep` is unavailable or you need pure regex that `colgrep` doesn't support. Prefer `rg` over `grep`.
 4. `ast-grep` via `bash` — structural code search when you need AST-level matching.
-5. `code_web_context` / `web_search` / `web_read` — external only. Use `code_web_context` for API/syntax references; use `web_search` for broader knowledge or documentation.
+5. `web_code_context` / `web_search` / `web_read` — external only. Use `web_code_context` for API/syntax references; use `web_search` for broader knowledge or documentation.
 
 Do not use `rg` or `grep` when `colgrep` is available for the same task.
 

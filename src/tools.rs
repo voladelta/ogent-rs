@@ -29,7 +29,7 @@ pub async fn execute_tool(mut ctx: ToolContext<'_>, name: &str, args: &str) -> R
     "edit_hash_anchors" => edit_hash_anchors(args),
     "web_search" => web_search(args).await,
     "web_read" => web_read(args).await,
-    "code_web_context" => code_web_context(args).await,
+    "web_code_context" => web_code_context(args).await,
 
     "set_goal" => {
       let agent = ctx
@@ -203,7 +203,7 @@ fn build_coder_tools(workflow_enabled: bool) -> Vec<Tool> {
       json!({"type":"object","properties":{"urls":{"type":"array","items":{"type":"string"}},"mode":{"type":"string","enum":["text","highlights"],"description":"text for full page text, highlights for key excerpts. Default: highlights."}},"required":["urls"],"additionalProperties":false}),
     ),
     schema(
-      "code_web_context",
+      "web_code_context",
       "Search real code for syntax, APIs, and patterns to avoid hallucinating implementation details. Not for general web search or URL reading.",
       json!({"type":"object","properties":{"query":{"type":"string"}},"required":["query"],"additionalProperties":false}),
     ),
@@ -301,7 +301,7 @@ pub fn is_read_only_tool(name: &str) -> bool {
       | "repo_map"
       | "web_search"
       | "web_read"
-      | "code_web_context"
+      | "web_code_context"
       | "load_skill"
   )
 }
@@ -678,7 +678,7 @@ struct CodeWebContextArgs {
   query: String,
 }
 
-async fn code_web_context(args: &str) -> Result<String> {
+async fn web_code_context(args: &str) -> Result<String> {
   let args: CodeWebContextArgs = parse_args(args)?;
   require_nonempty(&args.query, "query")?;
   let v = exa_post(
@@ -1097,7 +1097,7 @@ mod tests {
     assert!(is_read_only_tool("repo_map"));
     assert!(is_read_only_tool("web_search"));
     assert!(is_read_only_tool("web_read"));
-    assert!(is_read_only_tool("code_web_context"));
+    assert!(is_read_only_tool("web_code_context"));
     assert!(is_read_only_tool("load_skill"));
     assert!(!is_read_only_tool("write_file"));
     assert!(!is_read_only_tool("edit_hash_anchors"));
