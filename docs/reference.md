@@ -17,6 +17,7 @@ Common options:
 | `--autocompact <percent>` | Auto-compact context when usage crosses threshold. Default: `80`. `-1` to disable |
 | `--resume [<session>]` | Resume the latest or named non-worker session and save back into that same session |
 | `--fork [<session>]` | Load the latest or named non-worker session, then save the run into a new child session |
+| `--workflow <name-or-path>` | Load one active workflow by built-in name or YAML path |
 | `--worker` | Internal worker mode. Reads system prompt from stdin |
 | `--temp` | Ephemeral mode: run without persisting session state to disk |
 
@@ -71,7 +72,7 @@ cargo run -- --profile kimi "Explain this repository"
 
 Web tools require `EXA_API_KEY`.
 
-Workers use the same toolset except `dispatch_worker`, `start_workers`, `check_workers`, `set_goal`, `revise_goal`, `update_phase`, `update_todo`, and `complete`. Workers have `worker_complete` to return their final Markdown summary.
+Workers use the same toolset except `dispatch_worker`, `start_workers`, `check_workers`, `set_goal`, `revise_goal`, `update_phase`, `update_todo`, `workflow_status`, `workflow_enter_step`, `workflow_record_check`, `workflow_run_check`, and `complete`. Workers have `worker_complete` to return their final Markdown summary.
 
 Tool calls are evaluated in order. Contiguous read-only calls (`read_file`, `read_hash_anchors`, `repo_map`, web tools, `load_skill`) may run in parallel. Mutating or blocking calls (`write_file`, `edit_hash_anchors`, `bash`, workers) act as barriers and run serially.
 
