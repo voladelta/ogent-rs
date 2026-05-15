@@ -8,4 +8,5 @@ Hard requirements:
 - `description` must be one sentence that clearly states when the skill should be used.
 - The body must be concise, procedural Markdown that tells an agent how to perform the reusable capability.
 - Include examples, scripts, references, or assets sections only when they are useful for the objective.
+- Do not invent project facts, repository URLs, tool names, file paths, commands, or external references that were not provided by the user or existing artifact.
 - Do not include absolute local paths, credentials, secrets, destructive commands, or instructions that conflict with the user's repository safety rules.

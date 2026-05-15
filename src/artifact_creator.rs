@@ -369,7 +369,7 @@ fn append_existing_artifact(prompt: &mut String, existing: Option<&str>, label: 
   prompt.push_str("\n## Existing Artifact To Improve\n\n");
   prompt.push_str("Improve this existing ");
   prompt.push_str(label);
-  prompt.push_str(". Preserve the same artifact name/id, keep useful existing intent, remove obsolete or weak guidance, and return the complete improved artifact.\n\n```");
+  prompt.push_str(". Treat it as an editable draft, not authoritative truth. Preserve the same artifact name/id, keep useful existing intent, remove content that conflicts with the objective, remove obsolete or weak guidance, and return the complete improved artifact.\n\n```");
   prompt.push_str(if label.contains("YAML") {
     "yaml"
   } else {

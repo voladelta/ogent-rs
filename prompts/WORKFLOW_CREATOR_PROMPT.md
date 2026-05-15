@@ -13,4 +13,5 @@ Hard requirements:
 - Every `next` step must exist.
 - Use gates and required checks when evidence or review must be enforced.
 - For command checks, use only commands explicitly named by the user or broadly standard for the implied stack, such as `cargo test` or `cargo build --release` for Rust. Do not invent project-specific script paths.
+- Do not invent project facts, repository URLs, tool names, file paths, or external references that were not provided by the user or existing artifact.
 - Keep the workflow small enough to be followed during real work.
