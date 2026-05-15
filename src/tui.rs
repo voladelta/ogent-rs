@@ -29,6 +29,8 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
+type SkillEntries = Arc<[(String, String)]>;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SteerEvent {
   Message(String),
@@ -221,7 +223,7 @@ pub struct TuiHandle {
   thread: Option<JoinHandle<()>>,
 }
 
-pub fn start(profile: String, model: String) -> Result<TuiHandle> {
+pub fn start(profile: String, model: String, skills: Vec<(String, String)>) -> Result<TuiHandle> {
   let (tx, rx) = mpsc::unbounded_channel();
   let log = UiLog::default();
   let status = UiStatus::new(profile, model);
@@ -229,8 +231,9 @@ pub fn start(profile: String, model: String) -> Result<TuiHandle> {
   let ui_status = status.clone();
   let stop = Arc::new(AtomicBool::new(false));
   let ui_stop = stop.clone();
+  let skills = SkillEntries::from(skills);
   let thread = std::thread::spawn(move || {
-    if let Err(err) = run_ui(tx, ui_log.clone(), ui_status, ui_stop) {
+    if let Err(err) = run_ui(tx, ui_log.clone(), ui_status, ui_stop, skills) {
       ui_log.push(format!("[tui] {err}"));
     }
   });
@@ -275,6 +278,7 @@ fn run_ui(
   log: UiLog,
   status: UiStatus,
   stop: Arc<AtomicBool>,
+  skills: SkillEntries,
 ) -> Result<()> {
   enable_raw_mode()?;
   let mut stdout = io::stdout();
@@ -288,7 +292,7 @@ fn run_ui(
   let backend = CrosstermBackend::new(stdout);
   let mut terminal = Terminal::new(backend)?;
   terminal.hide_cursor()?;
-  let result = run_ui_loop(&mut terminal, tx, log, status, stop);
+  let result = run_ui_loop(&mut terminal, tx, log, status, stop, skills);
 
   let restore = execute!(
     terminal.backend_mut(),
@@ -310,6 +314,7 @@ fn run_ui_loop(
   log: UiLog,
   status: UiStatus,
   stop: Arc<AtomicBool>,
+  skills: SkillEntries,
 ) -> Result<()> {
   let mut textarea = TextArea::default();
   textarea.set_block(
@@ -325,7 +330,7 @@ fn run_ui_loop(
   textarea.set_cursor_line_style(Style::default());
   let mut scroll_y: usize = 0;
   let mut follow_bottom = true;
-  let mut file_selector: Option<FileSelector> = None;
+  let mut active_selector: Option<ActiveSelector> = None;
   let mut selector_start: Option<ratatui_textarea::DataCursor> = None;
   let mut cursor_visible = false;
 
@@ -334,7 +339,7 @@ fn run_ui_loop(
   let mut max_scroll_y = 0usize;
   let mut prev_state = status.state();
   while !stop.load(Ordering::Relaxed) {
-    let has_selector = file_selector.is_some();
+    let has_selector = active_selector.is_some();
     if has_selector != cursor_visible {
       if has_selector {
         terminal.show_cursor()?;
@@ -357,7 +362,7 @@ fn run_ui_loop(
             continue;
           }
 
-          if let Some(ref mut selector) = file_selector {
+          if let Some(ref mut selector) = active_selector {
             match key.code {
               KeyCode::Char(c) => {
                 selector.update_query(c);
@@ -371,38 +376,34 @@ fn run_ui_loop(
                 if let Some(start) = selector_start {
                   let cursor = textarea.cursor();
                   if cursor.0 < start.0 || (cursor.0 == start.0 && cursor.1 <= start.1) {
-                    file_selector = None;
+                    active_selector = None;
                     selector_start = None;
                   }
                 }
               }
               KeyCode::Enter => {
-                let filtered = selector.filtered();
-                if let Some(selected) = filtered.get(selector.selected)
-                  && let Some(start) = selector_start
-                {
-                  let end = textarea.cursor();
-                  textarea.move_cursor(CursorMove::Jump(start.0 as u16, start.1 as u16));
-                  textarea.start_selection();
-                  textarea.move_cursor(CursorMove::Jump(end.0 as u16, end.1 as u16));
-                  textarea.cut();
-                  textarea.insert_str(selected);
+                if let Some(completion) = selector.completion() {
+                  if let Some(start) = selector_start {
+                    let end = textarea.cursor();
+                    textarea.move_cursor(CursorMove::Jump(start.0 as u16, start.1 as u16));
+                    textarea.start_selection();
+                    textarea.move_cursor(CursorMove::Jump(end.0 as u16, end.1 as u16));
+                    textarea.cut();
+                  }
+                  textarea.insert_str(completion);
                 }
-                file_selector = None;
+                active_selector = None;
                 selector_start = None;
               }
               KeyCode::Esc => {
-                file_selector = None;
+                active_selector = None;
                 selector_start = None;
               }
               KeyCode::Up => {
-                selector.selected = selector.selected.saturating_sub(1);
+                selector.move_up(1);
               }
               KeyCode::Down => {
-                let filtered_count = selector.filtered().len();
-                if selector.selected + 1 < filtered_count {
-                  selector.selected += 1;
-                }
+                selector.move_down(1);
               }
               _ => {}
             }
@@ -421,7 +422,16 @@ fn run_ui_loop(
                 selector_start = Some(textarea.cursor());
                 let input = key_event_to_input(&key);
                 textarea.input_without_shortcuts(input);
-                file_selector = Some(FileSelector::new(all_files));
+                active_selector = Some(ActiveSelector::File(FileSelector::new(all_files)));
+              }
+              KeyCode::Char('$') => {
+                if !skills.is_empty() {
+                  selector_start = Some(textarea.cursor());
+                  textarea.input_without_shortcuts(key_event_to_input(&key));
+                  active_selector = Some(ActiveSelector::Skill(SkillSelector::new(skills.clone())));
+                } else {
+                  textarea.input_without_shortcuts(key_event_to_input(&key));
+                }
               }
               KeyCode::Enter => {
                 if key.modifiers.contains(KeyModifiers::SHIFT) {
@@ -479,17 +489,16 @@ fn run_ui_loop(
         }
         Event::Mouse(mouse) => match mouse.kind {
           MouseEventKind::ScrollUp => {
-            if let Some(ref mut selector) = file_selector {
-              selector.selected = selector.selected.saturating_sub(3);
+            if let Some(ref mut selector) = active_selector {
+              selector.move_up(3);
             } else {
               follow_bottom = false;
               scroll_y = scroll_y.saturating_sub(3);
             }
           }
           MouseEventKind::ScrollDown => {
-            if let Some(ref mut selector) = file_selector {
-              let filtered_count = selector.filtered().len();
-              selector.selected = (selector.selected + 3).min(filtered_count.saturating_sub(1));
+            if let Some(ref mut selector) = active_selector {
+              selector.move_down(3);
             } else {
               scroll_y = scroll_y.saturating_add(3);
               if scroll_y >= max_scroll_y {
@@ -500,7 +509,7 @@ fn run_ui_loop(
           _ => {}
         },
         Event::Paste(text) => {
-          if file_selector.is_none() {
+          if active_selector.is_none() {
             textarea.insert_str(&text);
           }
         }
@@ -532,7 +541,7 @@ fn run_ui_loop(
         &textarea,
         &mut scroll_y,
         follow_bottom,
-        file_selector.as_ref(),
+        active_selector.as_ref(),
       )?;
     }
   }
@@ -554,6 +563,66 @@ pub fn parse_steer_event(line: &str) -> SteerEvent {
       SteerEvent::Profile(s.strip_prefix("/profile ").unwrap().trim().to_string())
     }
     other => SteerEvent::Message(other.to_string()),
+  }
+}
+
+enum ActiveSelector {
+  File(FileSelector),
+  Skill(SkillSelector),
+}
+
+impl ActiveSelector {
+  fn update_query(&mut self, c: char) {
+    match self {
+      Self::File(selector) => selector.update_query(c),
+      Self::Skill(selector) => selector.update_query(c),
+    }
+  }
+
+  fn backspace(&mut self) {
+    match self {
+      Self::File(selector) => selector.backspace(),
+      Self::Skill(selector) => selector.backspace(),
+    }
+  }
+
+  fn filtered_len(&self) -> usize {
+    match self {
+      Self::File(selector) => selector.filtered().len(),
+      Self::Skill(selector) => selector.filtered_len(),
+    }
+  }
+
+  fn selected(&self) -> usize {
+    match self {
+      Self::File(selector) => selector.selected,
+      Self::Skill(selector) => selector.selected,
+    }
+  }
+
+  fn selected_mut(&mut self) -> &mut usize {
+    match self {
+      Self::File(selector) => &mut selector.selected,
+      Self::Skill(selector) => &mut selector.selected,
+    }
+  }
+
+  fn move_up(&mut self, amount: usize) {
+    *self.selected_mut() = self.selected().saturating_sub(amount);
+  }
+
+  fn move_down(&mut self, amount: usize) {
+    let max_selected = self.filtered_len().saturating_sub(1);
+    *self.selected_mut() = self.selected().saturating_add(amount).min(max_selected);
+  }
+
+  fn completion(&self) -> Option<String> {
+    match self {
+      Self::File(selector) => selector.filtered().get(selector.selected).cloned(),
+      Self::Skill(selector) => selector
+        .filtered_skill(selector.selected)
+        .map(|(name, _)| format!("{name} skill")),
+    }
   }
 }
 
@@ -609,6 +678,88 @@ impl FileSelector {
   }
 }
 
+struct SkillSelector {
+  skills: SkillEntries,
+  query: String,
+  selected: usize,
+  filtered_cache: Vec<usize>,
+}
+
+impl SkillSelector {
+  fn new(skills: SkillEntries) -> Self {
+    Self {
+      skills,
+      query: String::new(),
+      selected: 0,
+      filtered_cache: Vec::new(),
+    }
+  }
+
+  fn update_query(&mut self, c: char) {
+    self.query.push(c);
+    self.selected = 0;
+    self.recompute();
+  }
+
+  fn backspace(&mut self) {
+    self.query.pop();
+    self.selected = 0;
+    self.recompute();
+  }
+
+  fn recompute(&mut self) {
+    if self.query.is_empty() {
+      self.filtered_cache.clear();
+    } else {
+      let mut matcher = Matcher::new(Config::DEFAULT);
+      let pattern = Pattern::parse(&self.query, CaseMatching::Ignore, Normalization::Smart);
+      let matches = pattern.match_list(
+        self
+          .skills
+          .iter()
+          .enumerate()
+          .map(|(index, (name, _))| SkillCandidate {
+            index,
+            name: name.as_str(),
+          }),
+        &mut matcher,
+      );
+      self.filtered_cache.clear();
+      self
+        .filtered_cache
+        .extend(matches.into_iter().map(|(candidate, _)| candidate.index));
+    }
+  }
+
+  fn filtered_len(&self) -> usize {
+    if self.query.is_empty() {
+      self.skills.len()
+    } else {
+      self.filtered_cache.len()
+    }
+  }
+
+  fn filtered_skill(&self, index: usize) -> Option<&(String, String)> {
+    let skill_index = if self.query.is_empty() {
+      index
+    } else {
+      *self.filtered_cache.get(index)?
+    };
+    self.skills.get(skill_index)
+  }
+}
+
+struct SkillCandidate<'a> {
+  index: usize,
+  name: &'a str,
+}
+
+impl AsRef<str> for SkillCandidate<'_> {
+  fn as_ref(&self) -> &str {
+    self.name
+  }
+}
+
 fn collect_workspace_files() -> Vec<String> {
   let mut files = Vec::new();
   let root = crate::workspace::workspace_root();
@@ -656,7 +807,7 @@ fn draw(
   textarea: &TextArea,
   scroll_y: &mut usize,
   follow_bottom: bool,
-  file_selector: Option<&FileSelector>,
+  selector: Option<&ActiveSelector>,
 ) -> Result<(u16, usize)> {
   let status_snapshot = status.snapshot();
   let log_lines = log.snapshot();
@@ -724,7 +875,7 @@ fn draw(
 
     frame.render_widget(textarea, chunks[2]);
 
-    if let Some(selector) = file_selector {
+    if let Some(ActiveSelector::File(selector)) = selector {
       let filtered = selector.filtered();
       let popup_width = (area.width * 3 / 5).clamp(40, 80);
       let content_height = filtered.len().min(15) as u16;
@@ -763,6 +914,88 @@ fn draw(
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::Rgb(122, 115, 104)))
             .title("file selector")
+            .title_style(Style::default().fg(Color::Rgb(98, 93, 85))),
+        ),
+        popup_area,
+      );
+
+      let cursor_x = popup_area.x + 2 + UnicodeWidthStr::width(selector.query.as_str()) as u16;
+      let cursor_y = popup_area.y + 1;
+      frame.set_cursor_position((cursor_x.min(popup_area.x + popup_area.width - 1), cursor_y));
+    }
+
+    if let Some(ActiveSelector::Skill(selector)) = selector {
+      let popup_width = (area.width * 3 / 5).clamp(40, 80);
+      let max_skills = 8usize;
+      let desc_indent = 2;
+      let max_desc_lines = 3usize;
+      let inner_width = popup_width.saturating_sub(2) as usize;
+      let desc_wrap_width = inner_width.saturating_sub(desc_indent);
+
+      let filtered_count = selector.filtered_len();
+      let visible_count = filtered_count.min(max_skills);
+      let first_visible = selector
+        .selected
+        .saturating_add(1)
+        .saturating_sub(visible_count)
+        .min(filtered_count.saturating_sub(visible_count));
+      let mut lines: Vec<Line<'static>> = vec![Line::from(vec![
+        Span::raw("> "),
+        Span::raw(selector.query.clone()),
+      ])];
+      let desc_prefix = " ".repeat(desc_indent);
+      for i in first_visible..first_visible + visible_count {
+        let Some((name, desc)) = selector.filtered_skill(i) else {
+          continue;
+        };
+        let name_style = if i == selector.selected {
+          Style::default()
+            .bg(Color::Rgb(221, 214, 204))
+            .fg(Color::Rgb(74, 70, 64))
+        } else {
+          Style::default().fg(Color::Rgb(98, 93, 85))
+        };
+        let desc_style = if i == selector.selected {
+          Style::default()
+            .bg(Color::Rgb(221, 214, 204))
+            .fg(Color::Rgb(122, 115, 104))
+        } else {
+          Style::default().fg(Color::Rgb(122, 115, 104))
+        };
+        lines.push(Line::from(Span::styled(
+          head_cells(name, inner_width),
+          name_style,
+        )));
+        if i == selector.selected && !desc.is_empty() {
+          for wrap_line in wrap_text(desc, desc_wrap_width)
+            .into_iter()
+            .take(max_desc_lines)
+          {
+            lines.push(Line::from(Span::styled(
+              format!("{desc_prefix}{wrap_line}"),
+              desc_style,
+            )));
+          }
+        }
+      }
+      if filtered_count == 0 {
+        lines.push(Line::from(Span::styled(
+          "no skills found",
+          Style::default().fg(Color::DarkGray),
+        )));
+      }
+      let popup_height = lines.len() as u16 + 2;
+      let popup_x = (area.width.saturating_sub(popup_width)) / 2;
+      let popup_y = (area.height.saturating_sub(popup_height)) / 2;
+      let popup_area = Rect::new(popup_x, popup_y, popup_width, popup_height);
+
+      frame.render_widget(Clear, popup_area);
+      frame.render_widget(
+        Paragraph::new(lines).block(
+          Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Rgb(122, 115, 104)))
+            .title("skill selector")
             .title_style(Style::default().fg(Color::Rgb(98, 93, 85))),
         ),
         popup_area,
@@ -850,6 +1083,49 @@ fn head_cells(value: &str, width: usize) -> String {
     used += c_width;
   }
   out
+}
+
+fn wrap_text(value: &str, width: usize) -> Vec<String> {
+  if width == 0 {
+    return vec![value.to_string()];
+  }
+  let mut lines = Vec::new();
+  let mut current = String::new();
+  let mut used = 0usize;
+  for word in value.split_whitespace() {
+    let word_width = UnicodeWidthStr::width(word);
+    if used > 0 && used + 1 + word_width > width {
+      lines.push(current.clone());
+      current.clear();
+      used = 0;
+    }
+    if used > 0 {
+      current.push(' ');
+      used += 1;
+    }
+    if used + word_width <= width {
+      current.push_str(word);
+      used += word_width;
+    } else {
+      let mut chars_used = 0usize;
+      for c in word.chars() {
+        let cw = c.width().unwrap_or(0);
+        if chars_used + cw > width {
+          break;
+        }
+        current.push(c);
+        chars_used += cw;
+      }
+      used = chars_used;
+    }
+  }
+  if !current.is_empty() {
+    lines.push(current);
+  }
+  if lines.is_empty() {
+    lines.push(String::new());
+  }
+  lines
 }
 
 fn render_log_line(value: &str) -> Line<'static> {

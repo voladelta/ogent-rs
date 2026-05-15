@@ -31,7 +31,11 @@ pub fn get_builtin_worker_prompt(name: &str) -> Option<&'static str> {
 }
 
 pub fn skill_roots() -> Vec<PathBuf> {
-  let mut dirs = vec![PathBuf::from(".ogent/skills"), PathBuf::from(".agents/skills"), PathBuf::from(".skills")];
+  let mut dirs = vec![
+    PathBuf::from(".ogent/skills"),
+    PathBuf::from(".agents/skills"),
+    PathBuf::from(".skills"),
+  ];
   if let Some(home) = std::env::var_os("HOME") {
     dirs.push(PathBuf::from(home).join(".ogent/skills"));
   }
@@ -56,7 +60,40 @@ pub fn load_skill_content(skill_name: &str) -> Result<(String, String, String)> 
       strip_frontmatter(&content),
     ));
   }
-  bail!("skill {skill_name} not found in local .ogent/skills, .agents/skills, .skills, or ~/.ogent/skills")
+  bail!(
+    "skill {skill_name} not found in local .ogent/skills, .agents/skills, .skills, or ~/.ogent/skills"
+  )
+}
+
+pub fn discover_skill_names() -> Vec<(String, String)> {
+  let mut seen = std::collections::HashSet::new();
+  let mut skills = Vec::new();
+  for root in skill_roots() {
+    let Ok(entries) = fs::read_dir(&root) else {
+      continue;
+    };
+    for entry in entries.flatten() {
+      let dir_name = entry.file_name().to_string_lossy().to_string();
+      if !entry.file_type().is_ok_and(|t| t.is_dir()) {
+        continue;
+      }
+      let Ok(content) = fs::read_to_string(entry.path().join("SKILL.md")) else {
+        continue;
+      };
+      let (name, desc) = parse_skill_frontmatter(&content);
+      let key = if name.is_empty() {
+        dir_name.clone()
+      } else {
+        name.clone()
+      };
+      if !seen.insert(key.clone()) {
+        continue;
+      }
+      skills.push((key, desc));
+    }
+  }
+  skills.sort_by(|a, b| a.0.cmp(&b.0));
+  skills
 }
 
 pub fn discover_skills_message() -> String {

@@ -209,7 +209,11 @@ async fn main() -> Result<()> {
     agent.dirty = true;
   }
   let loop_result = if args.steer {
-    let tui = tui::start(args.profile.clone(), profile.model.to_string())?;
+    let tui = tui::start(
+      args.profile.clone(),
+      profile.model.to_string(),
+      crate::prompts::discover_skill_names(),
+    )?;
     if args.autocompact >= 0 {
       tui.status.set_compact_threshold(args.autocompact);
       tui.status.set_context_limit(profile.context_limit);
@@ -231,7 +235,7 @@ async fn main() -> Result<()> {
       session::append_journal(&agent.meta.session_id, summary)?;
     }
   }
-  if !args.worker && !args.temp {
+  if !args.worker && agent.dirty && !args.temp {
     io::stdout().flush()?;
     eprintln!(
       "\nogent --resume={} to continue this session",

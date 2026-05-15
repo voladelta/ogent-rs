@@ -662,7 +662,9 @@ impl Agent {
       SteerEvent::Compact(task_prompt) => {
         let has_assistant = self.messages.iter().any(|m| m.role == "assistant");
         if !has_assistant {
-          tui.log.push("[steer] nothing to compact; no assistant response yet");
+          tui
+            .log
+            .push("[steer] nothing to compact; no assistant response yet");
         } else {
           let mut compact_msg = String::from(
             "Produce a handoff brief for continuing this work in a fresh context window.\n\n\
