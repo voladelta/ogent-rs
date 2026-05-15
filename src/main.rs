@@ -61,9 +61,10 @@ async fn main() -> Result<()> {
     CompactState::disabled()
   };
   let session_id = session::generate_session_id();
-  let mode = if args.worker {
+  let mut run_steer = args.steer && !args.worker;
+  let mut mode = if args.worker {
     "worker"
-  } else if args.steer {
+  } else if run_steer {
     "steer"
   } else {
     "default"
@@ -74,7 +75,7 @@ async fn main() -> Result<()> {
     profile: args.profile.clone(),
     mode: mode.to_string(),
     flags: session::SessionFlags {
-      steer: args.steer,
+      steer: run_steer,
       worker: args.worker,
       autocompact: args.autocompact,
       resume: args.resume.is_some(),
@@ -91,7 +92,6 @@ async fn main() -> Result<()> {
   let is_fork = args.fork.is_some();
   let is_loaded_session = is_resume || is_fork;
   let prompt = args.prompt.join(" ");
-  let wait_for_steer_input = args.steer && !args.worker && !is_loaded_session && prompt.is_empty();
 
   let (messages, tools, task_tracker, workflow_state): (
     Vec<Message>,
@@ -185,6 +185,10 @@ async fn main() -> Result<()> {
       meta.parent_session = Some(sid.clone());
     } else if let Some(ref old_meta) = old_session_meta {
       meta.parent_session = old_meta.parent_session.clone();
+      if !args.worker && !args.steer && old_meta.mode == "steer" {
+        run_steer = true;
+        mode = "steer";
+      }
     }
     if let Some(old_meta) = old_session_meta.as_ref() {
       eprintln!(
@@ -196,6 +200,9 @@ async fn main() -> Result<()> {
       );
     }
   }
+  meta.mode = mode.to_string();
+  meta.flags.steer = run_steer;
+  let wait_for_steer_input = run_steer && prompt.is_empty();
   let mut agent = Agent::new(
     client,
     messages,
@@ -208,7 +215,7 @@ async fn main() -> Result<()> {
   if args.worker || is_loaded_session || !prompt.is_empty() {
     agent.dirty = true;
   }
-  let loop_result = if args.steer {
+  let loop_result = if run_steer {
     let tui = tui::start(
       args.profile.clone(),
       profile.model.to_string(),
@@ -237,8 +244,13 @@ async fn main() -> Result<()> {
   }
   if !args.worker && agent.dirty && !args.temp {
     io::stdout().flush()?;
+    let steer_flag = if agent.meta.mode == "steer" {
+      "--steer "
+    } else {
+      ""
+    };
     eprintln!(
-      "\nogent --resume={} to continue this session",
+      "\nogent {steer_flag}--resume={} to continue this session",
       agent.meta.session_id
     );
   }

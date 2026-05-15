@@ -37,7 +37,7 @@ pub enum SteerEvent {
   Cancel,
   Complete,
   New,
-  Exit,
+  Exit(Option<String>),
   Profile(String),
   Compact(Option<String>),
 }
@@ -410,11 +410,15 @@ fn run_ui_loop(
           } else {
             match key.code {
               KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                tx.send(SteerEvent::Exit).ok();
+                let text = textarea.lines().join("\n").trim().to_string();
+                let draft = (!text.is_empty()).then_some(text);
+                tx.send(SteerEvent::Exit(draft)).ok();
                 break;
               }
               KeyCode::Esc => {
-                tx.send(SteerEvent::Exit).ok();
+                let text = textarea.lines().join("\n").trim().to_string();
+                let draft = (!text.is_empty()).then_some(text);
+                tx.send(SteerEvent::Exit(draft)).ok();
                 break;
               }
               KeyCode::Char('@') => {
@@ -442,7 +446,7 @@ fn run_ui_loop(
                     textarea.clear();
                     follow_bottom = true;
                     let event = parse_steer_event(&text);
-                    let exit = matches!(event, SteerEvent::Exit);
+                    let exit = matches!(event, SteerEvent::Exit(_));
                     if tx.send(event).is_err() || exit {
                       break;
                     }
@@ -558,7 +562,7 @@ pub fn parse_steer_event(line: &str) -> SteerEvent {
       s.strip_prefix("/compact ").unwrap().trim().to_string(),
     )),
     "/new" => SteerEvent::New,
-    "/q" | "/quit" | "quit" | "exit" => SteerEvent::Exit,
+    "/q" | "/quit" | "quit" | "exit" => SteerEvent::Exit(None),
     s if s.starts_with("/profile ") => {
       SteerEvent::Profile(s.strip_prefix("/profile ").unwrap().trim().to_string())
     }
@@ -1251,10 +1255,10 @@ mod tests {
       SteerEvent::Compact(Some("fix auth".into()))
     );
     assert_eq!(parse_steer_event("/new"), SteerEvent::New);
-    assert_eq!(parse_steer_event("/q"), SteerEvent::Exit);
-    assert_eq!(parse_steer_event("/quit"), SteerEvent::Exit);
-    assert_eq!(parse_steer_event("quit"), SteerEvent::Exit);
-    assert_eq!(parse_steer_event("exit"), SteerEvent::Exit);
+    assert_eq!(parse_steer_event("/q"), SteerEvent::Exit(None));
+    assert_eq!(parse_steer_event("/quit"), SteerEvent::Exit(None));
+    assert_eq!(parse_steer_event("quit"), SteerEvent::Exit(None));
+    assert_eq!(parse_steer_event("exit"), SteerEvent::Exit(None));
     assert_eq!(parse_steer_event("hi"), SteerEvent::Message("hi".into()));
   }
 }

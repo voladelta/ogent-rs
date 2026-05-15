@@ -178,7 +178,10 @@ impl SteerState {
                   tui.log.push(STEER_COMMANDS.to_string());
                   return Ok(Self::Idle { wait_for_input: true });
                 }
-                SteerEvent::Exit => {
+                SteerEvent::Exit(exit_msg) => {
+                  if let Some(content) = exit_msg {
+                    agent.apply_steer_event(SteerEvent::Message(content), tui)?;
+                  }
                   cancel.cancel();
                   chat.abort();
                   return Ok(Self::Exit(agent.messages.clone()));
@@ -557,6 +560,7 @@ impl Agent {
     mut tui: TuiHandle,
     wait_for_input: bool,
   ) -> Result<Vec<Message>, AgentError> {
+    self.replay_messages_to_steer_log(&tui.log);
     tui.log.push(STEER_COMMANDS);
     let mut state = SteerState::Idle { wait_for_input };
     let mut ctx = SteerCtx;
@@ -708,9 +712,54 @@ impl Agent {
           tui.log.push(format!("[steer] unknown profile: {name}"));
         }
       },
-      SteerEvent::Exit => return Ok(SteerAction::Exit),
+      SteerEvent::Exit(exit_msg) => {
+        if let Some(content) = exit_msg {
+          if self.meta.prompt.is_none() {
+            self.meta.prompt = Some(content.clone());
+          }
+          if self.meta.start_ts.is_none() {
+            self.meta.start_ts = Some(session::timestamp_ms());
+          }
+          self.push_msg(user_msg(content.clone()));
+          tui.log.push(format!("[user] {}", truncate(&content, 200)));
+        }
+        return Ok(SteerAction::Exit);
+      }
     }
     Ok(SteerAction::Continue)
+  }
+
+  fn replay_messages_to_steer_log(&self, log: &crate::tui::UiLog) {
+    for msg in &self.messages {
+      match msg.role.as_str() {
+        "system" => {}
+        "user" => {
+          log.push(format!("[user] {}", truncate(&msg.content, 200)));
+        }
+        "assistant" => {
+          if !msg.reasoning_content.is_empty() {
+            log.push(format!(
+              "reasoning: {}",
+              truncate(&msg.reasoning_content, 300)
+            ));
+          }
+          if !msg.content.is_empty() {
+            log.push_assistant_markdown(&msg.content);
+          }
+          for tc in &msg.tool_calls {
+            log.push(format!(
+              "tool: {}({})",
+              tc.function.name,
+              truncate(&tc.function.arguments, 120)
+            ));
+          }
+        }
+        "tool" => {
+          log.push(format!("tool_result: {}", truncate(&msg.content, 200)));
+        }
+        _ => {}
+      }
+    }
   }
 
   async fn handle_turn_response(&mut self, resp: ChatResponse) -> Result<bool, AgentError> {
@@ -1149,8 +1198,26 @@ mod dirty_state_machine_tests {
   async fn exit_returns_exit_action() {
     let mut agent = dummy_agent();
     let tui = crate::tui::TuiHandle::test_handle();
-    let action = agent.apply_steer_event(SteerEvent::Exit, &tui).unwrap();
+    let action = agent
+      .apply_steer_event(SteerEvent::Exit(None), &tui)
+      .unwrap();
     assert!(matches!(action, SteerAction::Exit));
+  }
+
+  #[tokio::test]
+  async fn exit_with_message_sets_prompt_and_persists_message() {
+    let mut agent = dummy_agent();
+    let tui = crate::tui::TuiHandle::test_handle();
+    let action = agent
+      .apply_steer_event(SteerEvent::Exit(Some("save this".into())), &tui)
+      .unwrap();
+    assert!(matches!(action, SteerAction::Exit));
+    assert_eq!(agent.meta.prompt, Some("save this".into()));
+    assert!(agent.meta.start_ts.is_some());
+    assert!(agent.dirty);
+    assert!(
+      matches!(agent.messages.last(), Some(m) if m.role == "user" && m.content == "save this")
+    );
   }
 
   #[tokio::test]
