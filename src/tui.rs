@@ -1,7 +1,7 @@
 use anyhow::Result;
 use crossterm::event::{
-  self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers,
-  MouseEventKind,
+  self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+  Event, KeyCode, KeyEventKind, KeyModifiers, MouseEventKind,
 };
 use crossterm::execute;
 use crossterm::terminal::{
@@ -281,6 +281,7 @@ fn run_ui(
   execute!(
     stdout,
     EnterAlternateScreen,
+    EnableBracketedPaste,
     EnableMouseCapture,
     DisableLineWrap
   )?;
@@ -291,6 +292,7 @@ fn run_ui(
 
   let restore = execute!(
     terminal.backend_mut(),
+    DisableBracketedPaste,
     DisableMouseCapture,
     EnableLineWrap,
     LeaveAlternateScreen
@@ -497,6 +499,11 @@ fn run_ui_loop(
           }
           _ => {}
         },
+        Event::Paste(text) => {
+          if file_selector.is_none() {
+            textarea.insert_str(&text);
+          }
+        }
         _ => {}
       }
     }
