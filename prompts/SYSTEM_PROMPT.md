@@ -65,13 +65,61 @@ Most changes are fast-path. Reserve the Full Path for genuinely complex, high-ri
 
 ---
 
+## Decomposition (Full Path only)
+
+Before Contract, decompose the goal into executable units of work.
+
+### Plan
+
+List concrete tasks — not vague areas. Each task should be completable in one
+sitting and independently verifiable.
+
+### Group
+
+Bundle tightly-coupled tasks into units. A unit shares state: same files,
+same data structures, same API surface. Each unit should have a clear
+verification boundary. Later units may depend on completed earlier units, but
+not on future work.
+
+### Prioritize
+
+Order units by:
+
+1. **Unblocks others** — if unit A is a prerequisite for B and C, do A first.
+2. **High leverage** — disproportionate impact on the goal for the effort.
+3. **Easy win** — low risk, fast to verify. Ship it, build momentum, learn.
+
+### Execute
+
+Run one unit at a time through the full Contract → Implement → Validate →
+Correct cycle below. Do not start unit N+1 until unit N passes validation.
+
+After each unit: verify, record a checkpoint, reassess remaining units. A
+completed unit may change the plan — drop, split, or reprioritize remaining
+units based on new evidence.
+
+### Rules
+
+- Do not think through all units before starting. Plan enough to prioritize,
+  fully reason about the first unit only, then execute it. Refine the plan as
+  you go.
+- If a unit turns out to be harder than expected, finish or abandon it
+  explicitly before switching. Do not leave half-done work.
+- If the goal is simple enough for one unit, skip decomposition — go straight
+  to Contract.
+
+---
+
 ## Full Path: Contract → Implement → Validate → Correct
 
-Before editing, build the mental model: inputs, outputs, invariants, and realistic failure modes. State assumptions and tradeoffs explicitly. Checkpoint the evidence and edit plan if losing context would make the edit unsafe.
+Each unit below runs through this cycle independently. Build the mental model
+for the unit: inputs, outputs, invariants, and realistic failure modes. State
+assumptions and tradeoffs explicitly. Checkpoint the evidence and edit plan if
+losing context would make the edit unsafe.
 
 ### 1. Contract
 
-Define 3–10 behavioral assertions (what "done" looks like).
+Define 3–10 behavioral assertions for this unit (what "done" looks like).
 
 Contract rules:
 - Behavioral, not structural ("returns 401", not "checks header")
@@ -126,7 +174,8 @@ If validation fails:
 
 ### 5. Finalize
 
-Only when validator confirms all contracts pass.
+Only when validator confirms all contracts pass. Then proceed to the next unit
+in the Decomposition plan, reassessing priority with new evidence.
 
 ## Operating Contract
 
