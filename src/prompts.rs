@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use crate::types::Message;
 
-pub const TENX_CODER_SYSTEM_PROMPT: &str = include_str!("../prompts/SYSTEM_PROMPT.md");
+pub const SYSTEM_PROMPT: &str = include_str!("../prompts/SYSTEM_PROMPT.md");
 
 pub const WORKER_SUMMARY_PROMPT: &str = "\n\n## Worker Report Protocol\n\nWhen done, call `worker_complete` with a concise Markdown summary:\n\n```json\n{\"summary\":\"...\"}\n```\n\nInclude in the summary:\n- What you accomplished\n- Files inspected, commands run, results\n- Decisions made\n- Files modified (list)\n- Blockers (omit if none)\n\nRules:\n- Concise fragments are preferred.\n- Never fabricate or embellish results. Report only what you actually observed or did.\n- Do not write intermediate analysis, planning, or decision documents to the repo.";
 
@@ -31,15 +31,31 @@ pub fn get_builtin_worker_prompt(name: &str) -> Option<&'static str> {
 }
 
 pub fn skill_roots() -> Vec<PathBuf> {
-  let mut dirs = vec![
-    PathBuf::from(".ogent/skills"),
-    PathBuf::from(".agents/skills"),
-    PathBuf::from(".skills"),
-  ];
+  let mut dirs = vec![PathBuf::from(".ogent/skills")];
   if let Some(home) = std::env::var_os("HOME") {
     dirs.push(PathBuf::from(home).join(".ogent/skills"));
   }
   dirs
+}
+
+fn system_prompt_paths() -> Vec<PathBuf> {
+  let mut paths = vec![PathBuf::from(".ogent/SYSTEM_PROMPT.md")];
+  if let Some(home) = std::env::var_os("HOME") {
+    paths.push(PathBuf::from(home).join(".ogent/SYSTEM_PROMPT.md"));
+  }
+  paths
+}
+
+fn load_system_prompt() -> String {
+  for path in system_prompt_paths() {
+    if let Ok(content) = fs::read_to_string(path) {
+      let trimmed = content.trim();
+      if !trimmed.is_empty() {
+        return trimmed.to_string();
+      }
+    }
+  }
+  SYSTEM_PROMPT.trim().to_string()
 }
 
 pub fn load_skill_content(skill_name: &str) -> Result<(String, String, String)> {
@@ -60,9 +76,7 @@ pub fn load_skill_content(skill_name: &str) -> Result<(String, String, String)> 
       strip_frontmatter(&content),
     ));
   }
-  bail!(
-    "skill {skill_name} not found in local .ogent/skills, .agents/skills, .skills, or ~/.ogent/skills"
-  )
+  bail!("skill {skill_name} not found in local .ogent/skills or ~/.ogent/skills")
 }
 
 pub fn discover_skill_names() -> Vec<(String, String)> {
@@ -111,13 +125,15 @@ pub fn discover_skills_message() -> String {
         continue;
       };
       let (name, desc) = parse_skill_frontmatter(&content);
-      if name.is_empty() || !seen.insert(name.clone()) {
+      let dir_name = entry.file_name().to_string_lossy().to_string();
+      let key = if name.is_empty() { dir_name } else { name };
+      if !seen.insert(key.clone()) {
         continue;
       }
       writeln!(
         out,
         "  <skill name=\"{}\" description=\"{}\" />",
-        xml_escape(&name),
+        xml_escape(&key),
         xml_escape(&desc)
       )
       .unwrap();
@@ -189,7 +205,7 @@ pub fn build_messages(prompt: &str) -> Vec<Message> {
   vec![
     Message {
       role: "system".into(),
-      content: TENX_CODER_SYSTEM_PROMPT.to_string(),
+      content: load_system_prompt(),
       ..Default::default()
     },
     Message {
