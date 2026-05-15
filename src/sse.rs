@@ -1,5 +1,5 @@
 use futures_util::StreamExt;
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 
 use crate::types::{ChatResponse, FunctionCall, ToolCall, Usage};
 
@@ -12,13 +12,14 @@ pub enum StreamEvent {
 
 #[derive(Debug, Deserialize)]
 struct StreamChunk {
-  #[serde(default)]
+  #[serde(default, deserialize_with = "deserialize_default_on_null")]
   choices: Vec<StreamChoice>,
   usage: Option<Usage>,
 }
 
 #[derive(Debug, Deserialize)]
 struct StreamChoice {
+  #[serde(default, deserialize_with = "deserialize_default_on_null")]
   delta: StreamDelta,
 }
 
@@ -28,18 +29,22 @@ struct StreamDelta {
   content: Option<String>,
   #[serde(default)]
   reasoning_content: Option<String>,
-  #[serde(default)]
+  #[serde(default, deserialize_with = "deserialize_default_on_null")]
   tool_calls: Vec<DeltaToolCall>,
 }
 
 #[derive(Debug, Deserialize)]
 struct DeltaToolCall {
   index: usize,
-  #[serde(default)]
+  #[serde(default, deserialize_with = "deserialize_default_on_null")]
   id: String,
-  #[serde(rename = "type", default)]
+  #[serde(
+    rename = "type",
+    default,
+    deserialize_with = "deserialize_default_on_null"
+  )]
   kind: String,
-  #[serde(default)]
+  #[serde(default, deserialize_with = "deserialize_default_on_null")]
   function: DeltaFunctionCall,
 }
 
@@ -49,6 +54,14 @@ struct DeltaFunctionCall {
   name: Option<String>,
   #[serde(default)]
   arguments: Option<String>,
+}
+
+fn deserialize_default_on_null<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+  D: Deserializer<'de>,
+  T: Deserialize<'de> + Default,
+{
+  Ok(Option::<T>::deserialize(deserializer)?.unwrap_or_default())
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -284,5 +297,45 @@ mod tests {
     let tc = resp.tool_calls.first().unwrap();
     assert_eq!(tc.function.name, "read_file");
     assert_eq!(tc.function.arguments, "{\"path\": \"README.md\"}");
+  }
+
+  #[tokio::test]
+  async fn process_line_accepts_null_tool_calls() {
+    let mut resp = ChatResponse::default();
+    let mut acc = Vec::new();
+    let mut tc = false;
+    process_line(
+      r#"data: {"choices":[{"delta":{"content":"hello","reasoning_content":"thinking","tool_calls":null}}]}"#,
+      &mut resp,
+      &mut acc,
+      &mut None,
+      &mut tc,
+    )
+    .await;
+    assert_eq!(resp.reasoning_content, "thinking");
+    assert_eq!(resp.content, "hello");
+    assert!(acc.is_empty());
+    assert!(!tc);
+  }
+
+  #[tokio::test]
+  async fn process_line_accepts_null_function_object() {
+    let mut resp = ChatResponse::default();
+    let mut acc = Vec::new();
+    let mut tc = false;
+    process_line(
+      r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"x","type":"function","function":null}]}}]}"#,
+      &mut resp,
+      &mut acc,
+      &mut None,
+      &mut tc,
+    )
+    .await;
+    flush_tool_calls(&mut acc, &mut resp);
+    let tc = resp.tool_calls.first().unwrap();
+    assert_eq!(tc.id, "x");
+    assert_eq!(tc.kind, "function");
+    assert_eq!(tc.function.name, "");
+    assert_eq!(tc.function.arguments, "");
   }
 }
