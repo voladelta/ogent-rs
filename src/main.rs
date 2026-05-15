@@ -83,6 +83,7 @@ async fn main() -> Result<()> {
     },
     usage: session::SessionUsage { total_tokens: 0 },
     prompt: None,
+    draft_input: None,
     start_ts: None,
     end_ts: None,
   };
@@ -185,6 +186,10 @@ async fn main() -> Result<()> {
       meta.parent_session = Some(sid.clone());
     } else if let Some(ref old_meta) = old_session_meta {
       meta.parent_session = old_meta.parent_session.clone();
+      meta.prompt = old_meta.prompt.clone();
+      meta.start_ts = old_meta.start_ts;
+      meta.end_ts = old_meta.end_ts;
+      meta.draft_input = old_meta.draft_input.clone();
       if !args.worker && !args.steer && old_meta.mode == "steer" {
         run_steer = true;
         mode = "steer";
@@ -200,9 +205,13 @@ async fn main() -> Result<()> {
       );
     }
   }
+  if !prompt.is_empty() {
+    meta.draft_input = None;
+  }
   meta.mode = mode.to_string();
   meta.flags.steer = run_steer;
   let wait_for_steer_input = run_steer && prompt.is_empty();
+  let initial_draft_input = meta.draft_input.clone();
   let mut agent = Agent::new(
     client,
     messages,
@@ -220,6 +229,7 @@ async fn main() -> Result<()> {
       args.profile.clone(),
       profile.model.to_string(),
       crate::prompts::discover_skill_names(),
+      initial_draft_input,
     )?;
     if args.autocompact >= 0 {
       tui.status.set_compact_threshold(args.autocompact);

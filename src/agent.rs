@@ -179,9 +179,7 @@ impl SteerState {
                   return Ok(Self::Idle { wait_for_input: true });
                 }
                 SteerEvent::Exit(exit_msg) => {
-                  if let Some(content) = exit_msg {
-                    agent.apply_steer_event(SteerEvent::Message(content), tui)?;
-                  }
+                  agent.apply_steer_event(SteerEvent::Exit(exit_msg), tui)?;
                   cancel.cancel();
                   chat.abort();
                   return Ok(Self::Exit(agent.messages.clone()));
@@ -604,6 +602,7 @@ impl Agent {
   ) -> Result<SteerAction, AgentError> {
     match event {
       SteerEvent::Message(content) => {
+        self.meta.draft_input = None;
         if self.meta.prompt.is_none() {
           self.meta.prompt = Some(content.clone());
         }
@@ -614,9 +613,11 @@ impl Agent {
         tui.log.push(format!("[user] {}", truncate(&content, 200)));
       }
       SteerEvent::Cancel => {
+        self.meta.draft_input = None;
         tui.log.push("[steer] no in-flight request to cancel");
       }
       SteerEvent::Complete => {
+        self.meta.draft_input = None;
         let has_assistant = self.messages.iter().any(|m| m.role == "assistant");
         if has_assistant {
           let content = MANUAL_COMPLETE_REMINDER.to_string();
@@ -629,6 +630,7 @@ impl Agent {
         }
       }
       SteerEvent::New => {
+        self.meta.draft_input = None;
         if self.dirty && !self.meta.flags.temp {
           self.meta.usage.total_tokens = self.total_tokens;
           session::write_meta(&self.meta)?;
@@ -642,6 +644,7 @@ impl Agent {
         self.meta.parent_session = Some(old_id);
         self.meta.usage = session::SessionUsage { total_tokens: 0 };
         self.meta.prompt = None;
+        self.meta.draft_input = None;
         self.meta.start_ts = None;
         self.meta.end_ts = None;
         let mut messages = crate::prompts::build_messages("");
@@ -664,6 +667,7 @@ impl Agent {
         return Ok(SteerAction::Restart);
       }
       SteerEvent::Compact(task_prompt) => {
+        self.meta.draft_input = None;
         let has_assistant = self.messages.iter().any(|m| m.role == "assistant");
         if !has_assistant {
           tui
@@ -700,6 +704,7 @@ impl Agent {
       }
       SteerEvent::Profile(name) => match crate::profiles::get_profile(&name) {
         Some(p) => {
+          self.meta.draft_input = None;
           self.client = crate::providers::new_client(p)?;
           self.meta.profile = name.clone();
           self.compact.context_limit = p.context_limit;
@@ -709,19 +714,20 @@ impl Agent {
             .push(format!("[steer] profile → {}", self.meta.profile));
         }
         None => {
+          self.meta.draft_input = None;
           tui.log.push(format!("[steer] unknown profile: {name}"));
         }
       },
       SteerEvent::Exit(exit_msg) => {
-        if let Some(content) = exit_msg {
-          if self.meta.prompt.is_none() {
-            self.meta.prompt = Some(content.clone());
+        match exit_msg {
+          Some(content) => {
+            self.meta.draft_input = Some(content);
+            self.dirty = true;
           }
-          if self.meta.start_ts.is_none() {
-            self.meta.start_ts = Some(session::timestamp_ms());
+          None => {
+            self.meta.draft_input = None;
+            self.dirty = true;
           }
-          self.push_msg(user_msg(content.clone()));
-          tui.log.push(format!("[user] {}", truncate(&content, 200)));
         }
         return Ok(SteerAction::Exit);
       }
@@ -1104,6 +1110,7 @@ mod dirty_state_machine_tests {
       },
       usage: session::SessionUsage { total_tokens: 0 },
       prompt: None,
+      draft_input: None,
       start_ts: None,
       end_ts: None,
     }
@@ -1205,19 +1212,18 @@ mod dirty_state_machine_tests {
   }
 
   #[tokio::test]
-  async fn exit_with_message_sets_prompt_and_persists_message() {
+  async fn exit_with_message_sets_draft_only() {
     let mut agent = dummy_agent();
     let tui = crate::tui::TuiHandle::test_handle();
+    let before_len = agent.messages.len();
     let action = agent
       .apply_steer_event(SteerEvent::Exit(Some("save this".into())), &tui)
       .unwrap();
     assert!(matches!(action, SteerAction::Exit));
-    assert_eq!(agent.meta.prompt, Some("save this".into()));
-    assert!(agent.meta.start_ts.is_some());
+    assert_eq!(agent.meta.prompt, None);
+    assert_eq!(agent.meta.draft_input, Some("save this".into()));
     assert!(agent.dirty);
-    assert!(
-      matches!(agent.messages.last(), Some(m) if m.role == "user" && m.content == "save this")
-    );
+    assert_eq!(agent.messages.len(), before_len);
   }
 
   #[tokio::test]

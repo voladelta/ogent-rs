@@ -223,7 +223,12 @@ pub struct TuiHandle {
   thread: Option<JoinHandle<()>>,
 }
 
-pub fn start(profile: String, model: String, skills: Vec<(String, String)>) -> Result<TuiHandle> {
+pub fn start(
+  profile: String,
+  model: String,
+  skills: Vec<(String, String)>,
+  initial_input: Option<String>,
+) -> Result<TuiHandle> {
   let (tx, rx) = mpsc::unbounded_channel();
   let log = UiLog::default();
   let status = UiStatus::new(profile, model);
@@ -233,7 +238,14 @@ pub fn start(profile: String, model: String, skills: Vec<(String, String)>) -> R
   let ui_stop = stop.clone();
   let skills = SkillEntries::from(skills);
   let thread = std::thread::spawn(move || {
-    if let Err(err) = run_ui(tx, ui_log.clone(), ui_status, ui_stop, skills) {
+    if let Err(err) = run_ui(
+      tx,
+      ui_log.clone(),
+      ui_status,
+      ui_stop,
+      skills,
+      initial_input,
+    ) {
       ui_log.push(format!("[tui] {err}"));
     }
   });
@@ -279,6 +291,7 @@ fn run_ui(
   status: UiStatus,
   stop: Arc<AtomicBool>,
   skills: SkillEntries,
+  initial_input: Option<String>,
 ) -> Result<()> {
   enable_raw_mode()?;
   let mut stdout = io::stdout();
@@ -292,7 +305,7 @@ fn run_ui(
   let backend = CrosstermBackend::new(stdout);
   let mut terminal = Terminal::new(backend)?;
   terminal.hide_cursor()?;
-  let result = run_ui_loop(&mut terminal, tx, log, status, stop, skills);
+  let result = run_ui_loop(&mut terminal, tx, log, status, stop, skills, initial_input);
 
   let restore = execute!(
     terminal.backend_mut(),
@@ -315,6 +328,7 @@ fn run_ui_loop(
   status: UiStatus,
   stop: Arc<AtomicBool>,
   skills: SkillEntries,
+  initial_input: Option<String>,
 ) -> Result<()> {
   let mut textarea = TextArea::default();
   textarea.set_block(
@@ -328,6 +342,11 @@ fn run_ui_loop(
   textarea.set_placeholder_style(Style::default().fg(Color::Rgb(122, 115, 104)));
   textarea.set_wrap_mode(WrapMode::Word);
   textarea.set_cursor_line_style(Style::default());
+  if let Some(draft) = initial_input {
+    if !draft.is_empty() {
+      textarea.insert_str(&draft);
+    }
+  }
   let mut scroll_y: usize = 0;
   let mut follow_bottom = true;
   let mut active_selector: Option<ActiveSelector> = None;
