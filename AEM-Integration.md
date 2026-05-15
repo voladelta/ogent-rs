@@ -1,248 +1,895 @@
-# AEM Integration Design for ogent
+# Anchored Episodic Memory Integration for ogent
 
-> Port the architectural concepts of Anchored Episodic Memory (AEM) into ogent to improve harness of the agent after sessions.
+This document is the implementation reference for adding anchored episodic
+memory to ogent.
 
-> Reference repo: ~/Codehub/aem
+The goal is not to make ogent remember everything. The goal is to make useful
+past experience available without losing evidence, hiding state, or turning
+memory into authority.
 
-## Separation of Concerns
+## Design Goal
 
-| Layer | When | What |
+ogent should remember:
+
+- stable user and repository operating rules
+- recurring task patterns
+- prior failures and fixes
+- successful implementation and verification paths
+- enough evidence to inspect where every memory came from
+
+ogent should not:
+
+- treat memory as truth without checking the current repo
+- inject long historical summaries into every request
+- rely on opaque vector-only recall
+- mutate old sessions
+- ingest active or incomplete work by default
+- let worker subprocesses independently pull hidden context
+
+## Memory Model
+
+ogent memory is layered:
+
+| Layer | Name | Role |
 |---|---|---|
-| **Runtime agent** | Every turn | Has a `recall` tool to query the local memory DB. Lightweight — just a SQLite query + prompt injection. |
-| **Offline ingestion** | Post-hoc (human or cron) | Scans `.ogent/sessions/` for unvisited sessions, chunks them, and writes to `.ogent/memory.db`. |
-| **Human traces** | Anytime | A plain-text or JSONL log of what was recalled, what the agent did with it, and whether the run succeeded. Humans read this to reject bad memories or promote lessons. |
+| L0 | Raw episodes | Original `.ogent/sessions/<id>/messages.jsonl` evidence |
+| L1 | Atoms | Evidence-backed facts, actions, failures, fixes, and results |
+| L2 | Scenarios | Reusable software-task patterns distilled from evidence |
+| L3 | Operating memory | Stable user preferences, repo rules, and process rules |
 
-## Memory Store
+Active-session compression remains part of ogent's existing compaction design.
+It is not stored, ranked, or recalled through this memory DB.
 
-A single SQLite file at `.ogent/memory.db`. Four tables, ported from AEM:
+## Core Invariants
+
+1. Raw session logs are the source of truth.
+2. Every atom, scenario, and lesson must trace back to raw session evidence or
+   explicit human input.
+3. Runtime memory access must fail open. Missing or corrupt memory must not stop
+   the agent.
+4. Memory is advisory. The agent must verify current files, commands, and state
+   before acting on a recalled fact.
+5. Incomplete sessions are not ingested by default.
+6. Stable operating memory may be injected at session start, but only under a
+   strict size budget.
+7. Task-specific recall is explicit through the `recall` tool.
+8. Worker processes do not get the `recall` tool. The parent agent decides what
+   memory is relevant and passes it in worker context.
+9. Memory writes happen through ingestion, feedback, promotion, and retirement
+   commands, not through arbitrary agent tool calls.
+10. Redaction runs before content enters the memory DB or runtime recall output.
+
+## Storage Layout
+
+Memory lives under `.ogent/memory/`.
+
+```text
+.ogent/
+  sessions/
+    <session-id>/
+      meta.json
+      messages.jsonl
+      workflow-state.json
+  memory/
+    memory.db
+    traces.jsonl
+```
+
+`memory.db` is the authoritative memory index. `traces.jsonl` is a readable
+append-only mirror of recall events for humans. The trace file is redundant by
+design; the DB remains the source of truth.
+
+Required dependencies:
+
+```toml
+rusqlite = { version = "0.32", features = ["bundled"] }
+sha2 = "0.10"
+regex = "1"
+```
+
+Use SQLite FTS5 through bundled SQLite. Do not add embeddings or remote model
+calls to the memory path.
+
+## Identifier Rules
+
+IDs are stable when they refer to derived evidence, and explicit when they refer
+to human-authored abstractions.
+
+| Type | Format | Source |
+|---|---|---|
+| Episode | `ep_<12 hex>` | SHA-256 of normalized `meta.json` plus `messages.jsonl` |
+| Atom | `atom_<12 hex>` | SHA-256 of episode id, kind, content, and evidence ref |
+| Scenario | `scn_<12 hex>` | SHA-256 of title and evidence ids at creation time |
+| Lesson | `lsn_<12 hex>` | SHA-256 of title, rule, scope, and source at creation time |
+
+Reingesting an unchanged session must produce the same episode and atom IDs.
+Editing a lesson or scenario updates `updated_at` but does not change its ID.
+
+## Memory Layers
+
+### L0: Raw Episodes
+
+An episode is one ingested ogent session.
+
+The episode stores metadata and pointers to raw files. It does not copy the full
+transcript into the DB.
+
+### L1: Atoms
+
+An atom is an evidence-backed unit extracted from an episode.
+
+Atom kinds:
+
+- `goal`
+- `context`
+- `constraint`
+- `preference`
+- `file`
+- `command`
+- `edit`
+- `decision`
+- `failure`
+- `fix`
+- `verification`
+- `result`
+- `worker_report`
+- `workflow`
+
+Atoms are the main searchable layer.
+
+### L2: Scenarios
+
+A scenario is a reusable task pattern distilled from atoms and episodes.
+
+Examples:
+
+- "Adding a new CLI subcommand in ogent"
+- "Debugging TUI event-loop regressions"
+- "Adding a workflow-gated behavior with tests"
+
+Scenarios are sparse. They may be proposed by ingestion, but only active
+scenarios are used in recall.
+
+### L3: Operating Memory
+
+Operating memory is a stable rule, preference, or process convention.
+
+Examples:
+
+- "Use `colgrep` as the primary code search tool."
+- "For non-trivial design work, stress-test with hand-computed scenarios."
+- "Do not add comments unless the code convention requires them."
+
+Operating memory is the only layer eligible for automatic startup injection.
+
+## SQLite Schema
 
 ```sql
--- episodes: one per ingested session
-CREATE TABLE episodes (
-    id TEXT PRIMARY KEY,              -- hash of session content
+PRAGMA foreign_keys = ON;
+
+CREATE TABLE IF NOT EXISTS schema_migrations (
+    version INTEGER PRIMARY KEY,
+    applied_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS episodes (
+    id TEXT PRIMARY KEY,
     session_id TEXT NOT NULL,
-    timestamp INTEGER NOT NULL,
+    parent_session_id TEXT,
+    kind TEXT NOT NULL,                 -- agent | steer | worker
+    profile TEXT,
+    prompt TEXT,
+    started_at INTEGER,
+    ended_at INTEGER,
+    ingested_at INTEGER NOT NULL,
+    transcript_sha256 TEXT NOT NULL,
+    meta_sha256 TEXT NOT NULL,
+    raw_messages_path TEXT NOT NULL,
+    raw_meta_path TEXT NOT NULL,
+    outcome TEXT NOT NULL,              -- success | partial | failure | unknown
+    outcome_confidence REAL NOT NULL,   -- 0.0..1.0
+    completion_summary TEXT,
+    artifact_paths_json TEXT NOT NULL,  -- JSON array
+    tool_error_count INTEGER NOT NULL DEFAULT 0,
+    command_failure_count INTEGER NOT NULL DEFAULT 0,
+    pinned INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(session_id, transcript_sha256)
+);
+
+CREATE TABLE IF NOT EXISTS atoms (
+    id TEXT PRIMARY KEY,
+    episode_id TEXT NOT NULL REFERENCES episodes(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL,
+    content TEXT NOT NULL,
+    evidence_ref_json TEXT NOT NULL,
+    artifact_paths_json TEXT NOT NULL,  -- JSON array
+    importance REAL NOT NULL DEFAULT 0.5,
+    created_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS scenarios (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
     domain TEXT,
     task_type TEXT,
-    goal TEXT,
-    input_summary TEXT,
-    outcome TEXT,                     -- success | partial | failure
-    score REAL,                       -- 0.0..1.0 heuristic
-    summary TEXT,
-    fix_summary TEXT,
-    artifact_paths TEXT,              -- JSON array
-    raw_path TEXT NOT NULL            -- path to original messages.jsonl
+    applies_when TEXT NOT NULL,
+    do_not_use_when TEXT,
+    pattern TEXT NOT NULL,
+    failure_modes TEXT,
+    evidence_episode_ids_json TEXT NOT NULL,
+    evidence_atom_ids_json TEXT NOT NULL,
+    status TEXT NOT NULL,               -- draft | active | rejected | retired
+    confidence REAL NOT NULL DEFAULT 0.5,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
 );
 
--- chunks: searchable slices
-CREATE TABLE chunks (
+CREATE TABLE IF NOT EXISTS lessons (
     id TEXT PRIMARY KEY,
-    episode_id TEXT NOT NULL REFERENCES episodes(id),
-    kind TEXT NOT NULL,               -- goal | situation | action | result | failure | fix
-    content TEXT NOT NULL
-);
-
--- lessons: gated abstractions (sparse)
-CREATE TABLE lessons (
-    id TEXT PRIMARY KEY,
-    domain TEXT,
     title TEXT NOT NULL,
-    applies_when TEXT,
+    lesson_type TEXT NOT NULL,          -- preference | repo_rule | process_rule | bug_rule
+    scope TEXT NOT NULL,                -- workspace | repo | global
+    applies_when TEXT NOT NULL,
     do_not_use_when TEXT,
     rule TEXT NOT NULL,
-    evidence_episode_ids TEXT,        -- JSON array
-    eval_delta REAL,
-    status TEXT NOT NULL              -- active | rejected | retired
+    evidence_episode_ids_json TEXT NOT NULL,
+    evidence_atom_ids_json TEXT NOT NULL,
+    status TEXT NOT NULL,               -- draft | active | rejected | retired
+    confidence REAL NOT NULL DEFAULT 0.5,
+    priority INTEGER NOT NULL DEFAULT 50,
+    source TEXT NOT NULL,               -- human | promoted | ingested
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
 );
 
--- uses: recall traces
-CREATE TABLE uses (
-    id INTEGER PRIMARY KEY,
+CREATE TABLE IF NOT EXISTS recall_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     run_session_id TEXT NOT NULL,
-    episode_id TEXT REFERENCES episodes(id),
-    lesson_id TEXT REFERENCES lessons(id),
-    recalled_at INTEGER,
-    helpful INTEGER                   -- NULL = unknown; 1 = yes; 0 = no
+    query TEXT NOT NULL,
+    domain TEXT,
+    limit_n INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    returned_json TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS recall_results (
+    recall_event_id INTEGER NOT NULL REFERENCES recall_events(id) ON DELETE CASCADE,
+    item_type TEXT NOT NULL,            -- atom | episode | scenario | lesson
+    item_id TEXT NOT NULL,
+    rank INTEGER NOT NULL,
+    score REAL NOT NULL,
+    helpful INTEGER,                    -- NULL unknown, 1 helpful, 0 unhelpful
+    PRIMARY KEY (recall_event_id, item_type, item_id)
+);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
+    item_type,
+    item_id UNINDEXED,
+    title,
+    body,
+    tokenize = 'unicode61'
 );
 ```
 
-**Key invariant:** `raw_path` always points to the original `.ogent/sessions/{id}/messages.jsonl`. Episodes are immutable. If the original session is deleted, the episode stays but loses raw traceability.
+## Evidence References
 
-## Offline Ingestion (`ogent memory-ingest`)
+`evidence_ref_json` must be a JSON object with enough information to find the
+source in the raw transcript.
 
-A new CLI subcommand, not a tool the agent calls.
+```json
+{
+  "session_id": "1778566263-15c66",
+  "raw_path": ".ogent/sessions/1778566263-15c66/messages.jsonl",
+  "message_indexes": [12, 13, 14],
+  "tool_call_ids": ["call_01"],
+  "source": "tool_result",
+  "quote_sha256": "..."
+}
+```
+
+The memory DB may store concise redacted content. The raw transcript remains the
+recoverable source.
+
+## Transcript Parsing Contract
+
+`messages.jsonl` is parsed as ordered `Message` values from `src/types.rs`.
+
+Message indexes in evidence refs are zero-based line indexes in the JSONL file.
+
+Important fields:
+
+- `role`
+- `content`
+- `reasoning_content`
+- `tool_calls`
+- `tool_call_id`
+
+Completion summaries are read from the assistant `tool_calls` argument for
+`complete` or `worker_complete`, then confirmed by the following tool result.
+The tool result must indicate success, for example `Task marked complete.` or
+`Worker marked complete.`.
+
+Tool failures are detected from tool-result messages whose content starts with
+`ERROR:` or from command output containing a non-zero exit status emitted by the
+`bash` tool.
+
+Reasoning content is never indexed directly. It can only influence memory if the
+assistant later exposes the decision in visible content, a tool call, a tool
+result, or a completion summary.
+
+## Redaction
+
+Before inserting atom, scenario, lesson, FTS, or recall output content:
+
+1. Replace obvious secrets with `[REDACTED_SECRET]`.
+2. Replace API keys, bearer tokens, private keys, and common `.env` values.
+3. Do not index raw environment dumps.
+4. Do not index files or tool output that match secret-like paths unless a human
+   explicitly forces ingestion.
+
+Raw session files are not modified. Redaction only controls what memory copies
+and returns.
+
+## Offline Ingestion
+
+Ingestion is a CLI operation. It is not an agent tool.
 
 ```bash
-# Scan .ogent/sessions/ for sessions not yet in memory.db
-ogent memory-ingest
-
-# Dry-run: show what would be ingested
-ogent memory-ingest --dry-run
-
-# Ingest a specific session
-ogent memory-ingest --session 1778216383-2028
+ogent memory ingest
+ogent memory ingest --dry-run
+ogent memory ingest --session 1778566263-15c66
+ogent memory ingest --include-incomplete
+ogent memory ingest --reingest 1778566263-15c66
 ```
 
-### Ingestion logic
+Default behavior:
 
-For each unvisited session directory:
+1. Scan `.ogent/sessions/*/meta.json`.
+2. Ignore sessions with no `messages.jsonl`.
+3. Ignore active or incomplete sessions unless `--include-incomplete` is set.
+4. Ignore worker sessions as primary episodes unless `--include-workers` is set.
+5. Compute stable hashes for `meta.json` and `messages.jsonl`.
+6. Skip if `(session_id, transcript_sha256)` already exists.
+7. Extract metadata, outcome, artifacts, and atoms.
+8. Insert episode, atoms, and FTS rows in one transaction.
+9. Print a deterministic report.
 
-1. **Read** `meta.json` and `messages.jsonl`
-2. **Compute** `episode.id` = stable hash of `(meta + transcript)`
-3. **Skip** if `id` already exists in `episodes`
-4. **Determine outcome** heuristically:
-   - Scan tool results in transcript for `ERROR:` or non-zero bash exits → `failure`
-   - If `complete` was called with open tracked work → `partial`
-   - Else `success`
-5. **Extract goal** from `meta.prompt` or first user message
-6. **Extract summary** from `complete` tool call in transcript, or fall back to `journal.md` entry
-7. **Chunk** the transcript:
-   - `goal`: first user message
-   - `situation`: initial `repo_map` or `read_file` outputs
-   - `action`: sequences of `edit_hash_anchors` + `bash` calls
-   - `result`: final assistant message before `complete`
-   - `failure`: tool errors or failing test outputs
-   - `fix`: the corrective edit/bash that resolved the failure
-8. **Insert** `episode` + `chunks`
+### Completion Detection
 
-### Where it lives
+A session is complete when the transcript contains a successful `complete` tool
+result, or a worker session contains a successful `worker_complete` tool result.
 
-Add `src/memory/ingest.rs` and wire a subcommand in `main.rs` (next to `--steer`, `--continue`, etc.) or as a standalone binary under `src/bin/ingest.rs`. Given ogent already links SQLite (not yet, but we'd add `rusqlite`), a subcommand is simpler.
+If no completion tool is found:
 
-## Runtime `recall` Tool
+- default: skip
+- with `--include-incomplete`: ingest with `outcome = unknown`
 
-Add to `tools.rs` / `build_coder_tools`:
+### Outcome Detection
+
+Outcome is inferred from transcript evidence:
+
+- `failure`: completion summary states failure, or final forced stop includes
+  unresolved blockers, or command failures are unresolved
+- `partial`: completion happened with explicit limitation/intent or open tracked
+  work warning was forced
+- `success`: completion happened, no unresolved command/tool failure is visible,
+  and final summary claims the task was completed
+- `unknown`: incomplete session, malformed transcript, or insufficient evidence
+
+`outcome_confidence` must reflect inference quality. Do not store guessed
+outcomes as high confidence.
+
+### Atom Extraction Rules
+
+Extraction must be deterministic and local. No LLM calls.
+
+Sources:
+
+- user messages
+- assistant tool calls
+- tool results
+- completion summary arguments
+- worker report summaries
+- workflow state when present
+
+Rules:
+
+1. The first substantive user request becomes a `goal` atom.
+2. User constraints and preferences become `constraint` or `preference` atoms.
+3. `read_file`, `repo_map`, and `read_hash_anchors` outputs may produce
+   `context` and `file` atoms, but large file content must be summarized by path,
+   symbol, and line range rather than copied.
+4. `edit_hash_anchors` and `write_file` calls produce `edit` atoms and artifact
+   paths.
+5. `bash` calls produce `command`, `failure`, and `verification` atoms.
+6. A non-zero command creates a `failure` atom. A later passing related command
+   creates a `fix` or `verification` atom.
+7. The final `complete` summary produces a `result` atom.
+8. Worker summaries produce `worker_report` atoms in the parent episode when
+   visible in parent tool results.
+
+Do not infer a fix unless there is evidence of a failing step followed by a
+corrective edit or command and then a passing verification.
+
+## Promotion to Scenarios and Lessons
+
+Scenarios and lessons are sparse, higher-authority abstractions.
+
+They can be created by:
+
+- human CLI command
+- curated file import
+- deterministic promotion command that starts in `draft`
+
+They are used in recall only when `status = active`.
+
+```bash
+ogent memory promote scenario --from-episode <episode-id>
+ogent memory promote lesson --from-atom <atom-id>
+ogent memory lesson add --title ... --rule ... --applies-when ...
+ogent memory scenario activate <scenario-id>
+ogent memory lesson activate <lesson-id>
+ogent memory lesson retire <lesson-id>
+ogent memory scenario retire <scenario-id>
+```
+
+Activation requires:
+
+- non-empty `applies_when`
+- non-empty `do_not_use_when` for broad rules
+- at least one evidence reference, unless `source = human`
+- confidence and priority set explicitly or by default policy
+
+## Startup Memory Primer
+
+At the start of a non-worker session, ogent may inject a bounded memory primer
+containing only active operating memory.
+
+This fixes the failure mode where stable preferences are useful but the agent has
+no reason to call `recall`.
+
+Primer eligibility:
+
+- `lessons.status = active`
+- `lesson_type IN ('preference', 'repo_rule', 'process_rule')`
+- scope matches the current workspace or is global
+- priority is high enough for the size budget
+
+Primer constraints:
+
+- maximum 12 lessons
+- maximum 2,000 characters after rendering
+- never includes raw episodes or atoms
+- each item includes `lesson_id`, rule, applies/avoid condition, confidence
+- fail open if DB is absent or broken
+
+Primer rendering:
+
+```text
+<memory_primer>
+Memory is advisory. Verify current repo state before acting on it.
+- lsn_...: Use colgrep as primary code search. Applies when searching code.
+- lsn_...: Do not add comments unless convention requires them.
+</memory_primer>
+```
+
+The primer belongs in the initial user-side context, not as a hidden override to
+the system prompt.
+
+## Runtime Recall Tool
+
+`recall` is added to coder tools only. It is excluded from worker tools.
 
 ```json
 {
   "name": "recall",
-  "description": "Search prior task episodes and lessons for relevant experience.",
+  "description": "Search prior ogent memory for relevant episodes, atoms, scenarios, and operating lessons. Memory is advisory; verify current repo state before acting.",
   "parameters": {
     "type": "object",
     "properties": {
-      "query": { "type": "string", "description": "The task or problem to find prior experience for." },
-      "domain": { "type": "string", "description": "Optional domain filter, e.g. 'coding', 'docs'." },
-      "limit": { "type": "integer", "default": 5 }
+      "query": {
+        "type": "string",
+        "description": "Task, problem, file, error, or decision to search memory for."
+      },
+      "domain": {
+        "type": "string",
+        "description": "Optional filter such as coding, docs, tui, workflow, testing."
+      },
+      "limit": {
+        "type": "integer",
+        "description": "Maximum returned memory groups. Default 5, max 10."
+      }
     },
-    "required": ["query"]
+    "required": ["query"],
+    "additionalProperties": false
   }
 }
 ```
 
-Implementation (`src/memory/recall.rs`):
+Behavior:
 
-```rust
-pub fn recall(query: &str, domain: Option<&str>, limit: usize) -> Result<MemoryPack> {
-    // 1. Tokenize query
-    // 2. Load candidate episodes (filter by domain if given)
-    // 3. Score by lexical overlap + Jaccard on chunks
-    // 4. Load active lessons linked to top episodes
-    // 5. Log use to `uses` table (helpful = NULL)
-    // 6. Return MemoryPack
-}
+1. Validate and trim query.
+2. If memory DB is missing, return `No memory database found.`
+3. Search active lessons, active scenarios, atoms, and episodes.
+4. Rank with deterministic local scoring.
+5. Render a compact `MemoryPack`.
+6. Insert `recall_events` and `recall_results`.
+7. Append a JSONL line to `.ogent/memory/traces.jsonl`.
+
+## Ranking
+
+Ranking is deterministic and local.
+
+Candidate sources:
+
+- active lessons
+- active scenarios
+- atoms
+- episodes via their goal, summary, and artifact paths
+
+Score components:
+
+- FTS/BM25 score over title/body
+- exact file path match boost
+- exact tool/error token match boost
+- active lesson/scenario boost
+- successful or partial outcome boost
+- failure outcome boost only when query includes failure, bug, error, test, or
+  debug terms
+- recent helpful feedback boost
+- unhelpful feedback penalty
+- low-confidence outcome penalty
+- worker episode penalty unless query explicitly asks for worker/review/test
+
+Lessons and scenarios should outrank raw atoms when they match well, because they
+are curated. Raw atoms should outrank broad lessons when the query contains exact
+file paths, error text, or command output.
+
+## MemoryPack Output
+
+The tool returns text, not raw JSON, because the agent consumes it directly.
+
+Required structure:
+
+```text
+Memory recall for: <query>
+Memory is advisory. Verify current repo state before acting.
+
+Lessons:
+- <id> [confidence <n>] <title>
+  Rule: ...
+  Applies: ...
+  Avoid when: ...
+  Evidence: <episode count> episodes
+
+Scenarios:
+- <id> <title>
+  Applies: ...
+  Pattern: ...
+  Failure modes: ...
+  Evidence: <episode ids>
+
+Episodes and atoms:
+- <episode id> <outcome> <goal>
+  Summary: ...
+  Artifacts: ...
+  Relevant atoms:
+  - <atom id> <kind>: ...
+    Evidence: <raw path>, messages <indexes>
+
+Trace:
+- recall_event_id: <id>
 ```
 
-`MemoryPack` JSON returned to the agent:
+Hard limits:
 
-```json
-{
-  "episodes": [
-    {
-      "id": "ep_abc123",
-      "goal": "Fix stale cache after settings update",
-      "outcome": "success",
-      "summary": "Added invalidation after config writes...",
-      "chunks": [
-        {"kind": "action", "content": "Edited cache.ts to call invalidate()..."},
-        {"kind": "result", "content": "Tests pass."}
-      ],
-      "artifacts": ["src/cache.ts"]
-    }
-  ],
-  "lessons": [
-    {
-      "id": "lsn_def456",
-      "title": "Invalidate cache after durable config writes",
-      "rule": "After a committed config write, invalidate or refresh the cache.",
-      "applies_when": "...",
-      "evidence_count": 4
-    }
-  ]
-}
-```
+- max 10 memory groups
+- max 3 atoms per episode
+- max 6,000 characters total
+- truncate individual atom content at 700 characters
+- always preserve IDs and evidence refs when truncating
 
-The agent can read this and decide what to do. No automatic injection into the system prompt — the agent explicitly chooses to call `recall` when it thinks prior context would help.
+## Feedback
 
-### Prompt discipline
-
-Add a short note to the system prompt:
-
-> If a task feels familiar or you are unsure about an approach, call `recall` to check for prior episodes and lessons.
-
-## Traces for Human Improvement
-
-After `recall` runs, ogent writes a trace entry:
-
-```jsonl
-// .ogent/memory/traces.jsonl
-{"run_session_id":"1778216383-2028","recalled_at":1715420000,"query":"fix cache bug","episode_ids":["ep_abc"],"lesson_ids":["lsn_def"],"helpful":null}
-```
-
-Humans (or a future cron job) read `traces.jsonl` to see:
-- What was the query?
-- What came back?
-- Did the run succeed? (cross-reference with `episodes.outcome`)
-
-If a recalled episode was misleading, a human can run:
+Feedback updates `recall_results.helpful`.
 
 ```bash
-# Mark an episode as unhelpful in a specific run
-ogent memory-feedback --run 1778216383-2028 --episode ep_abc --helpful false
-
-# Or retire a bad lesson
-ogent memory-retire --lesson lsn_def
+ogent memory feedback --event <event-id> --item <item-id> --helpful true
+ogent memory feedback --event <event-id> --item <item-id> --helpful false
 ```
 
-This feedback updates the `uses.helpful` column and eventually informs ranking adjustments (or manual lesson retirement).
+Feedback affects ranking but never deletes evidence.
 
-## Retention and Pruning
-
-Old episodes that are not referenced by lessons and have no recent recall traces can be pruned to keep the DB bounded.
+Bad lessons or scenarios are retired explicitly:
 
 ```bash
-# Prune episodes with no recall in the last <days> and no linked lessons
-ogent memory-prune 30
-ogent memory-prune 90
+ogent memory lesson retire <lesson-id>
+ogent memory scenario retire <scenario-id>
 ```
 
-Safe defaults:
-- Never prune episodes linked to active lessons.
-- Never prune pinned episodes (future `ogent memory-pin <episode-id>`).
-- Only prune episodes where `last_recalled_at` is older than the threshold and no `uses` row exists with `helpful=1`.
+## Inspectability CLI
 
-This can be run manually or scheduled via cron.
+Memory must be inspectable without running the agent.
 
-## Code Map
+```bash
+ogent memory search "add CLI subcommand" --limit 5
+ogent memory show episode <episode-id>
+ogent memory show atom <atom-id>
+ogent memory show scenario <scenario-id>
+ogent memory show lesson <lesson-id>
+ogent memory stats
+```
 
-| File / New module | Role |
+`show atom` must include the evidence reference and the raw session path.
+
+## Pruning
+
+```bash
+ogent memory prune --older-than-days 90
+```
+
+Pruning rules:
+
+- never prune pinned episodes
+- never prune episodes referenced by active scenarios or active lessons
+- never prune episodes with helpful recall feedback
+- delete atoms through foreign-key cascade
+- delete FTS rows in the same transaction
+- print what would be deleted before deleting unless `--yes` is passed
+
+## Integration Points
+
+| File | Required change |
 |---|---|
-| `src/memory/db.rs` | SQLite schema, connection, migrations |
-| `src/memory/ingest.rs` | Offline session → episode + chunk conversion |
-| `src/memory/recall.rs` | Query ranking, `MemoryPack` assembly |
-| `src/memory/render.rs` | Format `MemoryPack` into readable text for the agent |
-| `src/memory/mod.rs` | Public API: `ingest`, `recall`, `feedback` |
-| `src/tools.rs` | Add `"recall"` arm + schema in tool builder |
-| `src/main.rs` | Add `memory-ingest`, `memory-feedback`, `memory-retire`, `memory-prune` CLI subcommands |
+| `Cargo.toml` | Add `rusqlite`, `sha2`, `regex` |
+| `src/main.rs` | Add `memory` subcommands and primer injection during non-worker session setup |
+| `src/memory/mod.rs` | Public memory API |
+| `src/memory/db.rs` | SQLite connection, schema, migrations, transactions |
+| `src/memory/redact.rs` | Redaction helpers |
+| `src/memory/ingest.rs` | Session scanning and atom extraction |
+| `src/memory/recall.rs` | Search, ranking, recall event logging |
+| `src/memory/render.rs` | Primer and MemoryPack rendering |
+| `src/memory/feedback.rs` | Helpful/unhelpful feedback, retire/activate |
+| `src/tools.rs` | Add coder-only `recall` tool and mark it read-only |
+| `src/prompts.rs` | Append startup memory primer to initial user context |
+| `src/session.rs` | Add helpers for listing session dirs and raw paths |
 
-## Why This Fits
+`recall` is read-only from the agent perspective even though it writes a recall
+trace. It can be included in read-only batching because trace insertion does not
+change repository files or agent-visible state.
 
-- **No runtime bloat:** The agent only pays for a SQLite query when it calls `recall`. No background indexing. No mandatory startup cost.
-- **Immutable evidence:** Original `messages.jsonl` is never touched. The memory DB only points to it.
-- **Human gate:** Ingestion is offline, so a human can review what goes in. Traces give humans visibility to correct bad recalls.
-- **Fail-open:** If `.ogent/memory.db` is missing, `recall` returns "No memory found" and the agent continues normally.
-- **No LLM in memory loop:** Ranking is lexical/Jaccard. No API calls. Fast and deterministic.
+## Hand-Computed Scenario Checks
 
-## Open Questions
+These checks were used to shape the final design. They are part of the spec
+because they explain constraints that are easy to miss.
 
-1. **Chunking depth** — Do we extract chunks greedily at ingest time, or lazily at recall time? Eager is simpler and matches AEM.
-2. **Lesson creation** — Should the agent ever propose a lesson via a tool (e.g., after `complete` it notices a pattern), or should lessons be purely human-authored? I lean toward: agent can propose, human ingests/promotes offline.
+### Scenario 1: Similar Feature Implementation
+
+State:
+
+- Prior session added a CLI subcommand.
+- New user asks to add another subcommand.
+- Memory contains an active scenario and atoms from the prior session.
+
+Trace:
+
+1. Agent receives request.
+2. Startup primer may include stable process rules only.
+3. Agent calls `recall("add ogent CLI subcommand")`.
+4. Recall returns the scenario, prior episode, edited files, and evidence refs.
+5. Agent still reads current `src/main.rs` before editing.
+
+Flaw found:
+
+- A flat chunk store can return old edits without explaining when they apply.
+
+Design fix:
+
+- Add scenarios with `applies_when` and `do_not_use_when`.
+- Require recall output to say memory is advisory.
+
+### Scenario 2: Prior Failure and Fix
+
+State:
+
+- Prior task failed `cargo test` after a TUI change.
+- Later edit fixed the failure and tests passed.
+- New user asks to debug a similar TUI regression.
+
+Trace:
+
+1. Query includes `TUI`, `test`, and error terms.
+2. Ranking boosts failure atoms because the query is a debug query.
+3. Recall returns failure -> fix -> verification atoms together.
+
+Flaw found:
+
+- Failure atoms alone can mislead the agent into repeating a broken path.
+
+Design fix:
+
+- Recall groups relevant atoms by episode.
+- A fix is emitted only when failure, corrective action, and verification are
+  all present.
+
+### Scenario 3: Stable User Preference
+
+State:
+
+- User has repeatedly asked for `colgrep` as primary search.
+- New task is ordinary implementation.
+- Agent may not know to call recall.
+
+Trace:
+
+1. Session starts.
+2. Primer injects only active operating memory under a strict size budget.
+3. Agent sees the search preference before choosing tools.
+
+Flaw found:
+
+- Explicit-only recall fails for preferences, because the agent has no trigger
+  to search for them.
+
+Design fix:
+
+- Add bounded startup memory primer for L3 operating memory only.
+- Keep episodes and atoms out of automatic injection.
+
+### Scenario 4: Continuing Old Work
+
+State:
+
+- User says "continue the memory design work" without a session id.
+- There are old memory-related episodes.
+
+Trace:
+
+1. Agent calls recall with the task phrase.
+2. Recall returns matching episodes and raw session paths.
+3. Agent can decide whether to inspect raw transcript or ask the user to resume a
+   specific session.
+
+Flaw found:
+
+- Memory can be confused with session resume.
+
+Design fix:
+
+- Memory returns paths and summaries, but does not reconstruct agent state.
+- Resume/fork remains the authority for continuing exact context.
+
+### Scenario 5: Incomplete or Aborted Session
+
+State:
+
+- A session contains half-finished edits and no `complete` call.
+- Ingest scans sessions.
+
+Trace:
+
+1. Ingest sees no successful `complete` call.
+2. Default ingest skips the session.
+3. Human can force `--include-incomplete`, which stores outcome `unknown`.
+
+Flaw found:
+
+- Ingesting every session by default pollutes memory with abandoned attempts.
+
+Design fix:
+
+- Skip incomplete sessions by default.
+- Track low outcome confidence when forced.
+
+### Scenario 6: Worker Delegation
+
+State:
+
+- Parent task dispatches a reviewer worker.
+- Worker finds an issue and reports it.
+
+Trace:
+
+1. Parent transcript contains worker report as a tool result.
+2. Ingest creates `worker_report` atoms in the parent episode.
+3. Worker sessions are not primary recall targets by default.
+
+Flaw found:
+
+- Letting workers call recall independently creates hidden context and weakens
+  parent integration.
+
+Design fix:
+
+- Exclude `recall` from worker tools.
+- Parent passes relevant memory to workers explicitly.
+
+### Scenario 7: Secret Exposure
+
+State:
+
+- A tool output contains an API key or `.env` dump.
+- Ingest extracts atoms.
+
+Trace:
+
+1. Redaction runs before DB insertion and FTS indexing.
+2. Redacted content is stored.
+3. Raw transcript remains unchanged but is not copied into memory output.
+
+Flaw found:
+
+- Memory DB can make existing raw transcript exposure easier to search.
+
+Design fix:
+
+- Redact before indexing.
+- Avoid indexing raw environment dumps and secret-like paths.
+
+### Scenario 8: Bad Memory
+
+State:
+
+- A recalled lesson is obsolete after architecture changes.
+- Agent follows it and user marks it unhelpful.
+
+Trace:
+
+1. Recall event has result rows.
+2. Feedback marks the item unhelpful.
+3. Later ranking penalizes it.
+4. Human retires the lesson if it is broadly wrong.
+
+Flaw found:
+
+- Trace rows without item-level feedback are not enough.
+
+Design fix:
+
+- Split `recall_events` and `recall_results`.
+- Feedback is attached to each returned item.
+
+## Test Requirements
+
+Unit tests:
+
+- schema migration creates all tables and FTS table
+- missing DB recall fails open
+- redaction removes representative secrets
+- incomplete sessions are skipped by default
+- completed sessions produce an episode and goal/result atoms
+- failed command followed by pass creates failure and verification atoms
+- recall ranking boosts exact file path matches
+- unhelpful feedback lowers rank
+- primer includes only active operating lessons and respects size budget
+- worker tools exclude `recall`
+
+Integration tests:
+
+- ingest a fixture session and search it
+- recall logs event rows and JSONL trace
+- show atom returns evidence refs
+- prune refuses active lesson evidence
+- reingest does not duplicate an unchanged session
+
+Manual verification:
+
+```bash
+cargo test
+cargo run -- memory ingest --dry-run
+cargo run -- memory ingest --session <fixture-session>
+cargo run -- memory search "add CLI subcommand"
+cargo run -- "Use memory to see whether we have done a similar CLI change before"
+```
+
+## Final Implementation Contract
+
+Memory is correct when:
+
+1. It can explain where every returned claim came from.
+2. It helps the agent avoid repeated work without hiding current-state checks.
+3. Stable preferences are available without relying on the agent to remember to
+   ask for them.
+4. Incomplete, secret, stale, or misleading data has clear containment paths.
+5. Humans can inspect, correct, promote, retire, and prune memory without reading
+   SQLite internals.
