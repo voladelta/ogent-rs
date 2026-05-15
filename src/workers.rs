@@ -360,11 +360,13 @@ pub async fn resolve_worker_prompts(
     crate::types::Message {
       role: "system".into(),
       content: crate::prompts::ARCHITECT_PROMPT.to_string(),
+      origin: crate::types::MessageOrigin::Internal,
       ..Default::default()
     },
     crate::types::Message {
       role: "user".into(),
       content: user_content,
+      origin: crate::types::MessageOrigin::Human,
       ..Default::default()
     },
   ];

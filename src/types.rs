@@ -1,10 +1,22 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MessageOrigin {
+  Internal,
+  #[default]
+  Human,
+  Model,
+  Tool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct Message {
   pub role: String,
   pub content: String,
+  #[serde(default)]
+  pub origin: MessageOrigin,
   #[serde(default, skip_serializing_if = "String::is_empty")]
   pub reasoning_content: String,
   #[serde(default, skip_serializing_if = "Vec::is_empty")]

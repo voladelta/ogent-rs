@@ -4,7 +4,7 @@ use crate::sse::{SseError, StreamEvent};
 use crate::task_tracker::{TaskTracker, is_tracking_tool_name};
 use crate::tools::{ToolContext, execute_tool, is_read_only_tool};
 use crate::tui::{AgentState, SteerEvent, TuiHandle};
-use crate::types::{ChatResponse, Message, Tool, ToolCall};
+use crate::types::{ChatResponse, Message, MessageOrigin, Tool, ToolCall};
 use crate::workers::WorkerManager;
 use std::io::{self, Write};
 
@@ -234,7 +234,7 @@ impl SteerState {
               });
             }
             if let Some(msg) = steer_msg {
-              agent.push_msg(user_msg(msg.clone()));
+              agent.push_msg(human_user_msg(msg.clone()));
               tui.log.push(format!("[steer] {}", truncate(&msg, 200)));
               return Ok(Self::StartTurn);
             }
@@ -282,7 +282,7 @@ impl SteerState {
                   serde_json::to_string_pretty(tracker).unwrap_or_default(),
                 ));
               }
-              agent.push_msg(user_msg(compact_msg));
+              agent.push_msg(internal_user_msg(compact_msg));
               tui
                 .log
                 .push("[compact] autocompact triggered, requesting handoff brief...");
@@ -347,6 +347,7 @@ impl SteerState {
             new_messages.push(Message {
               role: "user".into(),
               content,
+              origin: MessageOrigin::Internal,
               ..Default::default()
             });
             crate::prompts::enrich_initial_messages(&mut new_messages);
@@ -578,10 +579,10 @@ impl Agent {
     }
     if let Some(msg) = self.worker_manager.status_message().await {
       if let Some(log) = ui_log {
-        self.push_msg(user_msg(msg.clone()));
+        self.push_msg(internal_user_msg(msg.clone()));
         log.push(format!("[workers] {}", truncate(&msg, 200)));
       } else {
-        self.push_msg(user_msg(msg));
+        self.push_msg(internal_user_msg(msg));
       }
       *has_more = true;
     }
@@ -603,7 +604,7 @@ impl Agent {
         if self.meta.start_ts.is_none() {
           self.meta.start_ts = Some(session::timestamp_ms());
         }
-        self.push_msg(user_msg(content.clone()));
+        self.push_msg(human_user_msg(content.clone()));
         tui.log.push(format!("[user] {}", truncate(&content, 200)));
       }
       SteerEvent::Cancel => {
@@ -615,7 +616,7 @@ impl Agent {
         let has_assistant = self.messages.iter().any(|m| m.role == "assistant");
         if has_assistant {
           let content = MANUAL_COMPLETE_REMINDER.to_string();
-          self.push_msg(user_msg(content));
+          self.push_msg(internal_user_msg(content));
           tui.log.push("[steer] complete requested");
         } else {
           tui
@@ -687,7 +688,7 @@ impl Agent {
           if let Some(ref prompt) = task_prompt {
             compact_msg.push_str(&format!("\n\nFocus the new session on: {}", prompt));
           }
-          self.push_msg(user_msg(compact_msg));
+          self.push_msg(internal_user_msg(compact_msg));
           tui.log.push("[compact] requesting handoff brief...");
           self.pending_compact = match task_prompt {
             Some(p) => CompactPending::WithFocus(p),
@@ -914,7 +915,7 @@ impl Agent {
         "Context budget at {pct}%.\nEXHAUSTED.\nDo not write more files, delegate, or start new work.\nCall `complete` IMMEDIATELY with a summary of completed files, current state, verification state, blockers, and next steps."
       ),
     };
-    self.push_msg(user_msg(format!("Reminder: [context_budget] {body}")));
+    self.push_msg(internal_user_msg(format!("Reminder: [context_budget] {body}")));
   }
 
   fn report_tokens(&self) {
@@ -944,15 +945,25 @@ impl Agent {
     if let Some(tracker) = self.task_tracker.as_mut()
       && let Some(reminder) = tracker.take_reminder()
     {
-      self.push_msg(user_msg(reminder));
+      self.push_msg(internal_user_msg(reminder));
     }
   }
 }
 
-fn user_msg(content: impl Into<String>) -> Message {
+fn human_user_msg(content: impl Into<String>) -> Message {
   Message {
     role: "user".into(),
     content: content.into(),
+    origin: MessageOrigin::Human,
+    ..Default::default()
+  }
+}
+
+fn internal_user_msg(content: impl Into<String>) -> Message {
+  Message {
+    role: "user".into(),
+    content: content.into(),
+    origin: MessageOrigin::Internal,
     ..Default::default()
   }
 }
@@ -964,6 +975,7 @@ fn assistant_msg_with_reasoning(
   Message {
     role: "assistant".into(),
     content: content.into(),
+    origin: MessageOrigin::Model,
     reasoning_content: reasoning.into(),
     ..Default::default()
   }
@@ -977,6 +989,7 @@ fn assistant_msg_full(
   Message {
     role: "assistant".into(),
     content: content.into(),
+    origin: MessageOrigin::Model,
     reasoning_content: reasoning.into(),
     tool_calls,
     ..Default::default()
@@ -987,6 +1000,7 @@ fn tool_msg(content: impl Into<String>, tool_call_id: impl Into<String>) -> Mess
   Message {
     role: "tool".into(),
     content: content.into(),
+    origin: MessageOrigin::Tool,
     tool_call_id: tool_call_id.into(),
     ..Default::default()
   }
@@ -1129,7 +1143,7 @@ mod dirty_state_machine_tests {
   #[test]
   fn push_msg_sets_dirty() {
     let mut agent = dummy_agent();
-    agent.push_msg(user_msg("hello"));
+    agent.push_msg(human_user_msg("hello"));
     assert!(agent.dirty);
     assert_eq!(agent.messages.len(), 3); // system + initial user + "hello"
   }
@@ -1233,7 +1247,7 @@ mod dirty_state_machine_tests {
   async fn new_on_dirty_persists_old_then_resets() {
     let mut agent = dummy_agent();
     let tui = crate::tui::TuiHandle::test_handle();
-    agent.push_msg(user_msg("hello"));
+    agent.push_msg(human_user_msg("hello"));
     let old_id = agent.meta.session_id.clone();
 
     let action = agent.apply_steer_event(SteerEvent::New, &tui).unwrap();
@@ -1297,7 +1311,7 @@ mod dirty_state_machine_tests {
   async fn compact_pushes_handoff_message() {
     let mut agent = dummy_agent();
     let tui = crate::tui::TuiHandle::test_handle();
-    agent.push_msg(user_msg("hello"));
+    agent.push_msg(human_user_msg("hello"));
     agent.push_msg(assistant_msg_with_reasoning("ok", ""));
     let old_id = agent.meta.session_id.clone();
     let old_len = agent.messages.len();
@@ -1319,7 +1333,7 @@ mod dirty_state_machine_tests {
   async fn compact_with_focus_includes_prompt() {
     let mut agent = dummy_agent();
     let tui = crate::tui::TuiHandle::test_handle();
-    agent.push_msg(user_msg("hello"));
+    agent.push_msg(human_user_msg("hello"));
     agent.push_msg(assistant_msg_with_reasoning("ok", ""));
 
     let action = agent
@@ -1344,7 +1358,7 @@ mod dirty_state_machine_tests {
         notes: String::new(),
       },
     ));
-    agent.push_msg(user_msg("hello"));
+    agent.push_msg(human_user_msg("hello"));
     let action = agent.apply_steer_event(SteerEvent::New, &tui).unwrap();
     assert!(matches!(action, SteerAction::Restart));
     assert!(agent.task_tracker.is_none());

@@ -20,7 +20,7 @@ use std::env;
 use std::io::{self, Write};
 
 use agent::{Agent, CompactState};
-use types::Message;
+use types::{Message, MessageOrigin};
 
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
@@ -132,6 +132,7 @@ async fn main() -> Result<()> {
       loaded.push(Message {
         role: "user".into(),
         content: prompt.clone(),
+        origin: MessageOrigin::Human,
         ..Default::default()
       });
     }
@@ -277,11 +278,13 @@ fn build_worker_messages(system_prompt: &str, prompt: &str, session_id: &str) ->
     Message {
       role: "system".into(),
       content: system_prompt.to_string(),
+      origin: MessageOrigin::Internal,
       ..Default::default()
     },
     Message {
       role: "user".into(),
       content: format!("[session: {session_id}]\n\n{prompt}"),
+      origin: MessageOrigin::Human,
       ..Default::default()
     },
   ]
