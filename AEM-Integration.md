@@ -42,9 +42,9 @@ It is not stored, ranked, or recalled through this memory DB.
 
 ## Core Invariants
 
-1. Raw session logs are the source of truth.
-2. Every atom, scenario, and lesson must trace back to raw session evidence or
-   explicit human input.
+1. Immutable raw episode snapshots are the source of truth.
+2. Every atom, scenario, and lesson must trace back to immutable raw episode
+   evidence or explicit human input.
 3. Runtime memory access must fail open. Missing or corrupt memory must not stop
    the agent.
 4. Memory is advisory. The agent must verify current files, commands, and state
@@ -73,11 +73,19 @@ Memory lives under `.ogent/memory/`.
   memory/
     memory.db
     traces.jsonl
+    raw/
+      <episode-id>/
+        meta.json
+        messages.jsonl
 ```
 
 `memory.db` is the authoritative memory index. `traces.jsonl` is a readable
 append-only mirror of recall events for humans. The trace file is redundant by
 design; the DB remains the source of truth.
+
+Raw episode snapshots under `.ogent/memory/raw/` are immutable evidence copies
+created during ingestion. They are required because ogent sessions can be resumed
+and persisted again, which can rewrite `.ogent/sessions/<id>/messages.jsonl`.
 
 Required dependencies:
 
@@ -89,6 +97,15 @@ regex = "1"
 
 Use SQLite FTS5 through bundled SQLite. Do not add embeddings or remote model
 calls to the memory path.
+
+Open the DB with:
+
+- `PRAGMA foreign_keys = ON`
+- `PRAGMA journal_mode = WAL`
+- `PRAGMA busy_timeout = 5000`
+
+This is required because `recall` writes trace rows while otherwise behaving as
+a read-only agent tool, and multiple read-only tool calls may be batched.
 
 ## Identifier Rules
 
@@ -112,7 +129,8 @@ Editing a lesson or scenario updates `updated_at` but does not change its ID.
 An episode is one ingested ogent session.
 
 The episode stores metadata and pointers to raw files. It does not copy the full
-transcript into the DB.
+transcript into the DB. It does copy `meta.json` and `messages.jsonl` into an
+immutable memory snapshot directory.
 
 ### L1: Atoms
 
@@ -177,6 +195,8 @@ CREATE TABLE IF NOT EXISTS episodes (
     session_id TEXT NOT NULL,
     parent_session_id TEXT,
     kind TEXT NOT NULL,                 -- agent | steer | worker
+    status TEXT NOT NULL,               -- active | superseded | pruned
+    superseded_by_episode_id TEXT,
     profile TEXT,
     prompt TEXT,
     started_at INTEGER,
@@ -184,8 +204,10 @@ CREATE TABLE IF NOT EXISTS episodes (
     ingested_at INTEGER NOT NULL,
     transcript_sha256 TEXT NOT NULL,
     meta_sha256 TEXT NOT NULL,
-    raw_messages_path TEXT NOT NULL,
-    raw_meta_path TEXT NOT NULL,
+    raw_messages_path TEXT NOT NULL,    -- immutable memory snapshot
+    raw_meta_path TEXT NOT NULL,        -- immutable memory snapshot
+    source_messages_path TEXT NOT NULL, -- original session path at ingest time
+    source_meta_path TEXT NOT NULL,     -- original session path at ingest time
     outcome TEXT NOT NULL,              -- success | partial | failure | unknown
     outcome_confidence REAL NOT NULL,   -- 0.0..1.0
     completion_summary TEXT,
@@ -249,7 +271,7 @@ CREATE TABLE IF NOT EXISTS recall_events (
     domain TEXT,
     limit_n INTEGER NOT NULL,
     created_at INTEGER NOT NULL,
-    returned_json TEXT NOT NULL
+    returned_text TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS recall_results (
@@ -274,12 +296,13 @@ CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
 ## Evidence References
 
 `evidence_ref_json` must be a JSON object with enough information to find the
-source in the raw transcript.
+source in the immutable raw snapshot.
 
 ```json
 {
   "session_id": "1778566263-15c66",
-  "raw_path": ".ogent/sessions/1778566263-15c66/messages.jsonl",
+  "raw_path": ".ogent/memory/raw/ep_abc123/messages.jsonl",
+  "source_path": ".ogent/sessions/1778566263-15c66/messages.jsonl",
   "message_indexes": [12, 13, 14],
   "tool_call_ids": ["call_01"],
   "source": "tool_result",
@@ -287,8 +310,9 @@ source in the raw transcript.
 }
 ```
 
-The memory DB may store concise redacted content. The raw transcript remains the
-recoverable source.
+The memory DB may store concise redacted content. The immutable raw snapshot
+remains the recoverable source. `source_path` is diagnostic only and must not be
+used as evidence after ingestion.
 
 ## Transcript Parsing Contract
 
@@ -327,8 +351,8 @@ Before inserting atom, scenario, lesson, FTS, or recall output content:
 4. Do not index files or tool output that match secret-like paths unless a human
    explicitly forces ingestion.
 
-Raw session files are not modified. Redaction only controls what memory copies
-and returns.
+Source session files are not modified. Redaction only controls what memory
+copies and returns.
 
 ## Offline Ingestion
 
@@ -348,11 +372,27 @@ Default behavior:
 2. Ignore sessions with no `messages.jsonl`.
 3. Ignore active or incomplete sessions unless `--include-incomplete` is set.
 4. Ignore worker sessions as primary episodes unless `--include-workers` is set.
-5. Compute stable hashes for `meta.json` and `messages.jsonl`.
-6. Skip if `(session_id, transcript_sha256)` already exists.
-7. Extract metadata, outcome, artifacts, and atoms.
-8. Insert episode, atoms, and FTS rows in one transaction.
-9. Print a deterministic report.
+5. Read `meta.json` and `messages.jsonl`, hash both, copy both into
+   `.ogent/memory/raw/<episode-id>/`, then rehash the copied snapshot.
+6. Skip the session if source files changed during copy.
+7. Skip if `(session_id, transcript_sha256)` already exists.
+8. If another active episode exists for the same `session_id` with a different
+   transcript hash, mark the old episode `superseded`.
+9. Extract metadata, outcome, artifacts, and atoms from the immutable snapshot.
+10. Insert episode, atoms, and FTS rows in one transaction.
+11. Print a deterministic report.
+
+### Active Session Detection
+
+A session is active when any of these are true:
+
+- no successful completion tool result is present
+- `meta.end_ts` is absent
+- `meta.json` or `messages.jsonl` changes while ingestion is reading it
+- the session directory contains an implementation-created lock file
+
+The lock file is optional for compatibility with old sessions, but the ingestion
+copy-and-rehash check is mandatory.
 
 ### Completion Detection
 
@@ -378,6 +418,15 @@ Outcome is inferred from transcript evidence:
 
 `outcome_confidence` must reflect inference quality. Do not store guessed
 outcomes as high confidence.
+
+Unresolved command failure rule:
+
+1. A failed command creates an unresolved failure keyed by normalized command
+   family and nearby artifact paths.
+2. A later successful command from the same family, or a completion summary that
+   explicitly names the failure as resolved, can resolve it.
+3. If unresolved failures remain at completion, outcome is `partial` or
+   `failure` depending on the completion summary.
 
 ### Atom Extraction Rules
 
@@ -510,7 +559,8 @@ Behavior:
 
 1. Validate and trim query.
 2. If memory DB is missing, return `No memory database found.`
-3. Search active lessons, active scenarios, atoms, and episodes.
+3. Search active lessons, active scenarios, atoms from active episodes, and
+   active episodes.
 4. Rank with deterministic local scoring.
 5. Render a compact `MemoryPack`.
 6. Insert `recall_events` and `recall_results`.
@@ -540,6 +590,7 @@ Score components:
 - unhelpful feedback penalty
 - low-confidence outcome penalty
 - worker episode penalty unless query explicitly asks for worker/review/test
+- superseded episode exclusion
 
 Lessons and scenarios should outrank raw atoms when they match well, because they
 are curated. Raw atoms should outrank broad lessons when the query contains exact
@@ -620,7 +671,7 @@ ogent memory show lesson <lesson-id>
 ogent memory stats
 ```
 
-`show atom` must include the evidence reference and the raw session path.
+`show atom` must include the evidence reference and immutable raw snapshot path.
 
 ## Pruning
 
@@ -633,8 +684,11 @@ Pruning rules:
 - never prune pinned episodes
 - never prune episodes referenced by active scenarios or active lessons
 - never prune episodes with helpful recall feedback
+- never prune active episodes unless superseded by a newer episode from the same
+  session and unreferenced by active scenarios or lessons
 - delete atoms through foreign-key cascade
 - delete FTS rows in the same transaction
+- delete immutable raw snapshot files only after the DB transaction succeeds
 - print what would be deleted before deleting unless `--yes` is passed
 
 ## Integration Points
@@ -650,13 +704,16 @@ Pruning rules:
 | `src/memory/recall.rs` | Search, ranking, recall event logging |
 | `src/memory/render.rs` | Primer and MemoryPack rendering |
 | `src/memory/feedback.rs` | Helpful/unhelpful feedback, retire/activate |
+| `src/memory/snapshot.rs` | Immutable raw episode snapshot creation and verification |
 | `src/tools.rs` | Add coder-only `recall` tool and mark it read-only |
 | `src/prompts.rs` | Append startup memory primer to initial user context |
 | `src/session.rs` | Add helpers for listing session dirs and raw paths |
 
 `recall` is read-only from the agent perspective even though it writes a recall
 trace. It can be included in read-only batching because trace insertion does not
-change repository files or agent-visible state.
+change repository files or agent-visible state. The SQLite connection must use
+WAL and a busy timeout so concurrent recall calls do not fail under normal
+read-only batching.
 
 ## Hand-Computed Scenario Checks
 
@@ -746,9 +803,9 @@ State:
 Trace:
 
 1. Agent calls recall with the task phrase.
-2. Recall returns matching episodes and raw session paths.
-3. Agent can decide whether to inspect raw transcript or ask the user to resume a
-   specific session.
+2. Recall returns matching episodes and immutable raw snapshot paths.
+3. Agent can decide whether to inspect the raw snapshot or ask the user to resume
+   a specific session.
 
 Flaw found:
 
@@ -815,11 +872,12 @@ Trace:
 
 1. Redaction runs before DB insertion and FTS indexing.
 2. Redacted content is stored.
-3. Raw transcript remains unchanged but is not copied into memory output.
+3. The immutable raw snapshot remains unchanged but is not copied into memory
+   output.
 
 Flaw found:
 
-- Memory DB can make existing raw transcript exposure easier to search.
+- Memory DB can make existing raw evidence exposure easier to search.
 
 Design fix:
 
@@ -849,6 +907,58 @@ Design fix:
 - Split `recall_events` and `recall_results`.
 - Feedback is attached to each returned item.
 
+### Scenario 9: Resumed Session Rewrites Transcript
+
+State:
+
+- Session `S1` is ingested after completion.
+- Later, the user resumes `S1`; ogent persists a longer `messages.jsonl` at the
+  same source path.
+
+Trace:
+
+1. First ingest copies `S1` into `.ogent/memory/raw/ep_old/`.
+2. Episode `ep_old.raw_messages_path` points at the immutable snapshot, not the
+   mutable session file.
+3. Resume rewrites `.ogent/sessions/S1/messages.jsonl`.
+4. Second ingest computes a different transcript hash and creates `ep_new`.
+5. The old episode is marked `superseded`.
+6. Recall searches only active episodes unless the user explicitly inspects
+   `ep_old`.
+
+Flaw found:
+
+- Pointing evidence at mutable session files breaks traceability after resume.
+
+Design fix:
+
+- Ingestion creates immutable raw snapshots.
+- Episodes have `status` and `superseded_by_episode_id`.
+
+### Scenario 10: Parallel Recall Calls
+
+State:
+
+- The model emits several read-only tool calls, including two `recall` calls.
+- `recall` is batched with read-only tools.
+
+Trace:
+
+1. Both recall calls search memory.
+2. Both try to insert `recall_events` and `recall_results`.
+3. SQLite serializes writers under WAL with `busy_timeout = 5000`.
+4. Both calls return normally unless the DB is actually unavailable.
+
+Flaw found:
+
+- Treating recall as read-only at the agent layer hides that it writes traces.
+
+Design fix:
+
+- DB connections must use WAL and busy timeout.
+- The read-only classification is about repository and agent-visible state, not
+  whether SQLite trace tables are written.
+
 ## Test Requirements
 
 Unit tests:
@@ -857,12 +967,16 @@ Unit tests:
 - missing DB recall fails open
 - redaction removes representative secrets
 - incomplete sessions are skipped by default
+- active sessions are skipped when source files change during ingestion
 - completed sessions produce an episode and goal/result atoms
+- raw episode snapshots remain valid after the source session file changes
+- superseded episodes are excluded from default recall
 - failed command followed by pass creates failure and verification atoms
 - recall ranking boosts exact file path matches
 - unhelpful feedback lowers rank
 - primer includes only active operating lessons and respects size budget
 - worker tools exclude `recall`
+- concurrent recall calls both log trace rows or fail open cleanly
 
 Integration tests:
 
