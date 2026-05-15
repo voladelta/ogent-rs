@@ -95,6 +95,10 @@ cargo run -- "Add auth module, then review it for security issues"
 # Parallel worker-friendly task
 cargo run -- "Add tests for src/auth.rs and write README documentation"
 
+# Create reusable local artifacts
+cargo run -- --create-skill repo-audit "Review repositories for correctness, security, and maintainability risks"
+cargo run -- --create-workflow release-check "Gate a release through build, tests, review, and final approval evidence"
+
 # Resume the latest session and save back into that same session
 cargo run -- resume "Add more tests"
 

@@ -59,6 +59,14 @@ Skills are loaded from:
 - `.skills/<name>/SKILL.md`
 - `~/.ogent/skills/<name>/SKILL.md`
 
+Create a local skill with:
+
+```bash
+ogent --create-skill repo-audit "Review repositories for correctness, security, and maintainability risks"
+```
+
+Creator mode asks the selected profile for exactly one `SKILL.md`, validates required frontmatter and body content, and writes it to `.ogent/skills/<name>/SKILL.md`. Existing skills are not overwritten.
+
 At startup, available skills are discovered and listed in the user message. The agent can call `load_skill` to inject a skill body into the next turn.
 
 The `colgrep` skill is preloaded: if their `SKILL.md` files exist in a skill root, ogent auto-injects their full body into the initial user message after the skills list. This gives the agent semantic code search and repo context instructions without spending a turn on `load_skill`.
@@ -102,6 +110,14 @@ When a workflow step is entered and a task tracker exists, ogent mirrors the ste
 Built-in workflows live in `workflows/`:
 - `common-sw` — general software work: intake, execute, verify, repair, review, done.
 - `auto-iteration` — bounded measured optimization/research loop: frame, baseline, propose, implement, evaluate, fix, decide, report.
+
+Create a local workflow with:
+
+```bash
+ogent --create-workflow release-check "Gate a release through build, tests, review, and final approval evidence"
+```
+
+Creator mode asks the selected profile for exactly one workflow YAML file, validates it with the runtime workflow schema, and writes it to `.ogent/workflows/<name>.yaml`. Local workflows can be loaded by name with `--workflow <name>`.
 
 Install the search CLIs you want the agent to use for efficient codebase discovery:
 

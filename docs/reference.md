@@ -17,11 +17,22 @@ Common options:
 | `--autocompact <percent>` | Auto-compact context when usage crosses threshold. Default: `80`. `-1` to disable |
 | `--resume [<session>]` | Resume the latest or named non-worker session and save back into that same session |
 | `--fork [<session>]` | Load the latest or named non-worker session, then save the run into a new child session |
-| `--workflow <name-or-path>` | Load one active workflow by built-in name or YAML path |
+| `--workflow <name-or-path>` | Load one active workflow by built-in name, local `.ogent/workflows/<name>.yaml`, global `~/.ogent/workflows/<name>.yaml`, or YAML path |
+| `--create-skill <name>` | Ask the selected profile to create one local skill from the prompt and save it to `.ogent/skills/<name>/SKILL.md` |
+| `--create-workflow <name>` | Ask the selected profile to create one local workflow from the prompt and save it to `.ogent/workflows/<name>.yaml` |
 | `--worker` | Internal worker mode. Reads system prompt from stdin |
 | `--temp` | Ephemeral mode: run without persisting session state to disk |
 
 Non-steer mode requires a prompt unless `--resume` or `--fork` is used.
+
+Creator mode requires a prompt and cannot be combined with `--resume`, `--fork`, `--worker`, `--steer`, or `--workflow`:
+
+```bash
+ogent --create-skill repo-audit "Review a repository for correctness, security, and maintainability risks"
+ogent --create-workflow release-check "Gate a release through build, tests, review, and final approval evidence"
+```
+
+Generated artifact names are normalized to lowercase ASCII slugs. Existing artifacts are not overwritten.
 
 `resume` and `fork` can also be used as command-style aliases when they are the first argument after `ogent`:
 

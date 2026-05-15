@@ -34,7 +34,8 @@ struct KimiRequest<'a> {
   messages: Vec<ProviderMessage<'a>>,
   #[serde(skip_serializing_if = "<[Tool]>::is_empty")]
   tools: &'a [Tool],
-  tool_choice: &'static str,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  tool_choice: Option<&'static str>,
   stream: bool,
   max_tokens: i32,
   chat_template_args: KimiThinking,
@@ -100,7 +101,7 @@ pub fn new_client(profile: &Profile) -> Result<Client> {
             model,
             messages: provider_messages,
             tools,
-            tool_choice: "auto",
+            tool_choice: if tools.is_empty() { None } else { Some("auto") },
             stream: true,
             max_tokens: 262_144,
             chat_template_args: KimiThinking {
@@ -195,5 +196,31 @@ mod tests {
       value.get("content").and_then(serde_json::Value::as_str),
       Some("hello")
     );
+  }
+
+  #[test]
+  fn kimi_request_omits_tool_choice_without_tools() {
+    let tool_calls = Vec::new();
+    let messages = vec![ProviderMessage {
+      role: "user",
+      content: "hello",
+      reasoning_content: "",
+      tool_calls: &tool_calls,
+      tool_call_id: "",
+    }];
+    let value = serde_json::to_value(KimiRequest {
+      model: "test",
+      messages,
+      tools: &[],
+      tool_choice: None,
+      stream: false,
+      max_tokens: 1,
+      chat_template_args: KimiThinking {
+        enable_thinking: true,
+      },
+    })
+    .unwrap();
+    assert!(value.get("tool_choice").is_none());
+    assert!(value.get("tools").is_none());
   }
 }

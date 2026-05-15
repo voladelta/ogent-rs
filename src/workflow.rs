@@ -561,6 +561,12 @@ fn resolve_workflow_path(selector: &str) -> anyhow::Result<PathBuf> {
   if explicit.exists() {
     return Ok(explicit);
   }
+  for root in workflow_roots() {
+    let local = root.join(format!("{selector}.yaml"));
+    if local.exists() {
+      return Ok(local);
+    }
+  }
   let builtin = Path::new(env!("CARGO_MANIFEST_DIR"))
     .join("workflows")
     .join(format!("{selector}.yaml"));
@@ -568,8 +574,16 @@ fn resolve_workflow_path(selector: &str) -> anyhow::Result<PathBuf> {
     return Ok(builtin);
   }
   anyhow::bail!(
-    "workflow '{selector}' not found. Use a file path or a built-in workflow name from workflows/"
+    "workflow '{selector}' not found. Use a file path, .ogent/workflows/<name>.yaml, ~/.ogent/workflows/<name>.yaml, or a built-in workflow name from workflows/"
   )
+}
+
+fn workflow_roots() -> Vec<PathBuf> {
+  let mut dirs = vec![PathBuf::from(".ogent/workflows")];
+  if let Some(home) = std::env::var_os("HOME") {
+    dirs.push(PathBuf::from(home).join(".ogent/workflows"));
+  }
+  dirs
 }
 
 #[cfg(test)]

@@ -9,7 +9,8 @@ The system has two layers: the agent loops and the main driver. The agent loops 
 
 Coarse-grained modules and their responsibilities:
 
-- `main.rs` — CLI entry point, profile selection, optional workflow loading, session setup, loop selection.
+- `main.rs` — CLI entry point, profile selection, optional workflow loading, creator mode dispatch, session setup, loop selection.
+- `artifact_creator.rs` — One-shot skill/workflow generation via the selected profile, artifact validation, and local `.ogent` writes.
 - `agent.rs` — Standard and steer loops, turn handling, workflow reminders, compaction (in-session compaction to a new child session), and task tracker preservation.
 - `client.rs` — HTTP streaming client with SSE parsing and retry behavior with exponential backoff.
 - `providers.rs` — DeepSeek, Kimi, and Z/GLM request builders.
@@ -48,7 +49,7 @@ agent.rs
     +--> session.rs -> .ogent/sessions
 ```
 
-User prompt or steer input enters through `main.rs`, which builds initial messages and creates an `Agent`. If `--workflow <name-or-path>` is supplied, `main.rs` loads and validates one active workflow before selecting the tool schema. Built-in workflow names resolve to YAML files in `workflows/`; explicit file paths are also supported. `run_loop` or `steer_loop` calls `client.chat`, which streams an SSE response. Tool calls in the response are executed through `tools.rs`. Workers are spawned via `workers.rs` as child `ogent --worker` processes. Sessions and optional workflow state are persisted via `session.rs`.
+User prompt or steer input enters through `main.rs`, which builds initial messages and creates an `Agent`. If `--create-skill` or `--create-workflow` is supplied, `main.rs` enters creator mode, calls `artifact_creator.rs`, writes one validated local artifact, and exits without creating a session. If `--workflow <name-or-path>` is supplied, `main.rs` loads and validates one active workflow before selecting the tool schema. Workflow names resolve to local `.ogent/workflows/`, global `~/.ogent/workflows/`, or built-in YAML files in `workflows/`; explicit file paths are also supported. `run_loop` or `steer_loop` calls `client.chat`, which streams an SSE response. Tool calls in the response are executed through `tools.rs`. Workers are spawned via `workers.rs` as child `ogent --worker` processes. Sessions and optional workflow state are persisted via `session.rs`.
 
 ## Invariants and Boundaries
 
@@ -58,6 +59,7 @@ User prompt or steer input enters through `main.rs`, which builds initial messag
 - **Workflow is optional**: Workflow tools are included in the model tool schema only when a workflow is active. Sessions without `--workflow` do not pay schema/context cost and behave normally.
 - **Workflow authority**: When active, workflow state controls process transitions and completion gating. Task tracker phases are progress display; they do not drive workflow transitions.
 - **Workflow evidence**: Required workflow checks must pass or be waived before leaving a step. Command checks store command, exit code, output evidence, and timestamp.
+- **Creator validation**: Creator mode writes only after the model output parses and passes the skill or workflow validation contract. Existing artifacts are not overwritten.
 
 ## Cross-cutting Concerns
 

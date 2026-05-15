@@ -1,4 +1,5 @@
 mod agent;
+mod artifact_creator;
 mod client;
 mod hashline;
 mod profiles;
@@ -43,6 +44,10 @@ struct Args {
   temp: bool,
   #[arg(long)]
   workflow: Option<String>,
+  #[arg(long, value_name = "NAME")]
+  create_skill: Option<String>,
+  #[arg(long, value_name = "NAME")]
+  create_workflow: Option<String>,
   prompt: Vec<String>,
 }
 
@@ -52,9 +57,28 @@ async fn main() -> Result<()> {
   if args.resume.is_some() && args.fork.is_some() {
     bail!("use either resume or fork, not both");
   }
+  if args.create_skill.is_some() && args.create_workflow.is_some() {
+    bail!("use either --create-skill or --create-workflow, not both");
+  }
+  let creator_mode = args.create_skill.is_some() || args.create_workflow.is_some();
+  if creator_mode {
+    ensure_creator_mode_flags(&args)?;
+  }
   let profile = profiles::get_profile(&args.profile)
     .with_context(|| format!("unknown profile: {}", args.profile))?;
   let client = providers::new_client(profile)?;
+  if let Some(name) = args.create_skill.as_deref() {
+    let objective = args.prompt.join(" ");
+    let path = artifact_creator::create_skill(&client, name, &objective).await?;
+    println!("created skill: {}", path.display());
+    return Ok(());
+  }
+  if let Some(name) = args.create_workflow.as_deref() {
+    let objective = args.prompt.join(" ");
+    let path = artifact_creator::create_workflow(&client, name, &objective).await?;
+    println!("created workflow: {}", path.display());
+    return Ok(());
+  }
   let compact = if args.autocompact >= 0 {
     CompactState::new(f64::from(args.autocompact) / 100.0, profile.context_limit)
   } else {
@@ -268,6 +292,23 @@ async fn main() -> Result<()> {
       "\nogent {steer_flag}--resume={} to continue this session",
       agent.meta.session_id
     );
+  }
+  Ok(())
+}
+
+fn ensure_creator_mode_flags(args: &Args) -> Result<()> {
+  if args.resume.is_some()
+    || args.fork.is_some()
+    || args.worker
+    || args.steer
+    || args.workflow.is_some()
+  {
+    bail!(
+      "creator mode cannot be combined with --resume, --fork, --worker, --steer, or --workflow"
+    );
+  }
+  if args.prompt.join(" ").trim().is_empty() {
+    bail!("creator mode requires a description/objective prompt");
   }
   Ok(())
 }

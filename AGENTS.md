@@ -59,7 +59,7 @@ CLI / TUI input
 
 | Request area | Start here | Also check |
 | --- | --- | --- |
-| CLI flags, command aliases, mode selection, resume/fork/temp/worker setup | `src/main.rs` | `docs/reference.md`, `README.md` |
+| CLI flags, command aliases, mode selection, resume/fork/temp/worker/create setup | `src/main.rs` | `src/artifact_creator.rs`, `docs/reference.md`, `README.md` |
 | Dependencies and package configuration | `Cargo.toml`, `Cargo.lock` | affected module docs only if behavior changes |
 | Model profiles and provider selection | `src/profiles.rs` | `src/providers.rs`, `docs/reference.md` |
 | Provider request bodies, API-specific fields, auth env vars | `src/providers.rs` | `src/client.rs`, `docs/reference.md` |
@@ -73,12 +73,12 @@ CLI / TUI input
 | Anchored editing and hashline validation | `src/hashline.rs` | `src/tools.rs`, `docs/reference.md` |
 | Workspace path validation and allowed roots | `src/workspace.rs` | `src/tools.rs`, `ARCHITECTURE.md` |
 | Runtime goal, phase, todo tracking | `src/task_tracker.rs` | `src/tools.rs`, `docs/agent-guide.md` |
-| Workflow schema, checks, transitions, persistence model | `src/workflow.rs` | `workflows/*.yaml`, `src/tools.rs`, `docs/agent-guide.md` |
+| Workflow schema, checks, transitions, persistence model | `src/workflow.rs` | `workflows/*.yaml`, `.ogent/workflows/*.yaml`, `src/tools.rs`, `docs/agent-guide.md` |
 | Built-in workflow definitions | `workflows/common-sw.yaml`, `workflows/auto-iteration.yaml` | `src/workflow.rs`, `docs/agent-guide.md` |
 | Session save/load, child sessions, journal, metadata | `src/session.rs` | `src/main.rs`, `src/agent.rs`, `docs/reference.md` |
 | Worker subprocess execution and async worker manager | `src/workers.rs` | `src/tools.rs`, `prompts/workers/*`, `docs/agent-guide.md` |
 | Worker role behavior | `prompts/workers/*.md` | `src/workers.rs`, `src/tools.rs` |
-| System prompt, architect prompt, skill discovery/loading | `src/prompts.rs`, `prompts/*` | `docs/agent-guide.md` |
+| System prompt, architect prompt, skill discovery/loading, artifact creator prompts | `src/prompts.rs`, `prompts/*`, `src/artifact_creator.rs` | `docs/agent-guide.md` |
 | Shared response, message, tool, and domain types | `src/types.rs` | caller module that owns behavior |
 | User-facing examples and project overview | `README.md` | `docs/reference.md` |
 | Architecture map and cross-module invariants | `ARCHITECTURE.md` | this file |
