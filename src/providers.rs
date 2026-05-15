@@ -187,7 +187,10 @@ mod tests {
     };
     let value = serde_json::to_value(ProviderMessage::from(&message)).unwrap();
     assert!(value.get("origin").is_none());
-    assert_eq!(value.get("role").and_then(serde_json::Value::as_str), Some("user"));
+    assert_eq!(
+      value.get("role").and_then(serde_json::Value::as_str),
+      Some("user")
+    );
     assert_eq!(
       value.get("content").and_then(serde_json::Value::as_str),
       Some("hello")

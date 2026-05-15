@@ -342,10 +342,10 @@ fn run_ui_loop(
   textarea.set_placeholder_style(Style::default().fg(Color::Rgb(122, 115, 104)));
   textarea.set_wrap_mode(WrapMode::Word);
   textarea.set_cursor_line_style(Style::default());
-  if let Some(draft) = initial_input {
-    if !draft.is_empty() {
-      textarea.insert_str(&draft);
-    }
+  if let Some(draft) = initial_input
+    && !draft.is_empty()
+  {
+    textarea.insert_str(&draft);
   }
   let mut scroll_y: usize = 0;
   let mut follow_bottom = true;
@@ -531,11 +531,10 @@ fn run_ui_loop(
           }
           _ => {}
         },
-        Event::Paste(text) => {
-          if active_selector.is_none() {
-            textarea.insert_str(&text);
-          }
+        Event::Paste(text) if active_selector.is_none() => {
+          textarea.insert_str(&text);
         }
+        Event::Paste(_) => {}
         _ => {}
       }
     }

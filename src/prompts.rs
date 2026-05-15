@@ -202,42 +202,58 @@ fn xml_escape(s: &str) -> String {
 }
 
 pub fn build_messages(prompt: &str) -> Vec<Message> {
-  vec![
-    Message {
-      role: "system".into(),
-      content: load_system_prompt(),
-      origin: MessageOrigin::Internal,
-      ..Default::default()
-    },
-    Message {
+  let mut messages = vec![Message {
+    role: "system".into(),
+    content: load_system_prompt(),
+    origin: MessageOrigin::Internal,
+    ..Default::default()
+  }];
+  if !prompt.is_empty() {
+    messages.push(Message {
       role: "user".into(),
       content: prompt.to_string(),
       origin: MessageOrigin::Human,
       ..Default::default()
-    },
-  ]
+    });
+  }
+  messages
 }
 
-pub fn enrich_initial_messages(messages: &mut [Message]) {
-  append_to_system_message(messages, &discover_skills_message());
+pub fn enrich_initial_messages(messages: &mut Vec<Message>) {
+  append_to_internal_user_message(messages, &discover_skills_message());
   if let Ok((name, root, body)) = load_skill_content("colgrep") {
-    append_to_system_message(
+    append_to_internal_user_message(
       messages,
       &format!("<skill name=\"{name}\" root=\"{root}\">\n{body}\n</skill>"),
     );
   }
 }
 
-fn append_to_system_message(messages: &mut [Message], content: &str) {
+fn append_to_internal_user_message(messages: &mut Vec<Message>, content: &str) {
   if content.is_empty() {
     return;
   }
-  if let Some(message) = messages.iter_mut().find(|m| m.role == "system") {
-    if message.content.is_empty() {
-      message.content = content.to_string();
-    } else {
-      message.content.push_str("\n\n");
-      message.content.push_str(content);
-    }
+  if let Some(message) = messages
+    .iter_mut()
+    .rev()
+    .find(|m| m.role == "user" && m.origin == MessageOrigin::Internal)
+  {
+    message.content.push_str("\n\n");
+    message.content.push_str(content);
+    return;
   }
+  if let Some(message) = messages.iter_mut().rev().find(|m| m.role == "user")
+    && message.origin == MessageOrigin::Human
+    && !message.content.is_empty()
+  {
+    message.content.push_str("\n\n");
+    message.content.push_str(content);
+    return;
+  }
+  messages.push(Message {
+    role: "user".into(),
+    content: content.to_string(),
+    origin: MessageOrigin::Internal,
+    ..Default::default()
+  });
 }

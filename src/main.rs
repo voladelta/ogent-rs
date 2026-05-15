@@ -125,6 +125,13 @@ async fn main() -> Result<()> {
     let load_action = if is_fork { "fork" } else { "resume" };
     eprintln!("[{load_action}] loading {path}");
     let mut loaded = session::load_session(&path)?;
+    loaded.retain(|m| {
+      !(m.role == "user"
+        && m.content.is_empty()
+        && m.reasoning_content.is_empty()
+        && m.tool_calls.is_empty()
+        && m.tool_call_id.is_empty())
+    });
     if is_resume {
       meta.session_id = old_session_id.clone().expect("loaded session id");
     }

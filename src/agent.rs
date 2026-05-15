@@ -719,8 +719,10 @@ impl Agent {
             self.dirty = true;
           }
           None => {
-            self.meta.draft_input = None;
-            self.dirty = true;
+            if self.meta.draft_input.is_some() {
+              self.meta.draft_input = None;
+              self.dirty = true;
+            }
           }
         }
         return Ok(SteerAction::Exit);
@@ -733,9 +735,10 @@ impl Agent {
     for msg in &self.messages {
       match msg.role.as_str() {
         "system" => {}
-        "user" => {
+        "user" if msg.origin != MessageOrigin::Internal => {
           log.push(format!("[user] {}", truncate(&msg.content, 200)));
         }
+        "user" => {}
         "assistant" => {
           if !msg.reasoning_content.is_empty() {
             log.push(format!(
@@ -915,7 +918,9 @@ impl Agent {
         "Context budget at {pct}%.\nEXHAUSTED.\nDo not write more files, delegate, or start new work.\nCall `complete` IMMEDIATELY with a summary of completed files, current state, verification state, blockers, and next steps."
       ),
     };
-    self.push_msg(internal_user_msg(format!("Reminder: [context_budget] {body}")));
+    self.push_msg(internal_user_msg(format!(
+      "Reminder: [context_budget] {body}"
+    )));
   }
 
   fn report_tokens(&self) {
@@ -1145,7 +1150,7 @@ mod dirty_state_machine_tests {
     let mut agent = dummy_agent();
     agent.push_msg(human_user_msg("hello"));
     assert!(agent.dirty);
-    assert_eq!(agent.messages.len(), 3); // system + initial user + "hello"
+    assert_eq!(agent.messages.len(), 2); // system + "hello"
   }
 
   #[tokio::test]
@@ -1190,7 +1195,7 @@ mod dirty_state_machine_tests {
     let action = agent.apply_steer_event(SteerEvent::Complete, &tui).unwrap();
     assert!(matches!(action, SteerAction::Continue));
     assert!(!agent.dirty);
-    assert_eq!(agent.messages.len(), 2); // no extra message pushed
+    assert_eq!(agent.messages.len(), 1); // no extra message pushed
   }
 
   #[tokio::test]
@@ -1202,7 +1207,7 @@ mod dirty_state_machine_tests {
     let action = agent.apply_steer_event(SteerEvent::Complete, &tui).unwrap();
     assert!(matches!(action, SteerAction::Continue));
     assert!(agent.dirty);
-    assert_eq!(agent.messages.len(), 4); // system + user + assistant + complete reminder
+    assert_eq!(agent.messages.len(), 3); // system + assistant + complete reminder
   }
 
   #[tokio::test]
@@ -1213,6 +1218,7 @@ mod dirty_state_machine_tests {
       .apply_steer_event(SteerEvent::Exit(None), &tui)
       .unwrap();
     assert!(matches!(action, SteerAction::Exit));
+    assert!(!agent.dirty);
   }
 
   #[tokio::test]
