@@ -59,7 +59,7 @@ User prompt or steer input enters through `main.rs`, which builds initial messag
 - **Workflow is optional**: Workflow tools are included in the model tool schema only when a workflow is active. Sessions without `--workflow` do not pay schema/context cost and behave normally.
 - **Workflow authority**: When active, workflow state controls process transitions and completion gating. Task tracker phases are progress display; they do not drive workflow transitions.
 - **Workflow evidence**: Required workflow checks must pass or be waived before leaving a step. Command checks store command, exit code, output evidence, and timestamp.
-- **Creator validation**: Creator mode writes only after the model output parses and passes the skill or workflow validation contract. Existing artifacts are not overwritten.
+- **Creator validation**: Creator mode writes only after the model output parses and passes the skill or workflow validation contract. Existing artifacts are supplied to the model as context and then updated only after the replacement validates.
 
 ## Cross-cutting Concerns
 

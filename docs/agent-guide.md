@@ -65,7 +65,7 @@ Create a local skill with:
 ogent --create-skill repo-audit "Review repositories for correctness, security, and maintainability risks"
 ```
 
-Creator mode asks the selected profile for exactly one `SKILL.md`, validates required frontmatter and body content, and writes it to `.ogent/skills/<name>/SKILL.md`. Existing skills are not overwritten.
+Creator mode asks the selected profile for exactly one `SKILL.md`, validates required frontmatter and body content, and writes it to `.ogent/skills/<name>/SKILL.md`. Existing skills are included as context and improved in place after the replacement validates.
 
 At startup, available skills are discovered and listed in the user message. The agent can call `load_skill` to inject a skill body into the next turn.
 

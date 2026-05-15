@@ -10,39 +10,60 @@ const WORKFLOW_CREATOR_PROMPT: &str = include_str!("../prompts/WORKFLOW_CREATOR_
 
 const MAX_ATTEMPTS: usize = 2;
 
-pub async fn create_skill(client: &Client, raw_name: &str, objective: &str) -> Result<PathBuf> {
+pub struct ArtifactResult {
+  pub path: PathBuf,
+  pub action: ArtifactAction,
+}
+
+#[derive(Clone, Copy)]
+pub enum ArtifactAction {
+  Created,
+  Updated,
+}
+
+pub async fn create_skill(
+  client: &Client,
+  raw_name: &str,
+  objective: &str,
+) -> Result<ArtifactResult> {
   let name = normalize_artifact_name(raw_name)?;
   require_objective(objective)?;
   let path = PathBuf::from(".ogent")
     .join("skills")
     .join(&name)
     .join("SKILL.md");
-  ensure_new_path(&path)?;
+  let existing = read_existing_artifact(&path)?;
+  let action = action_for_existing(existing.as_deref());
 
-  let prompt = skill_user_prompt(&name, objective);
+  let prompt = skill_user_prompt(&name, objective, existing.as_deref());
   let content = generate_validated(client, SKILL_CREATOR_PROMPT, &prompt, |content| {
     validate_skill(&name, content)
   })
   .await?;
-  write_new_file(&path, &content)?;
-  Ok(path)
+  write_artifact(&path, &content)?;
+  Ok(ArtifactResult { path, action })
 }
 
-pub async fn create_workflow(client: &Client, raw_name: &str, objective: &str) -> Result<PathBuf> {
+pub async fn create_workflow(
+  client: &Client,
+  raw_name: &str,
+  objective: &str,
+) -> Result<ArtifactResult> {
   let name = normalize_artifact_name(raw_name)?;
   require_objective(objective)?;
   let path = PathBuf::from(".ogent")
     .join("workflows")
     .join(format!("{name}.yaml"));
-  ensure_new_path(&path)?;
+  let existing = read_existing_artifact(&path)?;
+  let action = action_for_existing(existing.as_deref());
 
-  let prompt = workflow_user_prompt(&name, objective);
+  let prompt = workflow_user_prompt(&name, objective, existing.as_deref());
   let content = generate_validated(client, WORKFLOW_CREATOR_PROMPT, &prompt, |content| {
     validate_workflow(&name, content)
   })
   .await?;
-  write_new_file(&path, &content)?;
-  Ok(path)
+  write_artifact(&path, &content)?;
+  Ok(ArtifactResult { path, action })
 }
 
 async fn generate_validated<F>(
@@ -89,8 +110,8 @@ where
   Err(last_error.expect("at least one validation attempt"))
 }
 
-fn skill_user_prompt(name: &str, objective: &str) -> String {
-  format!(
+fn skill_user_prompt(name: &str, objective: &str, existing: Option<&str>) -> String {
+  let mut prompt = format!(
     r#"## Requested Artifact
 
 name: {name}
@@ -119,11 +140,13 @@ description: Use when ...
 
 ...
 "#
-  )
+  );
+  append_existing_artifact(&mut prompt, existing, "SKILL.md");
+  prompt
 }
 
-fn workflow_user_prompt(name: &str, objective: &str) -> String {
-  format!(
+fn workflow_user_prompt(name: &str, objective: &str, existing: Option<&str>) -> String {
+  let mut prompt = format!(
     r#"## Requested Artifact
 
 id: {name}
@@ -198,7 +221,9 @@ steps:
     title: Done
     terminal: true
 "#
-  )
+  );
+  append_existing_artifact(&mut prompt, existing, "workflow YAML");
+  prompt
 }
 
 fn validate_skill(expected_name: &str, raw: &str) -> Result<String> {
@@ -314,20 +339,45 @@ fn require_objective(objective: &str) -> Result<()> {
   Ok(())
 }
 
-fn ensure_new_path(path: &Path) -> Result<()> {
-  if path.exists() {
-    bail!(
-      "refusing to overwrite existing artifact: {}",
-      path.display()
-    );
+fn read_existing_artifact(path: &Path) -> Result<Option<String>> {
+  if !path.exists() {
+    return Ok(None);
   }
-  Ok(())
+  fs::read_to_string(path)
+    .map(Some)
+    .with_context(|| format!("read existing artifact {}", path.display()))
 }
 
-fn write_new_file(path: &Path, content: &str) -> Result<()> {
+fn action_for_existing(existing: Option<&str>) -> ArtifactAction {
+  if existing.is_some() {
+    ArtifactAction::Updated
+  } else {
+    ArtifactAction::Created
+  }
+}
+
+fn write_artifact(path: &Path, content: &str) -> Result<()> {
   let parent = path.parent().context("artifact path has no parent")?;
   fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
   fs::write(path, content).with_context(|| format!("write {}", path.display()))
+}
+
+fn append_existing_artifact(prompt: &mut String, existing: Option<&str>, label: &str) {
+  let Some(existing) = existing else {
+    return;
+  };
+  prompt.push_str("\n## Existing Artifact To Improve\n\n");
+  prompt.push_str("Improve this existing ");
+  prompt.push_str(label);
+  prompt.push_str(". Preserve the same artifact name/id, keep useful existing intent, remove obsolete or weak guidance, and return the complete improved artifact.\n\n```");
+  prompt.push_str(if label.contains("YAML") {
+    "yaml"
+  } else {
+    "markdown"
+  });
+  prompt.push('\n');
+  prompt.push_str(existing.trim());
+  prompt.push_str("\n```\n");
 }
 
 fn ensure_trailing_newline(content: &str) -> String {
@@ -380,5 +430,17 @@ steps:
 "#;
     assert!(validate_workflow("tiny-flow", content).is_ok());
     assert!(validate_workflow("other", content).is_err());
+  }
+
+  #[test]
+  fn prompts_include_existing_artifact_when_present() {
+    let skill = skill_user_prompt("repo-audit", "improve it", Some("old skill"));
+    assert!(skill.contains("Existing Artifact To Improve"));
+    assert!(skill.contains("old skill"));
+
+    let workflow = workflow_user_prompt("release-gate", "improve it", Some("old workflow"));
+    assert!(workflow.contains("Existing Artifact To Improve"));
+    assert!(workflow.contains("```yaml"));
+    assert!(workflow.contains("old workflow"));
   }
 }

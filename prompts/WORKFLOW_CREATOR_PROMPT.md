@@ -1,4 +1,4 @@
-Create one ogent workflow.
+Create or improve one ogent workflow.
 
 Output only the final workflow YAML. Do not wrap it in a code fence. Do not include explanations, analysis, or extra files.
 

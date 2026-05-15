@@ -1,4 +1,4 @@
-Create one ogent skill.
+Create or improve one ogent skill.
 
 Output only the final `SKILL.md` file content. Do not wrap it in a code fence. Do not include explanations, analysis, or extra files.
 

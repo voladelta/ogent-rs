@@ -21,6 +21,7 @@ use std::env;
 use std::io::{self, Write};
 
 use agent::{Agent, CompactState};
+use artifact_creator::ArtifactAction;
 use types::{Message, MessageOrigin};
 
 #[global_allocator]
@@ -69,14 +70,22 @@ async fn main() -> Result<()> {
   let client = providers::new_client(profile)?;
   if let Some(name) = args.create_skill.as_deref() {
     let objective = args.prompt.join(" ");
-    let path = artifact_creator::create_skill(&client, name, &objective).await?;
-    println!("created skill: {}", path.display());
+    let result = artifact_creator::create_skill(&client, name, &objective).await?;
+    println!(
+      "{} skill: {}",
+      artifact_action_verb(result.action),
+      result.path.display()
+    );
     return Ok(());
   }
   if let Some(name) = args.create_workflow.as_deref() {
     let objective = args.prompt.join(" ");
-    let path = artifact_creator::create_workflow(&client, name, &objective).await?;
-    println!("created workflow: {}", path.display());
+    let result = artifact_creator::create_workflow(&client, name, &objective).await?;
+    println!(
+      "{} workflow: {}",
+      artifact_action_verb(result.action),
+      result.path.display()
+    );
     return Ok(());
   }
   let compact = if args.autocompact >= 0 {
@@ -311,6 +320,13 @@ fn ensure_creator_mode_flags(args: &Args) -> Result<()> {
     bail!("creator mode requires a description/objective prompt");
   }
   Ok(())
+}
+
+fn artifact_action_verb(action: ArtifactAction) -> &'static str {
+  match action {
+    ArtifactAction::Created => "created",
+    ArtifactAction::Updated => "updated",
+  }
 }
 
 fn parse_args() -> Args {

@@ -32,7 +32,7 @@ ogent --create-skill repo-audit "Review a repository for correctness, security, 
 ogent --create-workflow release-check "Gate a release through build, tests, review, and final approval evidence"
 ```
 
-Generated artifact names are normalized to lowercase ASCII slugs. Existing artifacts are not overwritten.
+Generated artifact names are normalized to lowercase ASCII slugs. If the target artifact already exists, creator mode asks the selected profile to improve it in place and overwrites it only after the replacement validates.
 
 `resume` and `fork` can also be used as command-style aliases when they are the first argument after `ogent`:
 
