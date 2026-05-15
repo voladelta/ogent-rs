@@ -17,8 +17,6 @@ pub struct SessionMeta {
   pub flags: SessionFlags,
   pub usage: SessionUsage,
   #[serde(skip_serializing_if = "Option::is_none")]
-  pub prompt: Option<String>,
-  #[serde(skip_serializing_if = "Option::is_none")]
   pub draft_input: Option<String>,
   #[serde(skip_serializing_if = "Option::is_none")]
   pub start_ts: Option<u64>,
@@ -225,14 +223,11 @@ mod tests {
         temp: false,
       },
       usage: SessionUsage { total_tokens: 150 },
-      prompt: Some("fix bug".into()),
       draft_input: Some("unsent draft".into()),
       start_ts: Some(1_234_567_890),
       end_ts: Some(1_234_567_999),
     };
     let json = serde_json::to_string_pretty(&meta).unwrap();
-    assert!(json.contains("\"prompt\""));
-    assert!(json.contains("\"fix bug\""));
     assert!(json.contains("\"draft_input\""));
     assert!(json.contains("\"unsent draft\""));
     assert!(json.contains("\"start_ts\""));
@@ -256,13 +251,11 @@ mod tests {
         temp: false,
       },
       usage: SessionUsage { total_tokens: 0 },
-      prompt: None,
       draft_input: None,
       start_ts: None,
       end_ts: None,
     };
     let json = serde_json::to_string_pretty(&meta).unwrap();
-    assert!(!json.contains("\"prompt\""));
     assert!(!json.contains("\"draft_input\""));
     assert!(!json.contains("\"start_ts\""));
     assert!(!json.contains("\"end_ts\""));

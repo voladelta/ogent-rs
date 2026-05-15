@@ -356,9 +356,6 @@ impl SteerState {
             agent.meta.start_ts = Some(session::timestamp_ms());
             agent.meta.end_ts = None;
             agent.meta.usage = session::SessionUsage { total_tokens: 0 };
-            if task_prompt.is_some() {
-              agent.meta.prompt = task_prompt;
-            }
             agent.messages = new_messages;
             agent.total_tokens = 0;
             agent.dirty = true;
@@ -603,9 +600,6 @@ impl Agent {
     match event {
       SteerEvent::Message(content) => {
         self.meta.draft_input = None;
-        if self.meta.prompt.is_none() {
-          self.meta.prompt = Some(content.clone());
-        }
         if self.meta.start_ts.is_none() {
           self.meta.start_ts = Some(session::timestamp_ms());
         }
@@ -643,7 +637,6 @@ impl Agent {
         self.meta.session_id = session::generate_session_id();
         self.meta.parent_session = Some(old_id);
         self.meta.usage = session::SessionUsage { total_tokens: 0 };
-        self.meta.prompt = None;
         self.meta.draft_input = None;
         self.meta.start_ts = None;
         self.meta.end_ts = None;
@@ -1109,7 +1102,6 @@ mod dirty_state_machine_tests {
         temp: false,
       },
       usage: session::SessionUsage { total_tokens: 0 },
-      prompt: None,
       draft_input: None,
       start_ts: None,
       end_ts: None,
@@ -1143,7 +1135,7 @@ mod dirty_state_machine_tests {
   }
 
   #[tokio::test]
-  async fn first_message_sets_prompt_and_start_ts() {
+  async fn first_message_sets_start_ts() {
     let mut agent = dummy_agent();
     let tui = crate::tui::TuiHandle::test_handle();
     let action = agent
@@ -1151,12 +1143,11 @@ mod dirty_state_machine_tests {
       .unwrap();
     assert!(matches!(action, SteerAction::Continue));
     assert!(agent.dirty);
-    assert_eq!(agent.meta.prompt, Some("fix bug".into()));
     assert!(agent.meta.start_ts.is_some());
   }
 
   #[tokio::test]
-  async fn second_message_preserves_prompt() {
+  async fn second_message_preserves_start_ts() {
     let mut agent = dummy_agent();
     let tui = crate::tui::TuiHandle::test_handle();
     agent
@@ -1166,7 +1157,6 @@ mod dirty_state_machine_tests {
     agent
       .apply_steer_event(SteerEvent::Message("more context".into()), &tui)
       .unwrap();
-    assert_eq!(agent.meta.prompt, Some("fix bug".into()));
     assert_eq!(agent.meta.start_ts, start_ts);
   }
 
@@ -1220,7 +1210,6 @@ mod dirty_state_machine_tests {
       .apply_steer_event(SteerEvent::Exit(Some("save this".into())), &tui)
       .unwrap();
     assert!(matches!(action, SteerAction::Exit));
-    assert_eq!(agent.meta.prompt, None);
     assert_eq!(agent.meta.draft_input, Some("save this".into()));
     assert!(agent.dirty);
     assert_eq!(agent.messages.len(), before_len);
@@ -1234,7 +1223,6 @@ mod dirty_state_machine_tests {
     let action = agent.apply_steer_event(SteerEvent::New, &tui).unwrap();
     assert!(matches!(action, SteerAction::Restart));
     assert!(!agent.dirty);
-    assert_eq!(agent.meta.prompt, None);
     assert_eq!(agent.meta.start_ts, None);
     assert_eq!(agent.meta.end_ts, None);
     assert_eq!(agent.meta.parent_session, Some(old_id.clone()));
@@ -1264,7 +1252,6 @@ mod dirty_state_machine_tests {
 
     // new session should be clean
     assert!(!agent.dirty);
-    assert_eq!(agent.meta.prompt, None);
     assert_eq!(agent.meta.start_ts, None);
     assert_eq!(agent.meta.end_ts, None);
     assert_eq!(agent.meta.parent_session, Some(old_id.clone()));
