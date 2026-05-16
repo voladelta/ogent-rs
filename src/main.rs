@@ -193,7 +193,7 @@ async fn main() -> Result<()> {
       workflow_state,
     )
   } else {
-    if prompt.is_empty() && !args.steer && !args.worker && !is_loaded_session {
+    if prompt.is_empty() && !args.steer {
       let mut cmd = Args::command();
       cmd.print_help()?;
       println!();
