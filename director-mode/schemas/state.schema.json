@@ -1,0 +1,132 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DirectorState",
+  "type": "object",
+  "required": [
+    "run_id",
+    "status",
+    "original_prompt",
+    "goal",
+    "definition_of_done",
+    "constraints",
+    "evidence",
+    "open_risks",
+    "failed_attempts"
+  ],
+  "properties": {
+    "run_id": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "received",
+        "framed",
+        "workflow_designed",
+        "in_progress",
+        "needs_review",
+        "needs_verification",
+        "deciding",
+        "revising",
+        "done",
+        "blocked",
+        "failed",
+        "partial"
+      ]
+    },
+    "original_prompt": {
+      "type": "string"
+    },
+    "goal": {
+      "type": "string"
+    },
+    "definition_of_done": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "constraints": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "non_goals": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "required_evidence": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "workflow": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "current_step": {
+      "type": "string"
+    },
+    "workers_used": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "contractors_used": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "files_seen": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "files_changed": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "open_risks": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "failed_attempts": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "blocked_reason": {
+      "type": "string"
+    },
+    "next_recommended_step": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": true
+}

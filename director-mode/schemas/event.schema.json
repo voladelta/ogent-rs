@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DirectorEvent",
+  "type": "object",
+  "required": [
+    "ts",
+    "run_id",
+    "event"
+  ],
+  "properties": {
+    "ts": {
+      "type": "string",
+      "description": "ISO timestamp"
+    },
+    "run_id": {
+      "type": "string"
+    },
+    "event": {
+      "type": "string"
+    },
+    "actor": {
+      "type": "string"
+    },
+    "step": {
+      "type": "string"
+    },
+    "contract_id": {
+      "type": "string"
+    },
+    "input_summary": {
+      "type": "string"
+    },
+    "output_summary": {
+      "type": "string"
+    },
+    "evidence_added": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "decision": {
+      "type": "string"
+    },
+    "risks_added": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": true
+}
