@@ -61,6 +61,7 @@ Use only these tools:
 - `load_skill`
 - `state`
 - `dispatch_workers`
+- `wait_workers`
 
 Do not invent specialized tools when state keys or worker dispatch can express the same thing.
 
@@ -92,14 +93,16 @@ Use these keys as default snapshots:
 - `ownership_map`
 
 After every major loop, update `next_action`, `risks`, and `decision_packet`.
-After every worker batch, compact worker outputs into `worker_batch_summary`, `evidence`, `risks`, and `decision_packet`.
+After worker results arrive from `wait_workers`, compact worker outputs into `worker_batch_summary`, `evidence`, `risks`, and `decision_packet`.
 Do not preserve raw search output or long transcripts in state. Store only facts, decisions, blockers, and the next concrete action.
 
 Do not write `status=done`, `status=blocked`, `status=failed`, or `status=partial` as a completion mechanism. When ready, stop calling tools and send the final report as assistant content.
 
 ## Worker dispatch
 
-Use `dispatch_workers` for one or many workers.
+Use `dispatch_workers` for one or many workers. It starts workers and returns worker IDs; it does not return their final outputs.
+
+After `dispatch_workers`, call `wait_workers` next unless dispatch reported no running workers. The Director normally has no implementation work to do while workers are running. `wait_workers` returns completed results immediately when any worker finishes; if none finish within about 10 seconds, it reports the still-running workers. Repeat `wait_workers` until you have the results needed to integrate, verify, retry, or report.
 
 Each worker task must be structured Markdown with:
 

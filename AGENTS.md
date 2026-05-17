@@ -24,8 +24,8 @@ CLI / TUI
 
 - `src/main.rs`: CLI wiring, resume/fork, worker subprocess mode, steer mode, skill creation.
 - `src/agent.rs`: turn loop, streaming handling, tool dispatch integration, compaction.
-- `src/tools.rs`: Director/worker tool schemas and execution (`state`, `dispatch_workers`, read/write/web/bash/hashline).
-- `src/workers.rs`: worker batch dispatch, role prompt resolution, subprocess spawning.
+- `src/tools.rs`: Director/worker tool schemas and execution (`state`, `dispatch_workers`, `wait_workers`, read/write/web/bash/hashline).
+- `src/workers.rs`: worker batch dispatch/waiting, role prompt resolution, subprocess spawning.
 - `src/session.rs`: session/meta/messages persistence plus Director/worker state file paths.
 - `src/prompts.rs`: Director system prompt, factory prompt, built-in worker prompts, skill discovery/injection.
 
@@ -36,7 +36,7 @@ CLI / TUI
 | CLI flags, resume/fork/temp/worker/create-skill | `src/main.rs` | `docs/reference.md`, `README.md` |
 | Director loop/exit rules/compaction | `src/agent.rs` | `docs/agent-guide.md`, `ARCHITECTURE.md` |
 | Tool schema/behavior | `src/tools.rs` | `src/workers.rs`, `docs/reference.md` |
-| Worker dispatch/spawn/prompt resolution | `src/workers.rs` | `prompts/workers/*.md`, `docs/agent-guide.md` |
+| Worker dispatch/wait/spawn/prompt resolution | `src/workers.rs` | `prompts/workers/*.md`, `docs/agent-guide.md` |
 | Session/state pathing | `src/session.rs` | `src/main.rs`, `src/tools.rs`, `docs/reference.md` |
 | Prompt loading and built-ins | `src/prompts.rs` | `prompts/*`, `docs/agent-guide.md` |
 | Anchored editing | `src/hashline.rs` | `src/tools.rs`, `docs/reference.md` |
@@ -59,7 +59,8 @@ CLI / TUI
 - Main agent is Director (no direct file-edit tools in Director toolset).
 - Director `bash` allows only `colgrep` and `rg`.
 - Workspace edits happen through worker subprocesses.
-- `dispatch_workers` takes `{ workers: [{ role, task }] }`, waits for all, returns ordered results.
+- `dispatch_workers` takes `{ workers: [{ role, task }] }`, starts workers, and returns worker IDs immediately.
+- `wait_workers` waits briefly, returns completed worker results as soon as any worker finishes, and reports still-running workers otherwise.
 - A run ends when the Director sends a final assistant message (no tool calls).
 - Workers do not dispatch workers.
 - `load_skill` tool and startup skill injection stay enabled.

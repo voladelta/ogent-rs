@@ -1,9 +1,9 @@
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 use tokio::process::Command;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Notify};
 
 #[derive(Debug, Clone)]
 pub struct WorkerProcessArgs {
@@ -33,6 +33,7 @@ pub struct WorkerDispatch {
 
 #[derive(Debug, Clone, Serialize)]
 struct DispatchWorkerResult {
+  batch_id: String,
   index: usize,
   role: String,
   worker_id: String,
@@ -43,18 +44,41 @@ struct DispatchWorkerResult {
 
 #[derive(Debug, Clone, Serialize)]
 struct DispatchBatchResult {
-  results: Vec<DispatchWorkerResult>,
+  message: String,
+  batch_id: String,
+  workers: Vec<WorkerStatus>,
+  completed: Vec<DispatchWorkerResult>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct WaitWorkersResult {
+  message: String,
+  completed: Vec<DispatchWorkerResult>,
+  running: Vec<WorkerStatus>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct WorkerStatus {
+  batch_id: String,
+  index: usize,
+  role: String,
+  worker_id: String,
+  status: String,
 }
 
 pub struct WorkerManager {
   inner: Mutex<Inner>,
+  notify: Arc<Notify>,
 }
 
 struct Inner {
   next_id: usize,
+  next_batch_id: usize,
+  in_flight: Vec<InFlightWorker>,
 }
 
 struct InFlightWorker {
+  batch_id: String,
   index: usize,
   role: String,
   worker_id: String,
@@ -64,7 +88,12 @@ struct InFlightWorker {
 impl WorkerManager {
   pub fn new() -> Self {
     Self {
-      inner: Mutex::new(Inner { next_id: 0 }),
+      inner: Mutex::new(Inner {
+        next_id: 0,
+        next_batch_id: 0,
+        in_flight: Vec::new(),
+      }),
+      notify: Arc::new(Notify::new()),
     }
   }
 
@@ -77,8 +106,13 @@ impl WorkerManager {
       bail!("workers must contain at least one worker");
     }
 
-    let mut in_flight = Vec::new();
-    let mut results = Vec::with_capacity(args.workers.len());
+    let batch_id = {
+      let mut inner = self.inner.lock().await;
+      inner.next_batch_id += 1;
+      format!("batch-{}", inner.next_batch_id)
+    };
+    let mut workers = Vec::with_capacity(args.workers.len());
+    let mut completed = Vec::new();
 
     for (index, worker) in args.workers.into_iter().enumerate() {
       let worker_id = {
@@ -89,7 +123,8 @@ impl WorkerManager {
 
       let role = worker.role.trim().to_string();
       if role.is_empty() {
-        results.push(DispatchWorkerResult {
+        completed.push(DispatchWorkerResult {
+          batch_id: batch_id.clone(),
           index,
           role,
           worker_id,
@@ -100,7 +135,8 @@ impl WorkerManager {
         continue;
       }
       if worker.task.trim().is_empty() {
-        results.push(DispatchWorkerResult {
+        completed.push(DispatchWorkerResult {
+          batch_id: batch_id.clone(),
           index,
           role,
           worker_id,
@@ -115,7 +151,8 @@ impl WorkerManager {
       {
         Ok(prompts) => prompts,
         Err(err) => {
-          results.push(DispatchWorkerResult {
+          completed.push(DispatchWorkerResult {
+            batch_id: batch_id.clone(),
             index,
             role,
             worker_id,
@@ -134,37 +171,147 @@ impl WorkerManager {
         parent_session_id: parent_session_id.to_string(),
         worker_id: worker_id.clone(),
       };
-      let done = tokio::spawn(async move { run_worker_process(run_args).await });
-      in_flight.push(InFlightWorker {
+      let notify = Arc::clone(&self.notify);
+      let done = tokio::spawn(async move {
+        let result = run_worker_process(run_args).await;
+        notify.notify_waiters();
+        result
+      });
+      workers.push(WorkerStatus {
+        batch_id: batch_id.clone(),
+        index,
+        role: role.clone(),
+        worker_id: worker_id.clone(),
+        status: "running".to_string(),
+      });
+      let in_flight = InFlightWorker {
+        batch_id: batch_id.clone(),
         index,
         role,
         worker_id,
         done,
-      });
-    }
-
-    for worker in in_flight {
-      let result = worker.done.await.unwrap_or_else(|e| WorkerProcessResult {
-        err: Some(e.to_string()),
-        ..Default::default()
-      });
-      let status = if result.err.is_some() {
-        "failed"
-      } else {
-        "completed"
       };
-      results.push(DispatchWorkerResult {
-        index: worker.index,
-        role: worker.role,
-        worker_id: worker.worker_id,
-        status: status.to_string(),
-        output: result.output,
-        error: result.err,
-      });
+      self.inner.lock().await.in_flight.push(in_flight);
     }
 
-    results.sort_by_key(|r| r.index);
-    Ok(serde_json::to_string(&DispatchBatchResult { results })?)
+    completed.sort_by_key(|r| (r.batch_id.clone(), r.index));
+    Ok(serde_json::to_string(&DispatchBatchResult {
+      message: dispatch_message(workers.len()),
+      batch_id,
+      workers,
+      completed,
+    })?)
+  }
+
+  pub async fn wait(&self) -> Result<String> {
+    self
+      .wait_with_timeout(std::time::Duration::from_secs(10))
+      .await
+  }
+
+  async fn wait_with_timeout(&self, timeout: std::time::Duration) -> Result<String> {
+    let mut finished = self.take_finished().await;
+    let mut running = self.running_workers().await;
+
+    if finished.is_empty() && !running.is_empty() {
+      let notified = self.notify.notified();
+      tokio::pin!(notified);
+
+      finished = self.take_finished().await;
+      if finished.is_empty() {
+        tokio::select! {
+          _ = &mut notified => {}
+          _ = tokio::time::sleep(timeout) => {}
+        }
+        finished = self.take_finished().await;
+      }
+    }
+
+    let mut completed = collect_results(finished).await;
+    completed.extend(collect_results(self.take_finished().await).await);
+    completed.sort_by_key(|r| (r.batch_id.clone(), r.index));
+    running = self.running_workers().await;
+    Ok(serde_json::to_string(&WaitWorkersResult {
+      message: wait_message(!completed.is_empty(), !running.is_empty()),
+      completed,
+      running,
+    })?)
+  }
+
+  async fn take_finished(&self) -> Vec<InFlightWorker> {
+    let mut inner = self.inner.lock().await;
+    let mut finished = Vec::new();
+    let mut i = 0;
+    while i < inner.in_flight.len() {
+      if inner.in_flight[i].done.is_finished() {
+        finished.push(inner.in_flight.remove(i));
+      } else {
+        i += 1;
+      }
+    }
+    finished
+  }
+
+  async fn running_workers(&self) -> Vec<WorkerStatus> {
+    let inner = self.inner.lock().await;
+    inner
+      .in_flight
+      .iter()
+      .map(|worker| WorkerStatus {
+        batch_id: worker.batch_id.clone(),
+        index: worker.index,
+        role: worker.role.clone(),
+        worker_id: worker.worker_id.clone(),
+        status: "running".to_string(),
+      })
+      .collect()
+  }
+}
+
+async fn collect_results(workers: Vec<InFlightWorker>) -> Vec<DispatchWorkerResult> {
+  let mut results = Vec::with_capacity(workers.len());
+  for worker in workers {
+    let result = worker.done.await.unwrap_or_else(|e| WorkerProcessResult {
+      err: Some(e.to_string()),
+      ..Default::default()
+    });
+    let status = if result.err.is_some() {
+      "failed"
+    } else {
+      "completed"
+    };
+    results.push(DispatchWorkerResult {
+      batch_id: worker.batch_id,
+      index: worker.index,
+      role: worker.role,
+      worker_id: worker.worker_id,
+      status: status.to_string(),
+      output: result.output,
+      error: result.err,
+    });
+  }
+  results
+}
+
+fn dispatch_message(running_count: usize) -> String {
+  if running_count == 0 {
+    return "No workers are running. Inspect `completed` for dispatch-time failures.".to_string();
+  }
+  "Workers dispatched successfully. Their results are not available yet. Next action: call `wait_workers`. `wait_workers` returns completed worker results as soon as any worker finishes; if none finish within about 10 seconds, it reports that workers are still running.".to_string()
+}
+
+fn wait_message(has_completed: bool, has_running: bool) -> String {
+  match (has_completed, has_running) {
+    (true, true) => {
+      "Completed workers are available. Some workers are still running; call `wait_workers` again before depending on unfinished workers.".to_string()
+    }
+    (true, false) => {
+      "All available worker results have been returned. No workers are still running.".to_string()
+    }
+    (false, true) => {
+      "No workers completed after waiting about 10 seconds. Workers are still running; call `wait_workers` again to continue waiting.".to_string()
+    }
+    (false, false) => "No workers are running and no new worker results are available.".to_string(),
   }
 }
 

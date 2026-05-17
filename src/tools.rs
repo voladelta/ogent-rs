@@ -54,6 +54,13 @@ pub async fn execute_tool(mut ctx: ToolContext<'_>, name: &str, args: &str) -> R
         .context("dispatch_workers requires an active agent")?;
       dispatch_workers(agent, args).await
     }
+    "wait_workers" => {
+      let agent = ctx
+        .agent
+        .as_deref_mut()
+        .context("wait_workers requires an active agent")?;
+      wait_workers(agent, args).await
+    }
     _ => bail!("unknown tool: {name}"),
   }
 }
@@ -113,8 +120,13 @@ fn build_director_tools() -> Vec<Tool> {
     ),
     schema(
       "dispatch_workers",
-      "Spawn a worker batch, wait for all workers, and return ordered results. Arguments must be exactly an object with one workers array. Example: {\"workers\":[{\"role\":\"implementer\",\"task\":\"# Task\\nEdit README.md only.\\n\\n# Required output\\nSummary and verification.\"}]}.",
+      "Spawn a worker batch and return worker ids immediately. Results are not available yet; call wait_workers next to receive completed worker results. Arguments must be exactly an object with one workers array. Example: {\"workers\":[{\"role\":\"implementer\",\"task\":\"# Task\\nEdit README.md only.\\n\\n# Required output\\nSummary and verification.\"}]}.",
       json!({"type":"object","properties":{"workers":{"type":"array","minItems":1,"items":{"type":"object","properties":{"role":{"type":"string"},"task":{"type":"string"}},"required":["role","task"],"additionalProperties":false}}},"required":["workers"],"additionalProperties":false}),
+    ),
+    schema(
+      "wait_workers",
+      "Wait for worker results. Returns immediately if any worker has completed; otherwise waits about 10 seconds before reporting still-running workers. Use after dispatch_workers and repeat until all needed worker results are returned.",
+      json!({"type":"object","properties":{},"additionalProperties":false}),
     ),
   ]
 }
@@ -728,6 +740,17 @@ async fn dispatch_workers(agent: &mut Agent, args: &str) -> Result<String> {
     .await
 }
 
+async fn wait_workers(agent: &mut Agent, args: &str) -> Result<String> {
+  if agent.meta.flags.worker {
+    bail!("worker mode cannot wait on workers");
+  }
+  let value: serde_json::Value = serde_json::from_str(args).context("bad wait_workers args")?;
+  if !value.as_object().is_some_and(|obj| obj.is_empty()) {
+    bail!("wait_workers takes no arguments; pass {{}}");
+  }
+  agent.worker_manager.wait().await
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -807,9 +830,9 @@ mod tests {
     assert!(names.contains(&"bash"));
     assert!(names.contains(&"state"));
     assert!(names.contains(&"dispatch_workers"));
+    assert!(names.contains(&"wait_workers"));
     assert!(!names.contains(&"write_file"));
     assert!(!names.contains(&"edit_hash_anchors"));
-    assert!(!names.contains(&"wait_workers"));
   }
 
   #[test]
@@ -822,6 +845,7 @@ mod tests {
     assert!(names.contains(&"edit_hash_anchors"));
     assert!(names.contains(&"state"));
     assert!(!names.contains(&"dispatch_workers"));
+    assert!(!names.contains(&"wait_workers"));
   }
 
   #[test]
@@ -912,5 +936,12 @@ mod tests {
     assert!(msg.contains("bad dispatch_workers args"));
     assert!(msg.contains("\"workers\""));
     assert!(msg.contains("close the JSON"));
+  }
+
+  #[tokio::test]
+  async fn wait_workers_without_running_workers_returns_immediately() {
+    let mut agent = dummy_agent(None);
+    let out = wait_workers(&mut agent, "{}").await.unwrap();
+    assert!(out.contains("No workers are running"));
   }
 }

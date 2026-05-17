@@ -32,6 +32,11 @@ Worker persistence:
 - transcript: `.ogent/sessions/{parent_session_id}/workers/{worker_id}/messages.jsonl`
 - state: `.ogent/sessions/{parent_session_id}/workers/{worker_id}/states.json`
 
+Worker waiting:
+
+- `dispatch_workers` starts workers and returns worker IDs immediately.
+- `wait_workers` returns completed worker results as soon as any worker finishes, or reports still-running workers after a short wait.
+
 ## Prompts
 
 - Main system prompt: `prompts/DIRECTOR_PROMPT.md`
@@ -60,6 +65,7 @@ A run ends when the Director sends a final assistant message (no tool calls).
 Director-only:
 
 - `dispatch_workers`
+- `wait_workers`
 - restricted `bash` (`colgrep` / `rg`)
 
 Worker-only edits:

@@ -27,9 +27,10 @@ ogent --worker=<parent_session_id> "<task prompt>"
 
 ## Key Behavior
 
-- Director tools include: `read_file`, `repo_map`, restricted `bash` (`colgrep`/`rg` only), web tools, `load_skill`, `state`, `dispatch_workers`.
+- Director tools include: `read_file`, `repo_map`, restricted `bash` (`colgrep`/`rg` only), web tools, `load_skill`, `state`, `dispatch_workers`, `wait_workers`.
 - Worker tools include editing tools (`write_file`, `read_hash_anchors`, `edit_hash_anchors`) plus read/web/bash/state tools.
-- `dispatch_workers` runs a batch, waits for every worker in that batch, and returns ordered results.
+- `dispatch_workers` starts a worker batch and returns worker IDs immediately.
+- `wait_workers` returns completed worker results as soon as any worker finishes, or reports still-running workers after a short wait.
 - A run ends when the Director sends a final assistant message (no tool calls).
 
 ## Runtime Layout

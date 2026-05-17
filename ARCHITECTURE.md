@@ -26,7 +26,7 @@ main.rs
 - `src/workers.rs`
   - Worker prompt resolution.
   - Worker subprocess spawn (`--worker=<parent_session_id>`, `OGENT_WORKER_ID`).
-  - Batch dispatch and ordered result collation.
+  - Batch dispatch, async worker tracking, and result collation.
 - `src/session.rs`
   - Session meta/messages persistence.
   - Director/worker state and worker transcript paths.
@@ -52,6 +52,7 @@ main.rs
 
 - Main agent is Director and does not receive direct file-edit tools.
 - Worker file edits are done via worker toolset (`write_file`, `edit_hash_anchors`).
-- `dispatch_workers` waits for the full batch and returns ordered `results`.
+- `dispatch_workers` starts workers and returns worker IDs immediately.
+- `wait_workers` long-polls for completed worker results and reports still-running workers after a short wait.
 - Worker subprocess state/transcript are scoped under parent session + worker ID.
 - A run ends when the Director sends a final assistant message (no tool calls).

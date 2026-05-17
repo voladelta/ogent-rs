@@ -26,6 +26,7 @@
 - `load_skill`
 - `state`
 - `dispatch_workers`
+- `wait_workers`
 
 ## Worker Tools
 
@@ -41,7 +42,7 @@
 - `load_skill`
 - `state`
 
-Workers do **not** get `dispatch_workers`.
+Workers do **not** get `dispatch_workers` or `wait_workers`.
 
 ## `state` Tool
 
@@ -79,21 +80,78 @@ Input:
 Behavior:
 
 - Spawns the full batch.
-- Waits for all workers in that batch.
-- Returns ordered results matching input order.
+- Returns worker IDs immediately.
+- Does not wait for worker completion.
+- `completed` is usually empty; it contains only dispatch-time failures such as invalid worker arguments or prompt-resolution errors.
+- Call `wait_workers` to collect completed worker results.
 
 Output shape:
 
 ```json
 {
-  "results": [
+  "message": "Workers dispatched successfully. Their results are not available yet. Next action: call `wait_workers`.",
+  "batch_id": "batch-1",
+  "workers": [
     {
+      "batch_id": "batch-1",
+      "index": 0,
+      "role": "implementer",
+      "worker_id": "worker-1",
+      "status": "running"
+    }
+  ],
+  "completed": [
+    {
+      "batch_id": "batch-1",
+      "index": 0,
+      "role": "implementer",
+      "worker_id": "worker-1",
+      "status": "failed",
+      "output": "",
+      "error": "dispatch-time error"
+    }
+  ]
+}
+```
+
+## `wait_workers` Tool
+
+Input:
+
+```json
+{}
+```
+
+Behavior:
+
+- Returns immediately if any unseen worker result is available.
+- Otherwise waits about 10 seconds.
+- If no worker finishes during that wait, returns the still-running workers.
+- Repeat until the workers needed for the Director decision have completed.
+
+Output shape:
+
+```json
+{
+  "message": "Completed workers are available. Some workers are still running; call `wait_workers` again before depending on unfinished workers.",
+  "completed": [
+    {
+      "batch_id": "batch-1",
       "index": 0,
       "role": "implementer",
       "worker_id": "worker-1",
       "status": "completed | failed",
       "output": "last assistant message",
       "error": null
+    }
+  ],
+  "running": [
+    {
+      "batch_id": "batch-1",
+      "index": 1,
+      "role": "verifier",
+      "worker_id": "worker-2",
+      "status": "running"
     }
   ]
 }
