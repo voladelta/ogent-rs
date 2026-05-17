@@ -228,40 +228,66 @@ pub fn build_messages(prompt: &str) -> Vec<Message> {
 }
 
 pub fn enrich_initial_messages(messages: &mut Vec<Message>) {
-  append_to_internal_user_message(messages, &discover_skills_message());
+  push_internal_user_message(messages, discover_skills_message());
   if let Ok((name, root, body)) = load_skill_content("colgrep") {
-    append_to_internal_user_message(
+    push_internal_user_message(
       messages,
-      &format!("<skill name=\"{name}\" root=\"{root}\">\n{body}\n</skill>"),
+      format!("<skill name=\"{name}\" root=\"{root}\">\n{body}\n</skill>"),
     );
   }
 }
 
-fn append_to_internal_user_message(messages: &mut Vec<Message>, content: &str) {
+fn push_internal_user_message(messages: &mut Vec<Message>, content: String) {
   if content.is_empty() {
-    return;
-  }
-  if let Some(message) = messages
-    .iter_mut()
-    .rev()
-    .find(|m| m.role == "user" && m.origin == MessageOrigin::Internal)
-  {
-    message.content.push_str("\n\n");
-    message.content.push_str(content);
-    return;
-  }
-  if let Some(message) = messages.iter_mut().rev().find(|m| m.role == "user")
-    && message.origin == MessageOrigin::Human
-    && !message.content.is_empty()
-  {
-    message.content.push_str("\n\n");
-    message.content.push_str(content);
     return;
   }
   messages.push(Message {
     role: "user".into(),
-    content: content.to_string(),
+    content,
     origin: MessageOrigin::Internal,
     ..Default::default()
   });
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn push_internal_user_message_preserves_human_message() {
+    let mut messages = build_messages("do the task");
+
+    push_internal_user_message(&mut messages, "internal context".into());
+
+    assert_eq!(messages.len(), 3);
+    assert_eq!(messages[1].role, "user");
+    assert_eq!(messages[1].origin, MessageOrigin::Human);
+    assert_eq!(messages[1].content, "do the task");
+    assert_eq!(messages[2].role, "user");
+    assert_eq!(messages[2].origin, MessageOrigin::Internal);
+    assert_eq!(messages[2].content, "internal context");
+  }
+
+  #[test]
+  fn push_internal_user_message_does_not_merge_internal_messages() {
+    let mut messages = build_messages("do the task");
+
+    push_internal_user_message(&mut messages, "first".into());
+    push_internal_user_message(&mut messages, "second".into());
+
+    assert_eq!(messages.len(), 4);
+    assert_eq!(messages[2].content, "first");
+    assert_eq!(messages[2].origin, MessageOrigin::Internal);
+    assert_eq!(messages[3].content, "second");
+    assert_eq!(messages[3].origin, MessageOrigin::Internal);
+  }
+
+  #[test]
+  fn push_internal_user_message_skips_empty_content() {
+    let mut messages = build_messages("do the task");
+
+    push_internal_user_message(&mut messages, String::new());
+
+    assert_eq!(messages.len(), 2);
+  }
 }
