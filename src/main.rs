@@ -7,12 +7,10 @@ mod prompts;
 mod providers;
 mod session;
 mod sse;
-mod task_tracker;
 mod tools;
 mod tui;
 mod types;
 mod workers;
-mod workflow;
 mod workspace;
 
 use anyhow::{Context, Result, bail};
@@ -33,8 +31,8 @@ struct Args {
   profile: String,
   #[arg(long, default_value_t = false)]
   steer: bool,
-  #[arg(long, default_value_t = false)]
-  worker: bool,
+  #[arg(long, value_name = "PARENT_SESSION_ID")]
+  worker: Option<String>,
   #[arg(long, default_value_t = 80)]
   autocompact: i32,
   #[arg(long)]
@@ -43,12 +41,8 @@ struct Args {
   fork: Option<Option<String>>,
   #[arg(long, default_value_t = false)]
   temp: bool,
-  #[arg(long)]
-  workflow: Option<String>,
   #[arg(long, value_name = "NAME")]
   create_skill: Option<String>,
-  #[arg(long, value_name = "NAME")]
-  create_workflow: Option<String>,
   prompt: Vec<String>,
 }
 
@@ -58,10 +52,7 @@ async fn main() -> Result<()> {
   if args.resume.is_some() && args.fork.is_some() {
     bail!("use either resume or fork, not both");
   }
-  if args.create_skill.is_some() && args.create_workflow.is_some() {
-    bail!("use either --create-skill or --create-workflow, not both");
-  }
-  let creator_mode = args.create_skill.is_some() || args.create_workflow.is_some();
+  let creator_mode = args.create_skill.is_some();
   if creator_mode {
     ensure_creator_mode_flags(&args)?;
   }
@@ -78,24 +69,17 @@ async fn main() -> Result<()> {
     );
     return Ok(());
   }
-  if let Some(name) = args.create_workflow.as_deref() {
-    let objective = args.prompt.join(" ");
-    let result = artifact_creator::create_workflow(&client, name, &objective).await?;
-    println!(
-      "{} workflow: {}",
-      artifact_action_verb(result.action),
-      result.path.display()
-    );
-    return Ok(());
-  }
   let compact = if args.autocompact >= 0 {
     CompactState::new(f64::from(args.autocompact) / 100.0, profile.context_limit)
   } else {
     CompactState::disabled()
   };
-  let session_id = session::generate_session_id();
-  let mut run_steer = args.steer && !args.worker;
-  let mut mode = if args.worker {
+  let session_id = args
+    .worker
+    .clone()
+    .unwrap_or_else(session::generate_session_id);
+  let mut run_steer = args.steer && args.worker.is_none();
+  let mut mode = if args.worker.is_some() {
     "worker"
   } else if run_steer {
     "steer"
@@ -109,7 +93,7 @@ async fn main() -> Result<()> {
     mode: mode.to_string(),
     flags: session::SessionFlags {
       steer: run_steer,
-      worker: args.worker,
+      worker: args.worker.is_some(),
       autocompact: args.autocompact,
       resume: args.resume.is_some(),
       temp: args.temp,
@@ -126,25 +110,26 @@ async fn main() -> Result<()> {
   let is_loaded_session = is_resume || is_fork;
   let prompt = args.prompt.join(" ");
 
-  let (messages, tools, task_tracker, workflow_state): (
-    Vec<Message>,
-    Vec<crate::types::Tool>,
-    Option<crate::task_tracker::TaskTracker>,
-    Option<_>,
-  ) = if args.worker {
+  let mut worker_parent_session_id = None;
+  let mut worker_id = None;
+  let (messages, tools): (Vec<Message>, Vec<crate::types::Tool>) = if let Some(parent_session_id) =
+    args.worker.as_deref()
+  {
     let system_prompt = read_stdin().await?.trim().to_string();
     if system_prompt.is_empty() {
       bail!("--worker requires system prompt on stdin");
     }
+    let wid = std::env::var("OGENT_WORKER_ID")
+      .context("--worker requires OGENT_WORKER_ID environment variable")?;
+    worker_parent_session_id = Some(parent_session_id.to_string());
+    worker_id = Some(wid);
     (
-      build_worker_messages(&system_prompt, &prompt, &session_id),
+      build_worker_messages(&system_prompt, &prompt, parent_session_id),
       tools::configured_worker_tools(),
-      None,
-      None,
     )
   } else if is_loaded_session {
     let path = match args.resume.or(args.fork) {
-      Some(Some(name)) => format!(".ogent/sessions/{name}.jsonl"),
+      Some(Some(name)) => name,
       Some(None) => session::find_latest_session(".ogent/sessions").context("no session found")?,
       None => unreachable!(),
     };
@@ -176,22 +161,7 @@ async fn main() -> Result<()> {
         ..Default::default()
       });
     }
-    let mut workflow_state =
-      session::read_workflow_state(old_session_id.as_ref().expect("loaded session id"))?;
-    if workflow_state.is_none()
-      && let Some(selector) = args.workflow.as_deref()
-    {
-      workflow_state = Some(crate::workflow::WorkflowState::new(
-        crate::workflow::load_workflow(selector)
-          .with_context(|| format!("load workflow {selector}"))?,
-      ));
-    }
-    (
-      loaded,
-      tools::configured_coder_tools(workflow_state.is_some()),
-      None,
-      workflow_state,
-    )
+    (loaded, tools::configured_director_tools())
   } else {
     if prompt.is_empty() && !args.steer {
       let mut cmd = Args::command();
@@ -201,20 +171,7 @@ async fn main() -> Result<()> {
     }
     let mut messages = prompts::build_messages(&prompt);
     prompts::enrich_initial_messages(&mut messages);
-    let workflow_state = if let Some(selector) = args.workflow.as_deref() {
-      Some(crate::workflow::WorkflowState::new(
-        crate::workflow::load_workflow(selector)
-          .with_context(|| format!("load workflow {selector}"))?,
-      ))
-    } else {
-      None
-    };
-    (
-      messages,
-      tools::configured_coder_tools(workflow_state.is_some()),
-      None,
-      workflow_state,
-    )
+    (messages, tools::configured_director_tools())
   };
   if !prompt.is_empty() {
     meta.start_ts = Some(session::timestamp_ms());
@@ -228,7 +185,7 @@ async fn main() -> Result<()> {
       meta.start_ts = old_meta.start_ts;
       meta.end_ts = old_meta.end_ts;
       meta.draft_input = old_meta.draft_input.clone();
-      if !args.worker && !args.steer && old_meta.mode == "steer" {
+      if args.worker.is_none() && !args.steer && old_meta.mode == "steer" {
         run_steer = true;
         mode = "steer";
       }
@@ -255,11 +212,11 @@ async fn main() -> Result<()> {
     messages,
     tools,
     compact,
-    task_tracker,
-    workflow_state,
     meta,
+    worker_parent_session_id,
+    worker_id,
   );
-  if args.worker || is_loaded_session || !prompt.is_empty() {
+  if args.worker.is_some() || is_loaded_session || !prompt.is_empty() {
     agent.dirty = true;
   }
   let loop_result = if run_steer {
@@ -283,14 +240,14 @@ async fn main() -> Result<()> {
     return Err(e.into());
   }
   agent.persist_if_dirty()?;
-  if let Some(summary) = agent.completion_summary.as_deref() {
-    if args.worker {
-      print!("{summary}");
-    } else {
-      session::append_journal(&agent.meta.session_id, summary)?;
+  if args.worker.is_some() {
+    if let Some(last) = agent.last_assistant_message() {
+      print!("{last}");
     }
+  } else if let Some(summary) = agent.completion_summary.as_deref() {
+    session::append_journal(&agent.meta.session_id, summary)?;
   }
-  if !args.worker && agent.dirty && !args.temp {
+  if args.worker.is_none() && agent.dirty && !args.temp {
     io::stdout().flush()?;
     let steer_flag = if agent.meta.mode == "steer" {
       "--steer "
@@ -306,15 +263,8 @@ async fn main() -> Result<()> {
 }
 
 fn ensure_creator_mode_flags(args: &Args) -> Result<()> {
-  if args.resume.is_some()
-    || args.fork.is_some()
-    || args.worker
-    || args.steer
-    || args.workflow.is_some()
-  {
-    bail!(
-      "creator mode cannot be combined with --resume, --fork, --worker, --steer, or --workflow"
-    );
+  if args.resume.is_some() || args.fork.is_some() || args.worker.is_some() || args.steer {
+    bail!("creator mode cannot be combined with --resume, --fork, --worker, or --steer");
   }
   if args.prompt.join(" ").trim().is_empty() {
     bail!("creator mode requires a description/objective prompt");

@@ -6,7 +6,6 @@ use crate::client::Client;
 use crate::types::{Message, MessageOrigin};
 
 const SKILL_CREATOR_PROMPT: &str = include_str!("../prompts/SKILL_CREATOR_PROMPT.md");
-const WORKFLOW_CREATOR_PROMPT: &str = include_str!("../prompts/WORKFLOW_CREATOR_PROMPT.md");
 
 const MAX_ATTEMPTS: usize = 2;
 
@@ -38,28 +37,6 @@ pub async fn create_skill(
   let prompt = skill_user_prompt(&name, objective, existing.as_deref());
   let content = generate_validated(client, SKILL_CREATOR_PROMPT, &prompt, |content| {
     validate_skill(&name, content)
-  })
-  .await?;
-  write_artifact(&path, &content)?;
-  Ok(ArtifactResult { path, action })
-}
-
-pub async fn create_workflow(
-  client: &Client,
-  raw_name: &str,
-  objective: &str,
-) -> Result<ArtifactResult> {
-  let name = normalize_artifact_name(raw_name)?;
-  require_objective(objective)?;
-  let path = PathBuf::from(".ogent")
-    .join("workflows")
-    .join(format!("{name}.yaml"));
-  let existing = read_existing_artifact(&path)?;
-  let action = action_for_existing(existing.as_deref());
-
-  let prompt = workflow_user_prompt(&name, objective, existing.as_deref());
-  let content = generate_validated(client, WORKFLOW_CREATOR_PROMPT, &prompt, |content| {
-    validate_workflow(&name, content)
   })
   .await?;
   write_artifact(&path, &content)?;
@@ -145,87 +122,6 @@ description: Use when ...
   prompt
 }
 
-fn workflow_user_prompt(name: &str, objective: &str, existing: Option<&str>) -> String {
-  let mut prompt = format!(
-    r#"## Requested Artifact
-
-id: {name}
-objective: {objective}
-
-## Workflow Schema
-
-Workflow:
-- id: string
-- name: string
-- version: integer, default 1
-- start: step id
-- instructions: optional string
-- steps: map of step id to step
-
-WorkflowStep:
-- title: optional string
-- instructions: optional string
-- next: list of step ids
-- terminal: boolean
-- gate: boolean
-- max_visits: optional positive integer
-- checks: list of checks
-
-WorkflowCheck:
-- id: string
-- type: manual or command
-- required: boolean
-- command: optional string, required for command checks
-
-Validation requires a non-empty id, name, start, at least one step, at least one terminal step, all next references to exist, all non-terminal steps to have next, unique check ids per step, and all steps reachable from start.
-
-## Example
-
-id: example-loop
-name: Example Loop
-version: 1
-start: frame
-instructions: |
-  Use this workflow when the task needs a small evidence-backed loop.
-steps:
-  frame:
-    title: Frame
-    instructions: |
-      Define the objective, constraints, and verification path.
-    next: [execute]
-    checks:
-      - id: objective
-        type: manual
-        required: true
-  execute:
-    title: Execute
-    instructions: |
-      Do one narrow unit of work.
-    next: [verify]
-    checks:
-      - id: work_done
-        type: manual
-        required: true
-  verify:
-    title: Verify
-    instructions: |
-      Run or record the relevant verification.
-    next: [execute, done]
-    gate: true
-    max_visits: 5
-    checks:
-      - id: evidence
-        type: manual
-        required: true
-  done:
-    title: Done
-    terminal: true
-"#
-  );
-  append_existing_artifact(&mut prompt, existing, "workflow YAML");
-  prompt
-}
-
 fn validate_skill(expected_name: &str, raw: &str) -> Result<String> {
   let content = strip_optional_code_fence(raw, "markdown");
   let trimmed = content.trim();
@@ -250,21 +146,6 @@ fn validate_skill(expected_name: &str, raw: &str) -> Result<String> {
   }
   if body_after_frontmatter(trimmed)?.is_empty() {
     bail!("skill body is required");
-  }
-  Ok(ensure_trailing_newline(trimmed))
-}
-
-fn validate_workflow(expected_name: &str, raw: &str) -> Result<String> {
-  let content = strip_optional_code_fence(raw, "yaml");
-  let trimmed = content.trim();
-  let workflow: crate::workflow::Workflow =
-    serde_yaml::from_str(trimmed).context("invalid workflow YAML")?;
-  workflow.validate().context("invalid workflow definition")?;
-  if workflow.id != expected_name {
-    bail!(
-      "workflow id must be '{expected_name}', got '{}'",
-      workflow.id
-    );
   }
   Ok(ensure_trailing_newline(trimmed))
 }
@@ -417,30 +298,9 @@ Review the repository.
   }
 
   #[test]
-  fn validates_workflow_yaml() {
-    let content = r#"id: tiny-flow
-name: Tiny Flow
-version: 1
-start: start
-steps:
-  start:
-    next: [done]
-  done:
-    terminal: true
-"#;
-    assert!(validate_workflow("tiny-flow", content).is_ok());
-    assert!(validate_workflow("other", content).is_err());
-  }
-
-  #[test]
   fn prompts_include_existing_artifact_when_present() {
     let skill = skill_user_prompt("repo-audit", "improve it", Some("old skill"));
     assert!(skill.contains("Existing Artifact To Improve"));
     assert!(skill.contains("old skill"));
-
-    let workflow = workflow_user_prompt("release-gate", "improve it", Some("old workflow"));
-    assert!(workflow.contains("Existing Artifact To Improve"));
-    assert!(workflow.contains("```yaml"));
-    assert!(workflow.contains("old workflow"));
   }
 }

@@ -1,5 +1,4 @@
 use crate::types::Message;
-use crate::workflow::WorkflowState;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
@@ -46,6 +45,24 @@ pub fn session_dir(session_id: &str) -> PathBuf {
   PathBuf::from(format!(".ogent/sessions/{session_id}"))
 }
 
+pub fn state_path(session_id: &str) -> PathBuf {
+  session_dir(session_id).join("states.json")
+}
+
+pub fn worker_dir(parent_session_id: &str, worker_id: &str) -> PathBuf {
+  session_dir(parent_session_id)
+    .join("workers")
+    .join(worker_id)
+}
+
+pub fn worker_state_path(parent_session_id: &str, worker_id: &str) -> PathBuf {
+  worker_dir(parent_session_id, worker_id).join("states.json")
+}
+
+pub fn worker_messages_path(parent_session_id: &str, worker_id: &str) -> PathBuf {
+  worker_dir(parent_session_id, worker_id).join("messages.jsonl")
+}
+
 pub fn write_meta(meta: &SessionMeta) -> Result<()> {
   let dir = session_dir(&meta.session_id);
   fs::create_dir_all(&dir)?;
@@ -62,37 +79,33 @@ pub fn read_meta(session_id: &str) -> Result<SessionMeta> {
 }
 
 pub fn persist_session(messages: &[Message], session_id: &str) -> Result<()> {
+  let path = session_dir(session_id).join("messages.jsonl");
+  persist_messages(messages, &path)
+}
+
+pub fn persist_worker_session(
+  messages: &[Message],
+  parent_session_id: &str,
+  worker_id: &str,
+) -> Result<()> {
+  let path = worker_messages_path(parent_session_id, worker_id);
+  persist_messages(messages, &path)
+}
+
+fn persist_messages(messages: &[Message], path: &PathBuf) -> Result<()> {
   if messages.is_empty() {
     return Ok(());
   }
-  let dir = session_dir(session_id);
+  let dir = path
+    .parent()
+    .context("messages path must have a parent directory")?;
   fs::create_dir_all(&dir)?;
-  let path = dir.join("messages.jsonl");
-  let mut file = fs::File::create(&path)?;
+  let mut file = fs::File::create(path)?;
   for message in messages {
     serde_json::to_writer(&mut file, message)?;
     file.write_all(b"\n")?;
   }
   Ok(())
-}
-
-pub fn write_workflow_state(session_id: &str, state: &WorkflowState) -> Result<()> {
-  let dir = session_dir(session_id);
-  fs::create_dir_all(&dir)?;
-  let data = serde_json::to_string_pretty(state)?;
-  fs::write(dir.join("workflow-state.json"), data)?;
-  Ok(())
-}
-
-pub fn read_workflow_state(session_id: &str) -> Result<Option<WorkflowState>> {
-  let path = session_dir(session_id).join("workflow-state.json");
-  if !path.exists() {
-    return Ok(None);
-  }
-  let data = fs::read_to_string(&path)
-    .with_context(|| format!("read workflow state for session {session_id}"))?;
-  let state = serde_json::from_str(&data).context("invalid workflow-state.json")?;
-  Ok(Some(state))
 }
 
 pub fn append_journal(session_id: &str, summary: &str) -> Result<()> {

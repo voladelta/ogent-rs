@@ -1,54 +1,49 @@
 use anyhow::{Context, Result, bail};
-use serde::Deserialize;
-use std::collections::HashSet;
+use serde::{Deserialize, Serialize};
 use std::sync::OnceLock;
 
 use tokio::process::Command;
 use tokio::sync::Mutex;
-
-use crate::prompts::WORKER_SUMMARY_PROMPT;
 
 #[derive(Debug, Clone)]
 pub struct WorkerProcessArgs {
   pub system_prompt: String,
   pub task_prompt: String,
   pub stream_stderr: bool,
+  pub parent_session_id: String,
+  pub worker_id: String,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct WorkerProcessResult {
-  pub report: String,
   pub output: String,
   pub err: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct DispatchWorkerArgs {
-  pub task: String,
-  #[serde(default = "default_template")]
-  pub template: String,
-  #[serde(default)]
-  pub context: String,
-}
-
-fn default_template() -> String {
-  "generic".to_string()
+pub struct DispatchWorkersArgs {
+  pub workers: Vec<WorkerDispatch>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct AsyncCoworkerArgs {
-  #[serde(default)]
-  pub name: String,
+pub struct WorkerDispatch {
+  pub role: String,
   pub task: String,
-  #[serde(default = "default_template")]
-  pub template: String,
-  #[serde(default)]
-  pub context: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-pub struct StartWorkersArgs {
-  pub coworkers: Vec<AsyncCoworkerArgs>,
+#[derive(Debug, Clone, Serialize)]
+struct DispatchWorkerResult {
+  index: usize,
+  role: String,
+  worker_id: String,
+  status: String,
+  output: String,
+  error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct DispatchBatchResult {
+  results: Vec<DispatchWorkerResult>,
 }
 
 pub struct WorkerManager {
@@ -57,159 +52,129 @@ pub struct WorkerManager {
 
 struct Inner {
   next_id: usize,
-  batches: usize,
-  workers: Vec<Worker>,
 }
 
-struct Worker {
-  id: String,
-  batch_id: String,
-  name: String,
-  order: usize,
+struct InFlightWorker {
+  index: usize,
+  role: String,
+  worker_id: String,
   done: tokio::task::JoinHandle<WorkerProcessResult>,
 }
 
 impl WorkerManager {
   pub fn new() -> Self {
     Self {
-      inner: Mutex::new(Inner {
-        next_id: 0,
-        batches: 0,
-        workers: Vec::new(),
-      }),
+      inner: Mutex::new(Inner { next_id: 0 }),
     }
   }
 
-  pub async fn start(&self, args: StartWorkersArgs) -> Result<String> {
-    validate_start_workers_args(&args)?;
-    let mut resolved = Vec::new();
-    for (i, coworker) in args.coworkers.iter().enumerate() {
-      let (sys, task) =
-        resolve_worker_prompts(&coworker.template, &coworker.task, &coworker.context)
-          .await
-          .with_context(|| format!("architect failed for coworkers[{i}]"))?;
-      let name = if coworker.name.trim().is_empty() {
-        format!("coworker-{}", i + 1)
-      } else {
-        coworker.name.trim().to_string()
-      };
-      resolved.push((name, sys, task));
+  pub async fn dispatch(
+    &self,
+    args: DispatchWorkersArgs,
+    parent_session_id: &str,
+  ) -> Result<String> {
+    if args.workers.is_empty() {
+      bail!("workers must contain at least one worker");
     }
-    let mut inner = self.inner.lock().await;
-    inner.batches += 1;
-    let batch_id = format!("batch-{}", inner.batches);
-    let mut started = Vec::new();
-    for (name, system_prompt, task_prompt) in resolved {
-      inner.next_id += 1;
-      let id = format!("worker-{}", inner.next_id);
+
+    let mut in_flight = Vec::new();
+    let mut results = Vec::with_capacity(args.workers.len());
+
+    for (index, worker) in args.workers.into_iter().enumerate() {
+      let worker_id = {
+        let mut inner = self.inner.lock().await;
+        inner.next_id += 1;
+        format!("worker-{}", inner.next_id)
+      };
+
+      let role = worker.role.trim().to_string();
+      if role.is_empty() {
+        results.push(DispatchWorkerResult {
+          index,
+          role,
+          worker_id,
+          status: "failed".to_string(),
+          output: String::new(),
+          error: Some("workers[index].role is required".to_string()),
+        });
+        continue;
+      }
+      if worker.task.trim().is_empty() {
+        results.push(DispatchWorkerResult {
+          index,
+          role,
+          worker_id,
+          status: "failed".to_string(),
+          output: String::new(),
+          error: Some("workers[index].task is required".to_string()),
+        });
+        continue;
+      }
+
+      let (system_prompt, task_prompt) = match resolve_worker_prompts(&role, &worker.task, "").await
+      {
+        Ok(prompts) => prompts,
+        Err(err) => {
+          results.push(DispatchWorkerResult {
+            index,
+            role,
+            worker_id,
+            status: "failed".to_string(),
+            output: String::new(),
+            error: Some(err.to_string()),
+          });
+          continue;
+        }
+      };
+
       let run_args = WorkerProcessArgs {
         system_prompt,
         task_prompt,
         stream_stderr: false,
+        parent_session_id: parent_session_id.to_string(),
+        worker_id: worker_id.clone(),
       };
       let done = tokio::spawn(async move { run_worker_process(run_args).await });
-      let order = inner.next_id;
-      inner.workers.push(Worker {
-        id: id.clone(),
-        batch_id: batch_id.clone(),
-        name: name.clone(),
-        order,
+      in_flight.push(InFlightWorker {
+        index,
+        role,
+        worker_id,
         done,
       });
-      started.push((id, name));
     }
-    let mut out = format!(
-      "Started {} async coworker(s) in {batch_id}:\n",
-      started.len()
-    );
-    for (id, name) in started {
-      out.push_str(&format!("- {id} ({name})\n"));
-    }
-    Ok(out)
-  }
 
-  pub async fn check(&self) -> String {
-    let workers = {
-      let mut inner = self.inner.lock().await;
-      if inner.workers.is_empty() {
-        return "No async coworkers are running or waiting to be collected.".to_string();
-      }
-      let mut workers = Vec::new();
-      std::mem::swap(&mut workers, &mut inner.workers);
-      workers
-    };
-    let mut sorted = workers;
-    sorted.sort_by_key(|w| w.order);
-    let mut out = format!("Async coworker summaries ({})\n", sorted.len());
-    for worker in sorted {
+    for worker in in_flight {
       let result = worker.done.await.unwrap_or_else(|e| WorkerProcessResult {
         err: Some(e.to_string()),
         ..Default::default()
       });
-      out.push_str(&format!(
-        "\n## {} ({})\n- Batch: {}\n",
-        worker.id, worker.name, worker.batch_id
-      ));
-      if let Some(err) = result.err {
-        out.push_str(&format!("- Status: failed: {err}\n"));
-        if !result.output.is_empty() {
-          out.push_str(&format!("\nOutput:\n{}\n", result.output));
-        }
-      } else if !result.report.is_empty() {
-        out.push_str(&format!(
-          "- Status: completed\n\nSummary:\n{}\n",
-          result.report
-        ));
+      let status = if result.err.is_some() {
+        "failed"
       } else {
-        out.push_str("- Status: completed without summary\n");
-        if !result.output.is_empty() {
-          out.push_str(&format!("\nOutput:\n{}\n", result.output));
-        }
-      }
+        "completed"
+      };
+      results.push(DispatchWorkerResult {
+        index: worker.index,
+        role: worker.role,
+        worker_id: worker.worker_id,
+        status: status.to_string(),
+        output: result.output,
+        error: result.err,
+      });
     }
-    out
-  }
 
-  #[cfg(test)]
-  async fn insert_finished_for_test(&self, name: &str, result: WorkerProcessResult) {
-    let mut inner = self.inner.lock().await;
-    inner.next_id += 1;
-    inner.batches += 1;
-    let id = format!("worker-{}", inner.next_id);
-    let batch_id = format!("batch-{}", inner.batches);
-    let order = inner.next_id;
-    let done = tokio::spawn(async move { result });
-    inner.workers.push(Worker {
-      id,
-      batch_id,
-      name: name.to_string(),
-      order,
-      done,
-    });
-  }
-
-  pub async fn status_message(&self) -> Option<String> {
-    let inner = self.inner.lock().await;
-    if inner.workers.is_empty() {
-      return None;
-    }
-    if inner.workers.iter().any(|w| !w.done.is_finished()) {
-      Some("Async coworkers are still running. Continue parent-owned work, or call `check_workers` if blocked or ready to integrate.".to_string())
-    } else {
-      Some(
-        "All async coworkers finished. Call `check_workers` to collect reports before finalizing."
-          .to_string(),
-      )
-    }
+    results.sort_by_key(|r| r.index);
+    Ok(serde_json::to_string(&DispatchBatchResult { results })?)
   }
 }
 
 pub async fn run_worker_process(args: WorkerProcessArgs) -> WorkerProcessResult {
   let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("ogent"));
   let mut cmd = Command::new(exe);
-  cmd.arg("--worker");
+  cmd.arg(format!("--worker={}", args.parent_session_id));
   cmd.arg(&args.task_prompt);
   cmd.current_dir(crate::workspace::workspace_root());
+  cmd.env("OGENT_WORKER_ID", &args.worker_id);
   cmd.stdin(std::process::Stdio::piped());
   cmd.stdout(std::process::Stdio::piped());
   cmd.stderr(std::process::Stdio::piped());
@@ -223,7 +188,7 @@ pub async fn run_worker_process(args: WorkerProcessArgs) -> WorkerProcessResult 
     }
   };
   if let Some(mut stdin) = child.stdin.take() {
-    let prompt = args.system_prompt + WORKER_SUMMARY_PROMPT;
+    let prompt = args.system_prompt;
     tokio::spawn(async move {
       use tokio::io::AsyncWriteExt;
       let _ = stdin.write_all(prompt.as_bytes()).await;
@@ -270,9 +235,8 @@ pub async fn run_worker_process(args: WorkerProcessArgs) -> WorkerProcessResult 
       let out = stdout_task.await.unwrap_or_default();
       let err = stderr_task.await.unwrap_or_default();
       return WorkerProcessResult {
-        output: format!("{out}{err}").trim().to_string(),
-        err: Some(e.to_string()),
-        ..Default::default()
+        output: out.trim().to_string(),
+        err: Some(format!("{e}\n{err}")),
       };
     }
   };
@@ -281,47 +245,19 @@ pub async fn run_worker_process(args: WorkerProcessArgs) -> WorkerProcessResult 
   let err = stderr_task.await.unwrap_or_default();
 
   if !status.success() {
-    let combined = format!("{out}{err}");
     return WorkerProcessResult {
-      output: combined.trim().to_string(),
-      err: Some(status.to_string()),
-      ..Default::default()
+      output: out.trim().to_string(),
+      err: Some(if err.trim().is_empty() {
+        status.to_string()
+      } else {
+        format!("{}\n{}", status, err.trim())
+      }),
     };
   }
   WorkerProcessResult {
-    report: out.trim().to_string(),
-    output: err.trim().to_string(),
+    output: out.trim().to_string(),
     err: None,
   }
-}
-
-pub fn format_dispatch_worker_result(result: WorkerProcessResult) -> Result<String> {
-  match result.err {
-    Some(err) if result.output.is_empty() => bail!("worker failed with no output: {err}"),
-    Some(err) => Ok(format!("WORKER FAILED ({err}):\n\n{}", result.output)),
-    None if result.report.is_empty() => Ok(format!(
-      "Worker completed without summary. Output:\n\n{}",
-      result.output
-    )),
-    None => Ok(format!("Worker completed. Summary:\n\n{}", result.report)),
-  }
-}
-
-pub fn validate_start_workers_args(args: &StartWorkersArgs) -> Result<()> {
-  if args.coworkers.is_empty() {
-    bail!("coworkers must contain at least one worker");
-  }
-  let mut seen = HashSet::new();
-  for (i, c) in args.coworkers.iter().enumerate() {
-    if c.task.trim().is_empty() {
-      bail!("coworkers[{i}].task is required");
-    }
-    let name = c.name.trim();
-    if !name.is_empty() && !seen.insert(name.to_string()) {
-      bail!("duplicate coworker name: {name}");
-    }
-  }
-  Ok(())
 }
 
 static ARCHITECT_CLIENT: OnceLock<Result<crate::client::Client, String>> = OnceLock::new();
@@ -339,27 +275,26 @@ fn get_architect_client() -> Result<&'static crate::client::Client> {
 }
 
 pub async fn resolve_worker_prompts(
-  template: &str,
+  role: &str,
   task: &str,
   context: &str,
 ) -> Result<(String, String)> {
-  let requested_template = normalize_template(template);
-  if let Some(builtin) = crate::prompts::get_builtin_worker_prompt(requested_template) {
+  let requested_role = normalize_role(role);
+  if let Some(builtin) = crate::prompts::get_builtin_worker_prompt(requested_role) {
     let system_prompt = format!("{builtin}\n\n## Context\n\n{}", context.trim());
     return Ok((system_prompt, task.trim().to_string()));
   }
 
   let client = get_architect_client()?;
-  let template_body = crate::prompts::get_worker_template(requested_template);
   let user_content = format!(
-    "## Requested Template/Role\n\n{requested_template}\n\n## Template\n\n{template_body}\n\n## Task\n\n{}\n\n## Context\n\n{}",
+    "## Desired Role\n\n{requested_role}\n\n## Hiring Request\n\n{}\n\n## Context\n\n{}",
     task.trim(),
     context.trim()
   );
   let messages = vec![
     crate::types::Message {
       role: "system".into(),
-      content: crate::prompts::ARCHITECT_PROMPT.to_string(),
+      content: architect_prompt_for_role(requested_role).to_string(),
       origin: crate::types::MessageOrigin::Internal,
       ..Default::default()
     },
@@ -377,13 +312,13 @@ pub async fn resolve_worker_prompts(
   parse_architect_output(&resp.content)
 }
 
-fn normalize_template(template: &str) -> &str {
-  let template = template.trim();
-  if template.is_empty() {
-    "generic"
-  } else {
-    template
-  }
+fn normalize_role(role: &str) -> &str {
+  let role = role.trim();
+  if role.is_empty() { "factory" } else { role }
+}
+
+fn architect_prompt_for_role(_role: &str) -> &'static str {
+  crate::prompts::CONTRACTOR_FACTORY
 }
 
 fn parse_architect_output(text: &str) -> Result<(String, String)> {
@@ -411,63 +346,6 @@ fn extract_tag(text: &str, tag: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
   use super::*;
-
-  #[test]
-  fn start_workers_rejects_empty_coworker_list() {
-    assert!(validate_start_workers_args(&StartWorkersArgs { coworkers: vec![] }).is_err());
-  }
-
-  #[test]
-  fn start_workers_rejects_duplicate_names() {
-    let args = StartWorkersArgs {
-      coworkers: vec![
-        AsyncCoworkerArgs {
-          name: "a".into(),
-          task: "do something".into(),
-          template: "generic".into(),
-          context: String::new(),
-        },
-        AsyncCoworkerArgs {
-          name: "a".into(),
-          task: "do something else".into(),
-          template: "generic".into(),
-          context: String::new(),
-        },
-      ],
-    };
-    assert!(validate_start_workers_args(&args).is_err());
-  }
-
-  #[tokio::test]
-  async fn check_workers_returns_reports_and_clears_workers() {
-    let manager = WorkerManager::new();
-    manager
-      .insert_finished_for_test(
-        "alpha",
-        WorkerProcessResult {
-          report: "report body".into(),
-          ..Default::default()
-        },
-      )
-      .await;
-
-    let first = manager.check().await;
-    assert!(first.contains("report body"));
-    let second = manager.check().await;
-    assert!(second.contains("No async coworkers"));
-  }
-
-  #[test]
-  fn dispatch_worker_reports_subprocess_failure_with_captured_output() {
-    let out = format_dispatch_worker_result(WorkerProcessResult {
-      output: "stderr text".into(),
-      err: Some("exit status: 1".into()),
-      ..Default::default()
-    })
-    .unwrap();
-    assert!(out.contains("WORKER FAILED"));
-    assert!(out.contains("stderr text"));
-  }
 
   #[test]
   fn parse_architect_output_extracts_tags() {
@@ -498,27 +376,52 @@ Some trailing text"#;
     assert!(extract_tag("no tags", "system_prompt").is_none());
   }
 
+  #[test]
+  fn factory_role_uses_contractor_factory_prompt() {
+    assert_eq!(
+      architect_prompt_for_role("factory"),
+      crate::prompts::CONTRACTOR_FACTORY
+    );
+    assert_eq!(
+      architect_prompt_for_role("unknown-role"),
+      crate::prompts::CONTRACTOR_FACTORY
+    );
+  }
+
   #[tokio::test]
-  async fn resolve_worker_prompts_uses_builtin_without_architect() {
+  async fn resolve_worker_prompts_uses_reviewer_builtin() {
     let (sys, task) =
       resolve_worker_prompts("reviewer", "review src/lib.rs", "## Files\n- src/lib.rs")
         .await
         .unwrap();
-    assert!(sys.contains("code reviewer"));
+    assert!(sys.contains("judge whether work satisfies the contract"));
     assert!(sys.contains("## Context"));
     assert!(sys.contains("src/lib.rs"));
     assert_eq!(task, "review src/lib.rs");
   }
 
   #[tokio::test]
-  async fn resolve_worker_prompts_uses_coder_builtin() {
-    let (coder_sys, coder_task) =
-      resolve_worker_prompts("coder", "edit src/lib.rs", "## Write Scope\n- src/lib.rs")
-        .await
-        .unwrap();
-    assert!(coder_sys.contains("implementation worker"));
-    assert!(coder_sys.contains("## Context"));
-    assert!(coder_sys.contains("src/lib.rs"));
-    assert_eq!(coder_task, "edit src/lib.rs");
+  async fn resolve_worker_prompts_uses_implementer_builtin() {
+    let (sys, task) = resolve_worker_prompts(
+      "implementer",
+      "edit src/lib.rs",
+      "## Write Scope\n- src/lib.rs",
+    )
+    .await
+    .unwrap();
+    assert!(sys.contains("produce the requested artifact or code change"));
+    assert!(sys.contains("## Context"));
+    assert!(sys.contains("src/lib.rs"));
+    assert_eq!(task, "edit src/lib.rs");
+  }
+
+  #[tokio::test]
+  async fn dispatch_rejects_empty_worker_list() {
+    let manager = WorkerManager::new();
+    let err = manager
+      .dispatch(DispatchWorkersArgs { workers: vec![] }, "parent-session")
+      .await
+      .expect_err("empty list should fail");
+    assert!(err.to_string().contains("at least one worker"));
   }
 }

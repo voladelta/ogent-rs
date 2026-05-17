@@ -6,26 +6,29 @@ use std::path::PathBuf;
 use crate::types::{Message, MessageOrigin};
 
 pub const SYSTEM_PROMPT: &str = include_str!("../prompts/SYSTEM_PROMPT.md");
-
-pub const WORKER_SUMMARY_PROMPT: &str = "\n\n## Worker Report Protocol\n\nWhen done, call `worker_complete` with a concise Markdown summary:\n\n```json\n{\"summary\":\"...\"}\n```\n\nInclude in the summary:\n- What you accomplished\n- Files inspected, commands run, results\n- Decisions made\n- Files modified (list)\n- Blockers (omit if none)\n\nRules:\n- Concise fragments are preferred.\n- Never fabricate or embellish results. Report only what you actually observed or did.\n- Do not write intermediate analysis, planning, or decision documents to the repo.";
-
-pub const WORKER_TEMPLATE_GENERIC: &str = include_str!("../prompts/workers/generic.md");
-pub const WORKER_PROMPT_CODER: &str = include_str!("../prompts/workers/coder.md");
+pub const DIRECTOR_PROMPT: &str = include_str!("../prompts/DIRECTOR_PROMPT.md");
+pub const CONTRACTOR_FACTORY: &str = include_str!("../prompts/CONTRACTOR_FACTORY.md");
+pub const WORKER_PROMPT_IMPLEMENTER: &str = include_str!("../prompts/workers/implementer.md");
+pub const WORKER_PROMPT_VERIFIER: &str = include_str!("../prompts/workers/verifier.md");
+pub const WORKER_PROMPT_DEBUGGER: &str = include_str!("../prompts/workers/debugger.md");
+pub const WORKER_PROMPT_RESEARCHER: &str = include_str!("../prompts/workers/researcher.md");
+pub const WORKER_PROMPT_WRITER: &str = include_str!("../prompts/workers/writer.md");
+pub const WORKER_PROMPT_CRITIC: &str = include_str!("../prompts/workers/critic.md");
+pub const WORKER_PROMPT_DESIGNER: &str = include_str!("../prompts/workers/designer.md");
+pub const WORKER_PROMPT_SUMMARIZER: &str = include_str!("../prompts/workers/summarizer.md");
 pub const WORKER_PROMPT_REVIEWER: &str = include_str!("../prompts/workers/reviewer.md");
-pub const WORKER_PROMPT_TESTER: &str = include_str!("../prompts/workers/tester.md");
-pub const WORKER_PROMPT_VALIDATOR: &str = include_str!("../prompts/workers/validator.md");
-pub const ARCHITECT_PROMPT: &str = include_str!("../prompts/ARCHITECT_PROMPT.md");
-
-pub fn get_worker_template(_name: &str) -> &'static str {
-  WORKER_TEMPLATE_GENERIC
-}
 
 pub fn get_builtin_worker_prompt(name: &str) -> Option<&'static str> {
   match name {
-    "coder" => Some(WORKER_PROMPT_CODER),
+    "implementer" => Some(WORKER_PROMPT_IMPLEMENTER),
+    "verifier" => Some(WORKER_PROMPT_VERIFIER),
+    "debugger" => Some(WORKER_PROMPT_DEBUGGER),
+    "researcher" => Some(WORKER_PROMPT_RESEARCHER),
+    "writer" => Some(WORKER_PROMPT_WRITER),
+    "critic" => Some(WORKER_PROMPT_CRITIC),
+    "designer" => Some(WORKER_PROMPT_DESIGNER),
+    "summarizer" => Some(WORKER_PROMPT_SUMMARIZER),
     "reviewer" => Some(WORKER_PROMPT_REVIEWER),
-    "tester" => Some(WORKER_PROMPT_TESTER),
-    "validator" => Some(WORKER_PROMPT_VALIDATOR),
     _ => None,
   }
 }
@@ -39,9 +42,9 @@ pub fn skill_roots() -> Vec<PathBuf> {
 }
 
 fn system_prompt_paths() -> Vec<PathBuf> {
-  let mut paths = vec![PathBuf::from(".ogent/SYSTEM_PROMPT.md")];
+  let mut paths = vec![PathBuf::from(".ogent/DIRECTOR_PROMPT.md")];
   if let Some(home) = std::env::var_os("HOME") {
-    paths.push(PathBuf::from(home).join(".ogent/SYSTEM_PROMPT.md"));
+    paths.push(PathBuf::from(home).join(".ogent/DIRECTOR_PROMPT.md"));
   }
   paths
 }
@@ -55,7 +58,12 @@ fn load_system_prompt() -> String {
       }
     }
   }
-  SYSTEM_PROMPT.trim().to_string()
+  let director = DIRECTOR_PROMPT.trim();
+  if director.is_empty() {
+    SYSTEM_PROMPT.trim().to_string()
+  } else {
+    director.to_string()
+  }
 }
 
 pub fn load_skill_content(skill_name: &str) -> Result<(String, String, String)> {

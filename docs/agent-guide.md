@@ -1,201 +1,84 @@
 # Agent Guide
 
-How the agent works internally: its phases, checkpoints, task tracking, skills, and coworker delegation.
+## Director-First Runtime
 
-## Agent
+`ogent` is always a Director in the main process.
 
-The agent works in **phases**, writing short in-session checkpoints and hiring specialist coworkers when needed.
+The Director:
 
-### Checkpoints
+- reads context
+- plans
+- dispatches workers
+- writes/reads runtime state
+- integrates worker results
+- exits on terminal state
 
-At meaningful in-session boundaries, the agent may write a short `<checkpoint>` note for its own context management:
+The Director does not directly edit workspace files.
 
-```xml
-<checkpoint>
-- Evidence: ...
-- State: ...
-- Decisions: ...
-- Risks: ...
-- Next: ...
-</checkpoint>
-```
+## Worker Runtime
 
-Checkpoints help preserve working state across phase changes, delegation, and compaction. They are model-facing context notes only: runtime code does not parse them, save them as durable memory, or load them on future runs.
-
-### Compaction
-
-When context usage crosses the autocompact threshold (default 80%), or when the user runs `/compact [focus]`, the agent produces a handoff brief and spawns a new child session. The brief preserves:
-
-- Goal, what was done, current state, relevant excerpts, next steps
-- Full task tracker state (goal, phases, todos) so work resumes seamlessly
-- A reference to the parent session transcript (`.ogent/sessions/<id>/messages.jsonl`)
-
-The parent session is preserved on disk unchanged. The new child session starts fresh with the handoff brief as its first user message. Task tracker state is carried forward in memory.
-
-### Runtime task tracking
-
-`ogent` now supports runtime-owned task tracking with a strict hierarchy:
-
-```text
-Goal -> Phases -> Todos
-```
-
-Todos are optional per phase.
-
-Tracking is maintained through tools, not free-form prose:
-- call `set_goal` once
-- use `update_phase` and `update_todo` as upserts
-- use `revise_goal` rarely; it records the prior goal and reason
-- include concise success criteria on `set_goal` / `revise_goal` when they clarify completion
-
-Status values: `pending`, `in_progress`, `completed`, `blocked`, `skipped`
-Complexity values: `simple`, `medium`, `complex`
-
-### Skills
-
-Skills are loaded from:
-
-- `.ogent/skills/<name>/SKILL.md`
-- `.skills/<name>/SKILL.md`
-- `~/.ogent/skills/<name>/SKILL.md`
-
-Create a local skill with:
+Workers are subprocesses spawned by the Director:
 
 ```bash
-ogent --create-skill repo-audit "Review repositories for correctness, security, and maintainability risks"
+ogent --worker=<parent_session_id> "<task prompt>"
 ```
 
-Creator mode asks the selected profile for exactly one `SKILL.md`, validates required frontmatter and body content, and writes it to `.ogent/skills/<name>/SKILL.md`. Existing skills are included as context and improved in place after the replacement validates.
+Environment:
 
-At startup, available skills are discovered and listed in the user message. The agent can call `load_skill` to inject a skill body into the next turn.
+- `OGENT_WORKER_ID` is required in worker mode.
 
-The `colgrep` skill is preloaded: if their `SKILL.md` files exist in a skill root, ogent auto-injects their full body into the initial user message after the skills list. This gives the agent semantic code search and repo context instructions without spending a turn on `load_skill`.
+Worker persistence:
 
-Skills do not define or activate workflows. Skills are reusable capability instructions. Workflows are optional session control policies loaded explicitly with `--workflow`.
+- transcript: `.ogent/sessions/{parent_session_id}/workers/{worker_id}/messages.jsonl`
+- state: `.ogent/sessions/{parent_session_id}/workers/{worker_id}/states.json`
 
-### Workflows
+## Prompts
 
-Workflows are optional. Start a session with one active workflow when the task benefits from enforced steps, evidence checks, or bounded loops:
+- Main system prompt: `prompts/DIRECTOR_PROMPT.md`
+- Factory prompt: `prompts/CONTRACTOR_FACTORY.md`
+- Built-in worker roles:
+  - `implementer`
+  - `verifier`
+  - `debugger`
+  - `researcher`
+  - `writer`
+  - `critic`
+  - `designer`
+  - `summarizer`
+  - `reviewer`
 
-```bash
-ogent --workflow common-sw "fix parser panic"
-ogent --workflow auto-iteration "improve benchmark score"
-ogent --workflow workflows/iteration.yaml --steer
-```
+Unknown role or `factory` role uses contractor-factory generation.
 
-If no workflow is supplied, ogent behaves normally.
+## State and Exit
 
-Workflow state is persisted in `.ogent/sessions/<id>/workflow-state.json` and reloaded on resume/fork. The model sees only the current workflow context before each turn.
+Director state lives in `.ogent/sessions/{session_id}/states.json`.
 
-Workflow tools are included in the model tool schema only when a workflow is active:
-- `workflow_status`
-- `workflow_enter_step`
-- `workflow_record_check`
-- `workflow_run_check`
+After each turn, the agent checks key `status`.
+If `status` is exactly one of `done`, `blocked`, `failed`, `partial`, the Director loop exits.
 
-Workflow enforcement:
-- first step must be the workflow `start`
-- transitions must follow `next`
-- gated transitions require a reason
-- required checks must pass or be waived before leaving a step
-- `max_visits` bounds loops
-- `complete` requires a terminal workflow step
+The final output shown to the user is the Director’s last assistant message.
 
-Workflow and goal tracking are separate:
-- Goal/task tracker = objective and progress display
-- Workflow = process control and evidence gates
+## Tool Split
 
-When a workflow step is entered and a task tracker exists, ogent mirrors the step as the current tracker phase for visibility.
+Director-only:
 
-Built-in workflows live in `workflows/`:
-- `common-sw` — general software work: intake, execute, verify, repair, review, done.
-- `auto-iteration` — bounded measured optimization/research loop: frame, baseline, propose, implement, evaluate, fix, decide, report.
+- `dispatch_workers`
+- restricted `bash` (`colgrep` / `rg`)
 
-Create a local workflow with:
+Worker-only edits:
 
-```bash
-ogent --create-workflow release-check "Gate a release through build, tests, review, and final approval evidence"
-```
+- `write_file`
+- `read_hash_anchors`
+- `edit_hash_anchors`
 
-Creator mode asks the selected profile for exactly one workflow YAML file, validates it with the runtime workflow schema, and writes it to `.ogent/workflows/<name>.yaml`. Local workflows can be loaded by name with `--workflow <name>`.
+Shared:
 
-Install the search CLIs you want the agent to use for efficient codebase discovery:
+- read/web/search tools
+- `repo_map`
+- `load_skill`
+- `state`
 
-```bash
-# macOS
-brew install ripgrep ast-grep
+## Compaction
 
-# Install colgrep separately if you use semantic repo search.
-brew install lightonai/tap/colgrep
-
-# Then add its skill file:
-mkdir -p ~/.ogent/skills/colgrep
-$EDITOR ~/.ogent/skills/colgrep/SKILL.md
-```
-
-Recommended search behavior:
-- `colgrep` for intent-based code search, system exploration, and symbol discovery.
-- `rg` for exact text and regex matching.
-- `ast-grep` for syntax-aware structural search.
-
-### Hiring coworkers
-
-The agent uses `dispatch_worker` when:
-- The task has parallel independent work streams
-- A specialist perspective is needed (security review, docs, tests)
-- The task is large enough that splitting context helps
-
-**Golden rule:** Give the worker JUST ENOUGH context — but it must be the RIGHT context. A worker without file paths or commands will fail silently.
-
-**Worker prompt templates** in `prompts/workers/` (`generic`, `coder`, `tester`, `reviewer`, `validator`) define the worker's role and behavior. Built-in specialist templates are used directly; custom roles are generated from the generic template via an architect LLM call. The concrete assignment goes in the separate `task` argument.
-
-**Dispatch checklist:**
-- [ ] You actually need a worker (prefer direct action for <3 turns of work)
-- [ ] `template` selects the worker role and defines behavior/scope; built-in templates (generic, coder, tester, reviewer, validator) are used directly, custom roles are generated from the generic template
-- [ ] `task` states the exact assignment, expected output, success criteria, and immediate next step
-- [ ] All file paths are exact relative paths
-- [ ] Commands are exact and copied into the worker scope
-- [ ] Invariants/constraints from the current checkpoint or task context are included
-
-The worker runs in isolation with your prompt. When done, it calls `worker_complete` with a structured Markdown summary. That summary is returned to the parent coder. You decide what to do next.
-
-## Creating skills
-
-Skills are **domain knowledge packages** stored as `.ogent/skills/<name>/SKILL.md`:
-
-```
-.ogent/skills/
-├── rust-refactor/
-│   └── SKILL.md          # Rust refactoring procedures
-├── string-utils/
-│   └── SKILL.md          # Rust string utility patterns
-└── ...                   # User-created skills
-```
-
-Each `SKILL.md` has YAML frontmatter (`name`, `description`) and Markdown instructions. The description helps the agent decide when to apply the skill. The full body is loaded only when triggered (progressive disclosure).
-
-```bash
-mkdir -p .ogent/skills/my-skill
-cat > .ogent/skills/my-skill/SKILL.md << 'EOF'
----
-name: my-skill
-description: What this skill does and when to use it.
----
-
-## Brief
-Compressed procedure.
-
-## Context
-What to assume.
-
-## Constraints
-Hard limits.
-
-## Procedure
-1. Step one
-2. Step two
-
-## Verification
-How to confirm success.
-EOF
-```
+Autocompaction is still available.
+Compaction creates a child session from a handoff brief and preserves the parent session.

@@ -1,132 +1,74 @@
 # ogent
 
-`ogent` is a minimal task agent with thinking-mode LLMs, anchored file editing, autonomous agent execution, and TUI-based steering.
+`ogent` is a Director-mode terminal agent.
 
-## Overview
-
-`ogent` is a terminal-based autonomous agent that turns user intent into file reads, edits, shell commands, tests, debugging, and worker delegation.
-
-The default **agent** mode owns the work directly. It delegates to worker subprocesses only when a specialist or parallel work stream adds value.
-
-The design priorities are:
-
-- Safe file edits: edits are anchored by content hashes, so stale edits are rejected.
-- Observable execution: reasoning, assistant output, tool calls, token usage, and session history are visible.
-- Small architecture: the code is split into focused modules with explicit boundaries.
-- Interactive steering: long-running work can be corrected through a TUI without waiting for the current model call to finish.
+The main agent does not edit workspace files directly. It plans work, manages state, dispatches workers, integrates results, and exits when a terminal status is written.
 
 ## Quick Start
-
-Requires a Rust toolchain with Cargo.
 
 ```bash
 export DEEPSEEK_API_KEY="sk-..."
 
-cargo build --release
-./target/release/ogent "Add a divide function to src/math.rs"
+cargo run -- "Fix the failing tests without overcomplicating"
 ```
 
-Or run without building first:
+## CLI
 
 ```bash
-cargo run -- "Add a divide function to src/math.rs"
+# Director run
+ogent "Implement feature X"
+
+# Steer-mode Director (TUI)
+ogent --steer
+
+# Internal worker subprocess mode
+ogent --worker=<parent_session_id> "<task prompt>"
 ```
 
-## How It Works
+## Key Behavior
 
-```text
-User prompt
-    |
-    v
-Agent (read -> plan -> act -> checkpoint)
-    |
-    v
-Need specialist? -> dispatch_worker / start_workers
-    |
-    v
-Worker subprocess -> worker_complete({summary})
-    |
-    v
-Agent reads report -> integrate -> continue or finalize
+- Director tools include: `read_file`, `repo_map`, restricted `bash` (`colgrep`/`rg` only), web tools, `load_skill`, `state`, `dispatch_workers`.
+- Worker tools include editing tools (`write_file`, `read_hash_anchors`, `edit_hash_anchors`) plus read/web/bash/state tools.
+- Director exits only when state key `status` is exactly one of:
+  - `done`
+  - `blocked`
+  - `failed`
+  - `partial`
+
+## Runtime Layout
+
+```txt
+.ogent/
+  sessions/
+    {session_id}/
+      meta.json
+      messages.jsonl
+      states.json
+      workers/
+        {worker_id}/
+          messages.jsonl
+          states.json
 ```
 
-The agent is the default mode. It reads files, writes code, runs tests, debugs issues, and hires workers only when useful.
+## Skill Creator
 
-Workers run as child `ogent --worker` processes. The parent provides a `template` (worker role), `task` (concrete assignment), and `context` (project info, files, constraints); ogent generates the worker's system prompt via an architect LLM call unless a built-in template is used.
+`--create-skill` remains available:
 
-## Documentation
-
-- [Agent Guide](docs/agent-guide.md) — agent internals, checkpoints, task tracking, skills, and hiring coworkers
-- [Reference](docs/reference.md) — CLI flags, model profiles, tools, hashline editing, sessions, context budget
-- [Steer Mode](docs/steer-mode.md) — Interactive TUI, commands, and navigation
-- [Architecture](ARCHITECTURE.md) — Module map, data flow, and design invariants
+```bash
+ogent --create-skill repo-audit "Review repositories for correctness and maintainability."
+```
 
 ## Development
 
 ```bash
-# Type-check without emitting
-cargo check
-
-# Lint
-cargo clippy
-
-# Format check
-cargo fmt -- --check
-
-# Auto-format
 cargo fmt
-
-# Full check
+cargo check
 cargo test
 ```
 
-## Examples
+## Docs
 
-```bash
-# Simple task
-cargo run -- "Add a divide function to src/math.rs"
-
-# Research task
-cargo run -- "How does Tokio scheduling work?"
-
-# Multi-step with worker delegation
-cargo run -- "Add auth module, then review it for security issues"
-
-# Parallel worker-friendly task
-cargo run -- "Add tests for src/auth.rs and write README documentation"
-
-# Create reusable local artifacts
-cargo run -- --create-skill repo-audit "Review repositories for correctness, security, and maintainability risks"
-cargo run -- --create-workflow release-check "Gate a release through build, tests, review, and final approval evidence"
-
-# Resume the latest session and save back into that same session
-cargo run -- resume "Add more tests"
-
-# Resume a specific session and save back into that same session
-cargo run -- resume 1778216383-2028 "Add more tests"
-
-# Fork a specific session into a new child session
-cargo run -- fork 1778216383-2028 "Try a different approach"
-
-# Auto-compact context at 50% and continue automatically
-cargo run -- --autocompact 50 "Large refactoring task"
-
-# Disable autocompact
-cargo run -- --autocompact -1 "Quick task"
-
-# Ephemeral session (no session state written to disk)
-cargo run -- --temp "Quick one-off query"
-
-# Try different backends
-cargo run -- --profile kimi "Explain the fnv1a hashline logic"
-cargo run -- --profile glm "Summarize this repository"
-
-# Max DeepSeek reasoning effort
-cargo run -- --profile ds-pro-max "Design a caching layer"
-
-# TUI steer mode
-cargo run -- --steer --profile ds-pro "Write a small web server"
-
-# TUI steer mode, waiting for first input
-cargo run -- --steer
-```
+- [docs/reference.md](docs/reference.md)
+- [docs/agent-guide.md](docs/agent-guide.md)
+- [docs/steer-mode.md](docs/steer-mode.md)
+- [ARCHITECTURE.md](ARCHITECTURE.md)

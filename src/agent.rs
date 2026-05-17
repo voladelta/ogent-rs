@@ -1,11 +1,12 @@
 use crate::client::{Client, ClientError};
 use crate::session;
 use crate::sse::{SseError, StreamEvent};
-use crate::task_tracker::{TaskTracker, is_tracking_tool_name};
 use crate::tools::{ToolContext, execute_tool, is_read_only_tool};
 use crate::tui::{AgentState, SteerEvent, TuiHandle};
 use crate::types::{ChatResponse, Message, MessageOrigin, Tool, ToolCall};
 use crate::workers::WorkerManager;
+use anyhow::Context;
+use std::collections::BTreeMap;
 use std::io::{self, Write};
 
 #[derive(Debug, thiserror::Error)]
@@ -99,7 +100,6 @@ impl SteerState {
 
       Self::StartTurn => {
         tui.status.set_tokens(agent.total_tokens);
-        agent.refresh_workflow_reminder();
 
         let cancel = tokio_util::sync::CancellationToken::new();
         let cancel_clone = cancel.clone();
@@ -169,7 +169,9 @@ impl SteerState {
                 }
                 SteerEvent::Complete => {
                   cancel.cancel();
-                  steer_msg = Some(MANUAL_COMPLETE_REMINDER.to_string());
+                  steer_msg = Some(
+                    "Reminder: set `state` key `status` to done/blocked/failed/partial when the Director is ready to finish.".to_string(),
+                  );
                 }
                 SteerEvent::New => {
                   cancel.cancel();
@@ -267,7 +269,7 @@ impl SteerState {
           if agent.compact.compacting && agent.compact.threshold > 0.0 {
             let ratio = agent.total_tokens as f64 / agent.compact.context_limit as f64;
             if ratio >= agent.compact.threshold {
-              let mut compact_msg = String::from(
+              let compact_msg = String::from(
                 "Context budget exhausted. Produce a handoff brief now:\n\
                  - ## Goal\n\
                  - ## What was done\n\
@@ -276,12 +278,6 @@ impl SteerState {
                  - ## Next steps\n\n\
                  Be concise. Specific facts only.",
               );
-              if let Some(tracker) = &agent.task_tracker {
-                compact_msg.push_str(&format!(
-                  "\n\n## Task Plan (include verbatim)\n{}",
-                  serde_json::to_string_pretty(tracker).unwrap_or_default(),
-                ));
-              }
               agent.push_msg(internal_user_msg(compact_msg));
               tui
                 .log
@@ -328,9 +324,6 @@ impl SteerState {
               agent.meta.usage.total_tokens = agent.total_tokens;
               session::write_meta(&agent.meta)?;
               session::persist_session(&agent.messages, &agent.meta.session_id)?;
-              if let Some(workflow_state) = &agent.workflow_state {
-                session::write_workflow_state(&agent.meta.session_id, workflow_state)?;
-              }
             }
 
             let mut new_messages = crate::prompts::build_messages("");
@@ -364,14 +357,10 @@ impl SteerState {
             agent.compact.compacting = false;
             agent.compact.urgency = 0;
             agent.completion_summary = None;
-            agent.complete_open_work_warned = false;
 
             if !agent.meta.flags.temp {
               session::write_meta(&agent.meta)?;
               session::persist_session(&agent.messages, &agent.meta.session_id)?;
-              if let Some(workflow_state) = &agent.workflow_state {
-                session::write_workflow_state(&agent.meta.session_id, workflow_state)?;
-              }
             }
 
             tui.log.clear();
@@ -453,10 +442,9 @@ pub struct Agent {
   pub total_tokens: u64,
   pub compact: CompactState,
   pub completion_summary: Option<String>,
-  pub task_tracker: Option<TaskTracker>,
-  pub workflow_state: Option<crate::workflow::WorkflowState>,
-  pub complete_open_work_warned: bool,
   pub meta: session::SessionMeta,
+  pub worker_parent_session_id: Option<String>,
+  pub worker_id: Option<String>,
   pub dirty: bool,
 
   pub pending_compact: CompactPending,
@@ -475,9 +463,9 @@ impl Agent {
     messages: Vec<Message>,
     tools: Vec<Tool>,
     compact: CompactState,
-    task_tracker: Option<TaskTracker>,
-    workflow_state: Option<crate::workflow::WorkflowState>,
     meta: session::SessionMeta,
+    worker_parent_session_id: Option<String>,
+    worker_id: Option<String>,
   ) -> Self {
     Self {
       client,
@@ -487,10 +475,9 @@ impl Agent {
       total_tokens: 0,
       compact,
       completion_summary: None,
-      task_tracker,
-      workflow_state,
-      complete_open_work_warned: false,
       meta,
+      worker_parent_session_id,
+      worker_id,
       dirty: false,
 
       pending_compact: CompactPending::None,
@@ -504,38 +491,22 @@ impl Agent {
 
   pub fn persist_if_dirty(&mut self) -> anyhow::Result<()> {
     if self.dirty && !self.meta.flags.temp {
-      self.meta.usage.total_tokens = self.total_tokens;
-      session::write_meta(&self.meta)?;
-      session::persist_session(&self.messages, &self.meta.session_id)?;
-      if let Some(workflow_state) = &self.workflow_state {
-        session::write_workflow_state(&self.meta.session_id, workflow_state)?;
+      if let (Some(parent_session_id), Some(worker_id)) = (
+        self.worker_parent_session_id.as_deref(),
+        self.worker_id.as_deref(),
+      ) {
+        session::persist_worker_session(&self.messages, parent_session_id, worker_id)?;
+      } else {
+        self.meta.usage.total_tokens = self.total_tokens;
+        session::write_meta(&self.meta)?;
+        session::persist_session(&self.messages, &self.meta.session_id)?;
       }
     }
     Ok(())
   }
 
-  fn refresh_workflow_reminder(&mut self) {
-    const WORKFLOW_MARKER: &str = "\n\n[Workflow]";
-    if let Some(ref ws) = self.workflow_state {
-      let reminder = ws.reminder_text();
-      if let Some(first) = self.messages.first_mut()
-        && first.role == "system"
-      {
-        if let Some(idx) = first.content.find(WORKFLOW_MARKER) {
-          first.content.truncate(idx);
-        }
-        std::fmt::Write::write_fmt(
-          &mut first.content,
-          format_args!("{WORKFLOW_MARKER}\n{reminder}"),
-        )
-        .unwrap();
-      }
-    }
-  }
-
   pub async fn run_loop(&mut self) -> Result<Vec<Message>, AgentError> {
     loop {
-      self.refresh_workflow_reminder();
       let resp = self
         .client
         .chat(&self.messages, &self.tools, None, None)
@@ -572,23 +543,22 @@ impl Agent {
   async fn finish_turn(
     &mut self,
     has_more: &mut bool,
-    ui_log: Option<&crate::tui::UiLog>,
+    _ui_log: Option<&crate::tui::UiLog>,
   ) -> Result<bool, AgentError> {
     if self.completion_summary.is_some() {
       return Ok(true);
     }
-    if let Some(msg) = self.worker_manager.status_message().await {
-      if let Some(log) = ui_log {
-        self.push_msg(internal_user_msg(msg.clone()));
-        log.push(format!("[workers] {}", truncate(&msg, 200)));
-      } else {
-        self.push_msg(internal_user_msg(msg));
+    if !self.meta.flags.worker
+      && let Some(status) = read_state_key(&self.meta.session_id, "status")?
+    {
+      let status = status.trim().to_ascii_lowercase();
+      if matches!(status.as_str(), "done" | "blocked" | "failed" | "partial") {
+        self.completion_summary = self.last_assistant_message().or(Some(status));
+        return Ok(true);
       }
-      *has_more = true;
     }
     if *has_more {
       self.check_compact();
-      self.push_task_tracking_reminder();
     }
     Ok(false)
   }
@@ -613,16 +583,9 @@ impl Agent {
       }
       SteerEvent::Complete => {
         self.meta.draft_input = None;
-        let has_assistant = self.messages.iter().any(|m| m.role == "assistant");
-        if has_assistant {
-          let content = MANUAL_COMPLETE_REMINDER.to_string();
-          self.push_msg(internal_user_msg(content));
-          tui.log.push("[steer] complete requested");
-        } else {
-          tui
-            .log
-            .push("[steer] nothing to complete; session is empty");
-        }
+        tui.log.push(
+          "[steer] /complete is deprecated; set `state` key `status` to done/blocked/failed/partial when ready to exit",
+        );
       }
       SteerEvent::New => {
         self.meta.draft_input = None;
@@ -630,9 +593,6 @@ impl Agent {
           self.meta.usage.total_tokens = self.total_tokens;
           session::write_meta(&self.meta)?;
           session::persist_session(&self.messages, &self.meta.session_id)?;
-          if let Some(workflow_state) = &self.workflow_state {
-            session::write_workflow_state(&self.meta.session_id, workflow_state)?;
-          }
         }
         let old_id = self.meta.session_id.clone();
         self.meta.session_id = session::generate_session_id();
@@ -645,16 +605,13 @@ impl Agent {
         crate::prompts::enrich_initial_messages(&mut messages);
         self.messages = messages;
         self.dirty = false;
-        self.workflow_state = None;
-        self.tools = crate::tools::configured_coder_tools(false);
+        self.tools = crate::tools::configured_director_tools();
         self.total_tokens = 0;
         self.worker_manager = WorkerManager::new();
         self.completion_summary = None;
-        self.complete_open_work_warned = false;
         self.compact.compacting = false;
         self.compact.urgency = 0;
         self.pending_compact = CompactPending::None;
-        self.task_tracker = None;
         tui.log.clear();
         tui.status.set_tokens(0);
         tui.log.push("[steer] new session started");
@@ -678,13 +635,6 @@ impl Agent {
              - ## Next steps\n\n\
              Be concise. Specific facts only. Omit anything that won't matter for continuing.",
           );
-          if let Some(tracker) = &self.task_tracker {
-            compact_msg.push_str(&format!(
-              "\n\n## Task Plan (include verbatim)\n\
-               Preserve the full task plan so set_goal/update_phase/update_todo can be resumed:\n{}",
-              serde_json::to_string_pretty(tracker).unwrap_or_default(),
-            ));
-          }
           if let Some(ref prompt) = task_prompt {
             compact_msg.push_str(&format!("\n\nFocus the new session on: {}", prompt));
           }
@@ -800,7 +750,7 @@ impl Agent {
         resp.content.clone(),
         resp.reasoning_content,
       ));
-      if ui_log.is_none() {
+      if ui_log.is_none() && !self.meta.flags.worker {
         print!("{}", resp.content);
         io::stdout().flush().map_err(anyhow::Error::from)?;
         self.report_tokens();
@@ -877,7 +827,6 @@ impl Agent {
     for (tc, r) in resp.tool_calls.iter().zip(results.iter()) {
       self.push_msg(tool_msg(r.output.clone(), tc.id.clone()));
     }
-    self.record_task_tracking_turn(&results);
     Ok(results)
   }
 
@@ -915,7 +864,7 @@ impl Agent {
         "Context budget at {pct}%.\nApproaching the limit. Finish only critical in-progress work.\nDo not delegate new work.\nWrite a checkpoint if it will preserve important state."
       ),
       _ => format!(
-        "Context budget at {pct}%.\nEXHAUSTED.\nDo not write more files, delegate, or start new work.\nCall `complete` IMMEDIATELY with a summary of completed files, current state, verification state, blockers, and next steps."
+        "Context budget at {pct}%.\nEXHAUSTED.\nDo not write more files, delegate, or start new work.\nSet terminal `state` key `status` to done/blocked/failed/partial and provide a final assistant summary."
       ),
     };
     self.push_msg(internal_user_msg(format!(
@@ -927,32 +876,28 @@ impl Agent {
     eprintln!("\n\ntokens: {}", self.total_tokens);
   }
 
-  fn record_task_tracking_turn(&mut self, results: &[ToolResult]) {
-    let Some(tracker) = self.task_tracker.as_mut() else {
-      return;
-    };
-    let mut saw_tracking_update = false;
-    let mut saw_meaningful_non_tracking = false;
-    for result in results {
-      if !result.success {
-        continue;
-      }
-      if is_tracking_tool_name(&result.name) {
-        saw_tracking_update = true;
-      } else {
-        saw_meaningful_non_tracking = true;
-      }
-    }
-    tracker.note_tool_turn(saw_tracking_update, saw_meaningful_non_tracking);
+  pub fn last_assistant_message(&self) -> Option<String> {
+    self
+      .messages
+      .iter()
+      .rev()
+      .find(|m| m.role == "assistant")
+      .map(|m| m.content.clone())
   }
+}
 
-  fn push_task_tracking_reminder(&mut self) {
-    if let Some(tracker) = self.task_tracker.as_mut()
-      && let Some(reminder) = tracker.take_reminder()
-    {
-      self.push_msg(internal_user_msg(reminder));
-    }
+fn read_state_key(session_id: &str, key: &str) -> Result<Option<String>, AgentError> {
+  let path = session::state_path(session_id);
+  if !path.exists() {
+    return Ok(None);
   }
+  let data = std::fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
+  if data.trim().is_empty() {
+    return Ok(None);
+  }
+  let map: BTreeMap<String, String> =
+    serde_json::from_str(&data).with_context(|| format!("parse {}", path.display()))?;
+  Ok(map.get(key).cloned())
 }
 
 fn human_user_msg(content: impl Into<String>) -> Message {
@@ -1076,18 +1021,7 @@ mod truncate_tests {
   }
 }
 
-const STEER_COMMANDS: &str =
-  "[steer] commands: /complete /cancel /new /compact [/compact <focus>] /q";
-
-const MANUAL_COMPLETE_REMINDER: &str = r#"Reminder: [manual_complete]
-The user requested completion from steer mode.
-
-Summarize the current session retrospectively and call `complete` with structured Markdown:
-- task summary
-- what changed / what you did
-- what you learned
-- what to do better next time
-- optional evidence: files touched, tests run, git head"#;
+const STEER_COMMANDS: &str = "[steer] commands: /cancel /new /compact [/compact <focus>] /q";
 
 #[cfg(test)]
 mod dirty_state_machine_tests {
@@ -1133,9 +1067,9 @@ mod dirty_state_machine_tests {
       crate::prompts::build_messages(""),
       Vec::new(),
       CompactState::disabled(),
-      None,
-      None,
       dummy_meta(),
+      None,
+      None,
     )
   }
 
@@ -1189,25 +1123,12 @@ mod dirty_state_machine_tests {
   }
 
   #[tokio::test]
-  async fn complete_on_empty_session_stays_clean() {
+  async fn complete_command_is_deprecated() {
     let mut agent = dummy_agent();
     let tui = crate::tui::TuiHandle::test_handle();
     let action = agent.apply_steer_event(SteerEvent::Complete, &tui).unwrap();
     assert!(matches!(action, SteerAction::Continue));
     assert!(!agent.dirty);
-    assert_eq!(agent.messages.len(), 1); // no extra message pushed
-  }
-
-  #[tokio::test]
-  async fn complete_with_assistant_makes_dirty() {
-    let mut agent = dummy_agent();
-    let tui = crate::tui::TuiHandle::test_handle();
-    agent.push_msg(assistant_msg_with_reasoning("ok", ""));
-    assert!(agent.dirty);
-    let action = agent.apply_steer_event(SteerEvent::Complete, &tui).unwrap();
-    assert!(matches!(action, SteerAction::Continue));
-    assert!(agent.dirty);
-    assert_eq!(agent.messages.len(), 3); // system + assistant + complete reminder
   }
 
   #[tokio::test]
@@ -1352,21 +1273,22 @@ mod dirty_state_machine_tests {
   }
 
   #[tokio::test]
-  async fn new_clears_task_tracker() {
+  async fn finish_turn_exits_on_exact_terminal_status() {
     let mut agent = dummy_agent();
-    let tui = crate::tui::TuiHandle::test_handle();
-    agent.task_tracker = Some(crate::task_tracker::TaskTracker::new(
-      crate::task_tracker::GoalState {
-        title: "test".into(),
-        status: crate::task_tracker::Status::InProgress,
-        complexity: crate::task_tracker::Complexity::Simple,
-        success_criteria: Vec::new(),
-        notes: String::new(),
-      },
-    ));
-    agent.push_msg(human_user_msg("hello"));
-    let action = agent.apply_steer_event(SteerEvent::New, &tui).unwrap();
-    assert!(matches!(action, SteerAction::Restart));
-    assert!(agent.task_tracker.is_none());
+    agent.push_msg(assistant_msg_with_reasoning("final output", ""));
+    let state_path = session::state_path(&agent.meta.session_id);
+    if let Some(parent) = state_path.parent() {
+      std::fs::create_dir_all(parent).unwrap();
+    }
+    std::fs::write(&state_path, r#"{"status":"done"}"#).unwrap();
+    let mut has_more = false;
+    let should_exit = agent.finish_turn(&mut has_more, None).await.unwrap();
+    assert!(should_exit);
+    assert_eq!(agent.completion_summary.as_deref(), Some("final output"));
+
+    std::fs::write(&state_path, r#"{"status":"done later"}"#).unwrap();
+    agent.completion_summary = None;
+    let should_not_exit = agent.finish_turn(&mut has_more, None).await.unwrap();
+    assert!(!should_not_exit);
   }
 }

@@ -1,72 +1,57 @@
 # Architecture
 
-`ogent` is a terminal-based autonomous coding agent. It turns natural language prompts into file reads, shell commands, code edits, and worker delegation. The core abstraction is an agent loop that processes assistant responses and executes tools; a main driver sets up state and dispatches to the appropriate loop.
+## Runtime Shape
 
-## Bird's Eye View
-
-The system has two layers: the agent loops and the main driver. The agent loops (`src/agent.rs`) implement turn logic, tool call dispatch, context-budget reminders, compaction, and child-session logic. The main driver (`src/main.rs`) parses CLI flags, loads profiles, sets up agent state, and starts the correct loop (`run_loop` or `steer_loop`). This split keeps agent logic contained and the entry point explicit.
-## Codemap
-
-Coarse-grained modules and their responsibilities:
-
-- `main.rs` — CLI entry point, profile selection, optional workflow loading, creator mode dispatch, session setup, loop selection.
-- `artifact_creator.rs` — One-shot skill/workflow generation via the selected profile, artifact validation, and local `.ogent` writes.
-- `agent.rs` — Standard and steer loops, turn handling, workflow reminders, compaction (in-session compaction to a new child session), and task tracker preservation.
-- `client.rs` — HTTP streaming client with SSE parsing and retry behavior with exponential backoff.
-- `providers.rs` — DeepSeek, Kimi, and Z/GLM request builders.
-- `profiles.rs` — Named model profiles.
-- `types.rs` — Domain types for messages, tools, responses, and tool calls.
-- `sse.rs` — SSE parser and streamed response accumulation.
-- `tools.rs` — Tool registry, conditional JSON schemas, and implementations.
-- `task_tracker.rs` — Runtime task tracker state, validation, reminders, and compact-brief serialization.
-- `workflow.rs` — Optional workflow schema, validation, persisted state, check evidence, and transition enforcement.
-- `workers.rs` — Worker subprocess execution and async worker manager.
-- `hashline.rs` — FNV-1a hash anchors and validated anchored edits.
-- `prompts.rs` — Prompt loading, skill discovery, and skill injection.
-- `session.rs` — Session persistence, child session snapshots, journal, and metadata.
-- `tui.rs` — Ratatui/Crossterm interactive TUI for steer mode.
-- `workspace.rs` — Workspace path validation and readable path rules.
-
-To find the implementation of a specific behavior, search for the named type or function (e.g., `run_loop`, `steer_loop`, `execute_tool`, `Client`, `WorkerManager`).
-
-## Data Flow
+`ogent` is Director-first.
 
 ```text
-User prompt / TUI message
-    |
-    v
 main.rs
-    |
-    v
-agent.rs
-    |
-    +--> client.rs -> providers.rs -> SSE stream -> sse.rs
-    |
-    +--> tools.rs
-    |
-    +--> workers.rs -> child ogent --worker
-    |
-    +--> session.rs -> .ogent/sessions
+  -> agent.rs
+    -> client.rs / providers.rs / sse.rs
+    -> tools.rs
+      -> workers.rs
+      -> session.rs
 ```
 
-User prompt or steer input enters through `main.rs`, which builds initial messages and creates an `Agent`. If `--create-skill` or `--create-workflow` is supplied, `main.rs` enters creator mode, calls `artifact_creator.rs`, writes one validated local artifact, and exits without creating a session. If `--workflow <name-or-path>` is supplied, `main.rs` loads and validates one active workflow before selecting the tool schema. Workflow names resolve to local `.ogent/workflows/`, global `~/.ogent/workflows/`, or built-in YAML files in `workflows/`; explicit file paths are also supported. `run_loop` or `steer_loop` calls `client.chat`, which streams an SSE response. Tool calls in the response are executed through `tools.rs`. Workers are spawned via `workers.rs` as child `ogent --worker` processes. Sessions and optional workflow state are persisted via `session.rs`.
+## Module Ownership
 
-## Invariants and Boundaries
+- `src/main.rs`
+  - CLI parsing, mode wiring, resume/fork, steer boot, skill creation mode.
+- `src/agent.rs`
+  - Turn loop, stream handling, tool-call execution, compaction, terminal status exit.
+- `src/tools.rs`
+  - Tool schemas and implementations.
+  - Director/worker toolset split.
+  - Director `bash` allowlist enforcement (`colgrep`/`rg`).
+- `src/workers.rs`
+  - Worker prompt resolution.
+  - Worker subprocess spawn (`--worker=<parent_session_id>`, `OGENT_WORKER_ID`).
+  - Batch dispatch and ordered result collation.
+- `src/session.rs`
+  - Session meta/messages persistence.
+  - Director/worker state and worker transcript paths.
+- `src/prompts.rs`
+  - Director prompt loading, factory prompt, builtin worker prompts, skill injection.
 
-- **Agent loop resilience**: `agent.rs` never performs I/O directly on the LLM stream; it delegates to `client.rs`. Individual tool failures are caught and returned as `ERROR: ...` strings to the model. They do not crash the agent loop.
-- **Read-only batching**: `tools.rs` batches contiguous read-only tool calls in parallel. A mutating tool or barrier flushes the batch serially.
-- **Workspace boundary**: `workspace.rs` validates all file paths before FS access. Tools cannot read or write outside the workspace or `~/.ogent`.
-- **Workflow is optional**: Workflow tools are included in the model tool schema only when a workflow is active. Sessions without `--workflow` do not pay schema/context cost and behave normally.
-- **Workflow authority**: When active, workflow state controls process transitions and completion gating. Task tracker phases are progress display; they do not drive workflow transitions.
-- **Workflow evidence**: Required workflow checks must pass or be waived before leaving a step. Command checks store command, exit code, output evidence, and timestamp.
-- **Creator validation**: Creator mode writes only after the model output parses and passes the skill or workflow validation contract. Existing artifacts are supplied to the model as context and then updated only after the replacement validates.
+## State Layout
 
-## Cross-cutting Concerns
+```txt
+.ogent/
+  sessions/
+    {session_id}/
+      meta.json
+      messages.jsonl
+      states.json
+      workers/
+        {worker_id}/
+          messages.jsonl
+          states.json
+```
 
-- **Error handling**: The agent loop is resilient — individual tool errors are caught and fed back to the model. Unhandled exceptions crash the process. The HTTP client retries transient errors with exponential backoff.
-- **Cancellation**: In-flight LLM requests can be cancelled via `CancellationToken` in steer mode. Partial SSE responses are preserved.
-- **Session persistence**: Every turn's state is saved to `.ogent/sessions/`. The journal appends completion summaries to `.ogent/journal.md`.
-- **Workflow persistence**: Active workflow state is saved to `.ogent/sessions/<id>/workflow-state.json` and reloaded on resume/fork. Compaction preserves the same workflow state in the child session.
-- **Task tracking**: Runtime-owned `Goal -> Phases -> Todos` hierarchy maintained through tool calls, not free-form prose. Phases may carry **validation contracts** (behavioral assertions that define "done" before implementation starts).
-- **Workflow and skills**: Skills are reusable capability instructions loaded with `load_skill`. Skills do not define or activate workflows; workflows are explicit session policies loaded with `--workflow`.
-- **Adversarial validation**: The `validator` worker template enforces behavioral verification. Validators are dispatched with a different model profile when possible and verify against contracts without seeing implementation reasoning. Structured handoffs (per-contract pass/fail with evidence) enable programmatic root cause diagnosis in corrective loops.
+## Invariants
+
+- Main agent is Director and does not receive direct file-edit tools.
+- Worker file edits are done via worker toolset (`write_file`, `edit_hash_anchors`).
+- `dispatch_workers` waits for the full batch and returns ordered `results`.
+- Worker subprocess state/transcript are scoped under parent session + worker ID.
+- Director loop exits only when state key `status` is exactly `done`, `blocked`, `failed`, or `partial`.
