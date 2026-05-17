@@ -36,6 +36,8 @@ Worker waiting:
 
 - `dispatch_workers` starts workers and returns worker IDs immediately.
 - `wait_workers` returns completed worker results as soon as any worker finishes, or reports still-running workers after a short wait.
+- Running worker reports include `progress`.
+  Workers are prompted to write concise phase updates to state key `progress/current`; `wait_workers` reports `Starting` until that key has a non-empty value.
 
 ## Prompts
 
@@ -55,6 +57,7 @@ Worker waiting:
   - `reviewer`
 
 Unknown role or `factory` role uses contractor-factory generation.
+All worker system prompts include the shared progress-reporting nudge, including factory-generated roles.
 
 ## State and Exit
 

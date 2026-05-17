@@ -31,6 +31,7 @@ ogent --worker=<parent_session_id> "<task prompt>"
 - Worker tools include editing tools (`write_file`, `read_hash_anchors`, `edit_hash_anchors`) plus read/web/bash/state tools.
 - `dispatch_workers` starts a worker batch and returns worker IDs immediately.
 - `wait_workers` returns completed worker results as soon as any worker finishes, or reports still-running workers after a short wait.
+- Running worker statuses include `progress`. Workers are prompted to write `progress/current` in their state; until they do, progress is `Starting`.
 - A run ends when the Director sends a final assistant message (no tool calls).
 
 ## Runtime Layout

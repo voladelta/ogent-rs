@@ -57,6 +57,7 @@ Rules:
 - `read`, `write`, `append` require non-empty `path`.
 - `write` and `append` require `content`.
 - `list` allows empty `path`; empty means list all keys.
+- Workers use state key `progress/current` for concise current-phase progress. `wait_workers` reads this key for running workers.
 - State storage:
   - Director: `.ogent/sessions/{session_id}/states.json`
   - Worker: `.ogent/sessions/{parent_session_id}/workers/{worker_id}/states.json`
@@ -79,6 +80,7 @@ Behavior:
 - Spawns the full batch.
 - Returns worker IDs immediately.
 - Does not wait for worker completion.
+- Each running worker status includes `progress`, initially `Starting`.
 - `completed` is usually empty; it contains only dispatch-time failures such as invalid worker arguments or prompt-resolution errors.
 - Call `wait_workers` to collect completed worker results.
 
@@ -94,7 +96,8 @@ Output shape:
       "index": 0,
       "role": "implementer",
       "worker_id": "worker-1",
-      "status": "running"
+      "status": "running",
+      "progress": "Starting"
     }
   ],
   "completed": [
@@ -124,6 +127,9 @@ Behavior:
 - Returns immediately if any unseen worker result is available.
 - Otherwise waits about 10 seconds.
 - If no worker finishes during that wait, returns the still-running workers.
+- Running worker statuses include `progress`.
+- `progress` is read from the worker state key `progress/current`.
+- If that key is missing, empty, unreadable, or malformed, `progress` is `Starting`.
 - Repeat until the workers needed for the Director decision have completed.
 
 Output shape:
@@ -148,7 +154,8 @@ Output shape:
       "index": 1,
       "role": "verifier",
       "worker_id": "worker-2",
-      "status": "running"
+      "status": "running",
+      "progress": "Reading subscription schemas"
     }
   ]
 }

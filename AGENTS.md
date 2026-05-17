@@ -61,6 +61,7 @@ CLI / TUI
 - Workspace edits happen through worker subprocesses.
 - `dispatch_workers` takes `{ workers: [{ role, task }] }`, starts workers, and returns worker IDs immediately.
 - `wait_workers` waits briefly, returns completed worker results as soon as any worker finishes, and reports still-running workers otherwise.
+- Running worker statuses include `progress`, read from each worker's `progress/current` state key. Workers are prompted to update that key during non-trivial work; missing or empty progress is reported as `Starting`.
 - A run ends when the Director sends a final assistant message (no tool calls).
 - Workers do not dispatch workers.
 - `load_skill` tool and startup skill injection stay enabled.
