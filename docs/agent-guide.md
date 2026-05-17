@@ -39,7 +39,7 @@ Worker waiting:
 
 ## Prompts
 
-- Main system prompt: `prompts/DIRECTOR_PROMPT.md`
+- Main system prompt: `prompts/SYSTEM_PROMPT.md`
 - Factory prompt: `prompts/CONTRACTOR_FACTORY.md`
 - Built-in worker roles:
   - `implementer`

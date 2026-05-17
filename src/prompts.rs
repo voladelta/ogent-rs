@@ -6,7 +6,6 @@ use std::path::PathBuf;
 use crate::types::{Message, MessageOrigin};
 
 pub const SYSTEM_PROMPT: &str = include_str!("../prompts/SYSTEM_PROMPT.md");
-pub const DIRECTOR_PROMPT: &str = include_str!("../prompts/DIRECTOR_PROMPT.md");
 pub const CONTRACTOR_FACTORY: &str = include_str!("../prompts/CONTRACTOR_FACTORY.md");
 pub const WORKER_PROMPT_IMPLEMENTER: &str = include_str!("../prompts/workers/implementer.md");
 pub const WORKER_PROMPT_VERIFIER: &str = include_str!("../prompts/workers/verifier.md");
@@ -49,9 +48,9 @@ pub fn skill_roots() -> Vec<PathBuf> {
 }
 
 fn system_prompt_paths() -> Vec<PathBuf> {
-  let mut paths = vec![PathBuf::from(".ogent/DIRECTOR_PROMPT.md")];
+  let mut paths = vec![PathBuf::from(".ogent/SYSTEM_PROMPT.md")];
   if let Some(home) = std::env::var_os("HOME") {
-    paths.push(PathBuf::from(home).join(".ogent/DIRECTOR_PROMPT.md"));
+    paths.push(PathBuf::from(home).join(".ogent/SYSTEM_PROMPT.md"));
   }
   paths
 }
@@ -65,12 +64,7 @@ fn load_system_prompt() -> String {
       }
     }
   }
-  let director = DIRECTOR_PROMPT.trim();
-  if director.is_empty() {
-    SYSTEM_PROMPT.trim().to_string()
-  } else {
-    director.to_string()
-  }
+  SYSTEM_PROMPT.trim().to_string()
 }
 
 pub fn load_skill_content(skill_name: &str) -> Result<(String, String, String)> {
