@@ -1,6 +1,6 @@
 # ogent Agent Guide
 
-`ogent` runs as a Director. The main agent plans, dispatches workers, tracks state, integrates results, and reports the outcome.
+`ogent` runs as a Director. The main agent plans, dispatches workers, tracks state, synthesizes evidence, integrates results, and reports the outcome.
 
 ## Operating Rules
 

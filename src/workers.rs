@@ -8,7 +8,38 @@ use std::sync::{Arc, OnceLock};
 use tokio::process::Command;
 use tokio::sync::{Mutex, Notify};
 
-const WORKER_PROGRESS_PROMPT_SUFFIX: &str = "## Progress Reporting\n\nWhen work may take more than one tool call or one reasoning step, write concise current progress before each meaningful phase using the `state` tool:\n- `action`: `write`\n- `path`: `progress/current`\n- `content`: short factual status\n\nUpdate this value when the phase changes. Keep it brief and factual. Skip this for trivial one-shot answers.";
+const WORKER_PROGRESS_PROMPT_SUFFIX: &str = r#"## Progress Reporting
+
+When work may take more than one tool call or one reasoning step, write concise current progress before each meaningful phase using the `state` tool:
+- `action`: `write`
+- `path`: `progress/current`
+- `content`: short factual status
+
+Update this value when the phase changes. Keep it brief and factual. Skip this for trivial one-shot answers.
+
+## Result Reporting
+
+If your task specifies an output format, that format overrides your role's default output format.
+
+When the Director asks for the standard worker result format, return:
+
+```txt
+Status: completed | blocked | partial
+
+Summary:
+
+Changed files:
+
+Evidence:
+
+Verification:
+
+Risks:
+
+Open questions:
+
+Next action: accept | revise | verify | block
+```"#;
 
 #[derive(Debug, Clone)]
 pub struct WorkerProcessArgs {

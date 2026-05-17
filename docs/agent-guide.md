@@ -11,6 +11,8 @@ The Director:
 - dispatches workers
 - writes/reads runtime state
 - integrates worker results
+- synthesizes already available evidence
+- discusses routing, tradeoffs, and decisions directly
 - exits on terminal state
 
 The Director does not directly edit workspace files.
@@ -39,6 +41,10 @@ Worker waiting:
 - Running worker reports include `progress`.
   Workers are prompted to write concise phase updates to state key `progress/current`; `wait_workers` reports `Starting` until that key has a non-empty value.
 
+Worker contracts are Markdown tasks with the smallest useful structure: task, scope, acceptance criteria, required evidence, verification, and output format. The contract output format overrides a worker role's default output format. The default output format is a concise worker result: status, summary, changed files, evidence, verification, risks, open questions, and next action.
+
+Dispatch workers in one batch only when their scopes are independent. Independent means they do not need the same evidence-gathering step in order to do useful work, unless duplicate independent analysis is intentional. If one worker needs another worker's output, wait, integrate that result, then dispatch the dependent worker.
+
 ## Prompts
 
 - Main system prompt: `prompts/SYSTEM_PROMPT.md`
@@ -62,6 +68,8 @@ All worker system prompts include the shared progress-reporting nudge, including
 ## State and Exit
 
 Director state lives in `.ogent/sessions/{session_id}/states.json`.
+
+For non-trivial runs, the Director may keep a compact `decision/current` packet with goal, assumptions, worker IDs, acceptance criteria, evidence, and next decision.
 
 A run ends when the Director sends a final assistant message (no tool calls).
 
