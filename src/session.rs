@@ -99,7 +99,7 @@ fn persist_messages(messages: &[Message], path: &PathBuf) -> Result<()> {
   let dir = path
     .parent()
     .context("messages path must have a parent directory")?;
-  fs::create_dir_all(&dir)?;
+  fs::create_dir_all(dir)?;
   let mut file = fs::File::create(path)?;
   for message in messages {
     serde_json::to_writer(&mut file, message)?;

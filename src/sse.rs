@@ -118,11 +118,10 @@ fn repair_tool_arguments_json(arguments: &str) -> String {
       '"' => in_string = true,
       '{' => stack.push('}'),
       '[' => stack.push(']'),
-      '}' | ']' => {
-        if stack.pop() != Some(ch) {
+      '}' | ']'
+        if stack.pop() != Some(ch) => {
           return arguments.to_string();
         }
-      }
       _ => {}
     }
   }
