@@ -48,7 +48,9 @@ Worker waiting:
   - `researcher`
   - `writer`
   - `critic`
-  - `designer`
+  - `visual_designer`
+  - `database_architect`
+  - `system_architect`
   - `summarizer`
   - `reviewer`
 

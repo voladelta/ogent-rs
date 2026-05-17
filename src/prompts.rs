@@ -14,7 +14,12 @@ pub const WORKER_PROMPT_DEBUGGER: &str = include_str!("../prompts/workers/debugg
 pub const WORKER_PROMPT_RESEARCHER: &str = include_str!("../prompts/workers/researcher.md");
 pub const WORKER_PROMPT_WRITER: &str = include_str!("../prompts/workers/writer.md");
 pub const WORKER_PROMPT_CRITIC: &str = include_str!("../prompts/workers/critic.md");
-pub const WORKER_PROMPT_DESIGNER: &str = include_str!("../prompts/workers/designer.md");
+pub const WORKER_PROMPT_VISUAL_DESIGNER: &str =
+  include_str!("../prompts/workers/visual_designer.md");
+pub const WORKER_PROMPT_DATABASE_ARCHITECT: &str =
+  include_str!("../prompts/workers/database_architect.md");
+pub const WORKER_PROMPT_SYSTEM_ARCHITECT: &str =
+  include_str!("../prompts/workers/system_architect.md");
 pub const WORKER_PROMPT_SUMMARIZER: &str = include_str!("../prompts/workers/summarizer.md");
 pub const WORKER_PROMPT_REVIEWER: &str = include_str!("../prompts/workers/reviewer.md");
 
@@ -26,7 +31,9 @@ pub fn get_builtin_worker_prompt(name: &str) -> Option<&'static str> {
     "researcher" => Some(WORKER_PROMPT_RESEARCHER),
     "writer" => Some(WORKER_PROMPT_WRITER),
     "critic" => Some(WORKER_PROMPT_CRITIC),
-    "designer" => Some(WORKER_PROMPT_DESIGNER),
+    "visual_designer" => Some(WORKER_PROMPT_VISUAL_DESIGNER),
+    "database_architect" => Some(WORKER_PROMPT_DATABASE_ARCHITECT),
+    "system_architect" => Some(WORKER_PROMPT_SYSTEM_ARCHITECT),
     "summarizer" => Some(WORKER_PROMPT_SUMMARIZER),
     "reviewer" => Some(WORKER_PROMPT_REVIEWER),
     _ => None,
