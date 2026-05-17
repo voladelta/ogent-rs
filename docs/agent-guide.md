@@ -6,7 +6,7 @@
 
 The Director:
 
-- reads context
+- maps and searches context
 - plans
 - dispatches workers
 - writes/reads runtime state
@@ -78,10 +78,16 @@ Worker-only edits:
 
 Shared:
 
-- read/web/search tools
 - `repo_map`
 - `load_skill`
 - `state`
+
+Worker-only context gathering:
+
+- `read_file`
+- `web_search`
+- `web_read`
+- `web_code_context`
 
 ## Compaction
 

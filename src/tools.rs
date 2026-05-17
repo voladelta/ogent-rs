@@ -79,34 +79,14 @@ pub fn configured_worker_tools() -> Vec<Tool> {
 fn build_director_tools() -> Vec<Tool> {
   vec![
     schema(
-      "read_file",
-      "Read a file from the local filesystem. Use start and end as 1-indexed line numbers; omit both for the full file.",
-      json!({"type":"object","properties":{"path":{"type":"string"},"start":{"type":"integer","description":"1-indexed start line (inclusive)"},"end":{"type":"integer","description":"1-indexed end line (inclusive)"}},"required":["path"],"additionalProperties":false}),
-    ),
-    schema(
       "bash",
-      "Execute a shell command in the workspace root and return stdout and stderr combined. Director mode only allows `colgrep` and `rg` executables. Default timeout is 120s if omitted or 0; max is 600s.",
+      "Execute one plain search command in the workspace root and return stdout/stderr. Director mode only allows `colgrep` or `rg`; it is not for reading files or shell scripting. Do not use cat/find/ls/head/pipes/redirection/fallbacks. Default timeout is 120s if omitted or 0; max is 600s.",
       json!({"type":"object","properties":{"command":{"type":"string"},"timeout_seconds":{"type":"integer","description":"Max seconds. Default: 120 if 0 or omitted. Max: 600."}},"required":["command"],"additionalProperties":false}),
     ),
     schema(
       "repo_map",
       "Display a tree map of the repository directory structure. path defaults to the workspace root; levels defaults to 3.",
       json!({"type":"object","properties":{"path":{"type":"string","description":"Directory path relative to workspace root. Default: \".\""},"levels":{"type":"integer","description":"Max depth to descend. Default: 3 if 0 or omitted."}},"additionalProperties":false}),
-    ),
-    schema(
-      "web_search",
-      "Search the web for relevant excerpts. Use type=auto for quick facts and deep-reasoning for complex or niche topics.",
-      json!({"type":"object","properties":{"query":{"type":"string"},"num_results":{"type":"integer"},"type":{"type":"string","enum":["auto","deep-reasoning"]}},"required":["query"],"additionalProperties":false}),
-    ),
-    schema(
-      "web_read",
-      "Read key excerpts from one or more URLs. Set mode=text for full text or highlights for key excerpts.",
-      json!({"type":"object","properties":{"urls":{"type":"array","items":{"type":"string"}},"mode":{"type":"string","enum":["text","highlights"],"description":"text for full page text, highlights for key excerpts. Default: highlights."}},"required":["urls"],"additionalProperties":false}),
-    ),
-    schema(
-      "web_code_context",
-      "Search real code for syntax, APIs, and patterns to avoid hallucinating implementation details. Not for general web search or URL reading.",
-      json!({"type":"object","properties":{"query":{"type":"string"}},"required":["query"],"additionalProperties":false}),
     ),
     schema(
       "load_skill",
@@ -358,28 +338,41 @@ fn check_bash_cds(command: &str) -> Result<()> {
 }
 
 fn check_director_bash_allowlist(command: &str) -> Result<()> {
-  let mut cmd = command.to_string();
-  for sep in ["&&", "||", "|", ";", "\n", "\r"] {
-    cmd = cmd.replace(sep, "\n");
+  for forbidden in ["&&", "||", "|", ";", "\n", "\r", ">", "<", "`", "$("] {
+    if command.contains(forbidden) {
+      bail!("director bash only allows a single plain `colgrep` or `rg` command");
+    }
   }
-  for line in cmd.split('\n') {
-    let line = line.trim();
-    if line.is_empty() || line.starts_with('#') {
-      continue;
-    }
-    let mut words = line.split_whitespace();
-    let mut first = words.next().unwrap_or_default();
-    while first.contains('=') && !first.contains('/') {
-      first = words.next().unwrap_or_default();
-      if first.is_empty() {
-        break;
+
+  let line = command.trim();
+  if line.is_empty() || line.starts_with('#') {
+    return Ok(());
+  }
+  let words: Vec<_> = line
+    .split_whitespace()
+    .map(|w| w.trim_matches(|c| c == '"' || c == '\''))
+    .collect();
+  let mut i = 0;
+  while i < words.len() && words[i].contains('=') && !words[i].contains('/') {
+    i += 1;
+  }
+  let Some(first) = words.get(i).copied() else {
+    return Ok(());
+  };
+  if first != "colgrep" && first != "rg" {
+    bail!("director bash only allows `colgrep` and `rg` executables");
+  }
+
+  if first == "rg" {
+    let lists_only = words
+      .iter()
+      .skip(i + 1)
+      .any(|w| *w == "-l" || *w == "--files-with-matches");
+    if !lists_only {
+      let pattern = words.iter().skip(i + 1).find(|w| !w.starts_with('-'));
+      if pattern.is_some_and(|p| matches!(*p, "" | "." | ".*" | "^" | "$")) {
+        bail!("director `rg` cannot be used to dump file contents");
       }
-    }
-    if first.is_empty() {
-      continue;
-    }
-    if first != "colgrep" && first != "rg" {
-      bail!("director bash only allows `colgrep` and `rg` executables");
     }
   }
   Ok(())
@@ -825,12 +818,16 @@ mod tests {
   fn configured_director_tools_includes_expected() {
     let tools = configured_director_tools();
     let names: Vec<_> = tools.iter().map(|t| t.function.name.as_str()).collect();
-    assert!(names.contains(&"read_file"));
     assert!(names.contains(&"repo_map"));
     assert!(names.contains(&"bash"));
     assert!(names.contains(&"state"));
     assert!(names.contains(&"dispatch_workers"));
     assert!(names.contains(&"wait_workers"));
+    assert!(names.contains(&"load_skill"));
+    assert!(!names.contains(&"read_file"));
+    assert!(!names.contains(&"web_search"));
+    assert!(!names.contains(&"web_read"));
+    assert!(!names.contains(&"web_code_context"));
     assert!(!names.contains(&"write_file"));
     assert!(!names.contains(&"edit_hash_anchors"));
   }
@@ -852,13 +849,15 @@ mod tests {
   fn check_director_bash_allowlist_accepts_rg_and_colgrep() {
     assert!(check_director_bash_allowlist("rg foo src").is_ok());
     assert!(check_director_bash_allowlist("colgrep \"search\" ./src").is_ok());
-    assert!(check_director_bash_allowlist("rg foo src && colgrep bar ./src").is_ok());
+    assert!(check_director_bash_allowlist("rg -l \"\" docs").is_ok());
   }
 
   #[test]
   fn check_director_bash_allowlist_rejects_other_execs() {
     assert!(check_director_bash_allowlist("ls -la").is_err());
     assert!(check_director_bash_allowlist("rg foo src | head -n 1").is_err());
+    assert!(check_director_bash_allowlist("rg foo src && colgrep bar ./src").is_err());
+    assert!(check_director_bash_allowlist("rg -n \".\" docs/index.md").is_err());
     assert!(check_director_bash_allowlist("python -c 'print(1)'").is_err());
   }
 

@@ -17,12 +17,8 @@
 
 ## Director Tools
 
-- `read_file`
 - `repo_map`
 - `bash` (allowlisted to `colgrep` and `rg`)
-- `web_search`
-- `web_read`
-- `web_code_context`
 - `load_skill`
 - `state`
 - `dispatch_workers`
