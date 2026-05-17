@@ -1,5 +1,7 @@
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::{Arc, OnceLock};
 
 use tokio::process::Command;
@@ -69,7 +71,11 @@ struct WorkerStatus {
 pub struct WorkerManager {
   inner: Mutex<Inner>,
   notify: Arc<Notify>,
+  runner: WorkerRunner,
 }
+
+type WorkerRunFuture = Pin<Box<dyn Future<Output = WorkerProcessResult> + Send>>;
+type WorkerRunner = Arc<dyn Fn(WorkerProcessArgs) -> WorkerRunFuture + Send + Sync>;
 
 struct Inner {
   next_id: usize,
@@ -94,6 +100,24 @@ impl WorkerManager {
         in_flight: Vec::new(),
       }),
       notify: Arc::new(Notify::new()),
+      runner: Arc::new(|args| Box::pin(run_worker_process(args))),
+    }
+  }
+
+  #[cfg(test)]
+  pub(crate) fn new_for_test<F, Fut>(runner: F) -> Self
+  where
+    F: Fn(WorkerProcessArgs) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = WorkerProcessResult> + Send + 'static,
+  {
+    Self {
+      inner: Mutex::new(Inner {
+        next_id: 0,
+        next_batch_id: 0,
+        in_flight: Vec::new(),
+      }),
+      notify: Arc::new(Notify::new()),
+      runner: Arc::new(move |args| Box::pin(runner(args))),
     }
   }
 
@@ -172,8 +196,9 @@ impl WorkerManager {
         worker_id: worker_id.clone(),
       };
       let notify = Arc::clone(&self.notify);
+      let runner = Arc::clone(&self.runner);
       let done = tokio::spawn(async move {
-        let result = run_worker_process(run_args).await;
+        let result = runner(run_args).await;
         notify.notify_waiters();
         result
       });

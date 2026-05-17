@@ -552,8 +552,8 @@ impl Agent {
         self.dirty = false;
         self.tools = crate::tools::configured_director_tools();
         self.total_tokens = 0;
-      self.worker_manager = WorkerManager::new();
-      self.compact.compacting = false;
+        self.worker_manager = WorkerManager::new();
+        self.compact.compacting = false;
         self.compact.urgency = 0;
         self.pending_compact = CompactPending::None;
         tui.log.clear();
@@ -1000,6 +1000,27 @@ mod dirty_state_machine_tests {
     )
   }
 
+  fn tool_response(id: &str, name: &str, arguments: &str) -> ChatResponse {
+    ChatResponse {
+      tool_calls: vec![ToolCall {
+        id: id.to_string(),
+        kind: "function".to_string(),
+        function: crate::types::FunctionCall {
+          name: name.to_string(),
+          arguments: arguments.to_string(),
+        },
+      }],
+      ..Default::default()
+    }
+  }
+
+  fn first_message_index(
+    messages: &[Message],
+    predicate: impl Fn(&Message) -> bool,
+  ) -> Option<usize> {
+    messages.iter().position(predicate)
+  }
+
   #[test]
   fn agent_starts_clean() {
     let agent = dummy_agent();
@@ -1145,6 +1166,81 @@ mod dirty_state_machine_tests {
     });
     assert!(agent.meta.end_ts.is_some());
     assert!(agent.dirty);
+  }
+
+  #[tokio::test]
+  async fn persisted_trace_keeps_failed_dispatch_then_valid_wait() {
+    let mut agent = dummy_agent();
+    agent.worker_manager = WorkerManager::new_for_test(|args| async move {
+      crate::workers::WorkerProcessResult {
+        output: format!("finished {}", args.worker_id),
+        err: None,
+      }
+    });
+
+    let bad_dispatch = tool_response(
+      "bad-dispatch",
+      "dispatch_workers",
+      r#"{"workers":[{"role":"implementer","task":"missing array close"}"#,
+    );
+    assert!(agent.handle_turn_response(bad_dispatch).await.unwrap());
+
+    let valid_dispatch = tool_response(
+      "valid-dispatch",
+      "dispatch_workers",
+      r#"{"workers":[{"role":"implementer","task":"complete quickly"}]}"#,
+    );
+    assert!(agent.handle_turn_response(valid_dispatch).await.unwrap());
+
+    let wait = tool_response("wait-workers", "wait_workers", "{}");
+    assert!(agent.handle_turn_response(wait).await.unwrap());
+
+    agent.persist_if_dirty().unwrap();
+    let messages = session::load_session(&agent.meta.session_id).unwrap();
+
+    let bad_dispatch_idx = first_message_index(&messages, |m| {
+      m.tool_calls
+        .iter()
+        .any(|tc| tc.id == "bad-dispatch" && tc.function.name == "dispatch_workers")
+    })
+    .unwrap();
+    let bad_error_idx = first_message_index(&messages, |m| {
+      m.role == "tool"
+        && m.tool_call_id == "bad-dispatch"
+        && m.content.contains("ERROR: bad dispatch_workers args")
+    })
+    .unwrap();
+    let valid_dispatch_idx = first_message_index(&messages, |m| {
+      m.tool_calls
+        .iter()
+        .any(|tc| tc.id == "valid-dispatch" && tc.function.name == "dispatch_workers")
+    })
+    .unwrap();
+    let dispatch_result_idx = first_message_index(&messages, |m| {
+      m.role == "tool"
+        && m.tool_call_id == "valid-dispatch"
+        && m.content.contains("Workers dispatched successfully")
+    })
+    .unwrap();
+    let wait_idx = first_message_index(&messages, |m| {
+      m.tool_calls
+        .iter()
+        .any(|tc| tc.id == "wait-workers" && tc.function.name == "wait_workers")
+    })
+    .unwrap();
+    let wait_result_idx = first_message_index(&messages, |m| {
+      m.role == "tool"
+        && m.tool_call_id == "wait-workers"
+        && m.content.contains("\"status\":\"completed\"")
+        && m.content.contains("finished worker-1")
+    })
+    .unwrap();
+
+    assert!(bad_dispatch_idx < bad_error_idx);
+    assert!(bad_error_idx < valid_dispatch_idx);
+    assert!(valid_dispatch_idx < dispatch_result_idx);
+    assert!(dispatch_result_idx < wait_idx);
+    assert!(wait_idx < wait_result_idx);
   }
 
   #[tokio::test]
