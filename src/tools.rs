@@ -113,7 +113,7 @@ fn build_director_tools() -> Vec<Tool> {
     ),
     schema(
       "dispatch_workers",
-      "Spawn a worker batch, wait for all workers, and return ordered results for each input worker.",
+      "Spawn a worker batch, wait for all workers, and return ordered results. Arguments must be exactly an object with one workers array. Example: {\"workers\":[{\"role\":\"implementer\",\"task\":\"# Task\\nEdit README.md only.\\n\\n# Required output\\nSummary and verification.\"}]}.",
       json!({"type":"object","properties":{"workers":{"type":"array","minItems":1,"items":{"type":"object","properties":{"role":{"type":"string"},"task":{"type":"string"}},"required":["role","task"],"additionalProperties":false}}},"required":["workers"],"additionalProperties":false}),
     ),
   ]
@@ -715,7 +715,13 @@ async fn dispatch_workers(agent: &mut Agent, args: &str) -> Result<String> {
   if agent.meta.flags.worker {
     bail!("worker mode cannot dispatch workers");
   }
-  let args: crate::workers::DispatchWorkersArgs = parse_args(args)?;
+  let args: crate::workers::DispatchWorkersArgs =
+    serde_json::from_str(args).with_context(|| {
+      "bad dispatch_workers args; expected exactly: \
+       {\"workers\":[{\"role\":\"implementer\",\"task\":\"# Task\\n...\"}]}. \
+       `workers` must be an array of objects, each with string `role` and string `task`; \
+       close the JSON with `]}` and do not include `sync`, `worker_ids`, or top-level `role`/`task`"
+    })?;
   agent
     .worker_manager
     .dispatch(args, &agent.meta.session_id)
@@ -891,5 +897,20 @@ mod tests {
     let result = execute_tool(ToolContext { agent: None }, "nonexistent_tool", "{}").await;
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("unknown tool"));
+  }
+
+  #[tokio::test]
+  async fn dispatch_workers_bad_json_explains_expected_shape() {
+    let mut agent = dummy_agent(None);
+    let err = dispatch_workers(
+      &mut agent,
+      r#"{"workers":[{"role":"implementer","task":"missing array close"}"#,
+    )
+    .await
+    .expect_err("malformed JSON should fail");
+    let msg = err.to_string();
+    assert!(msg.contains("bad dispatch_workers args"));
+    assert!(msg.contains("\"workers\""));
+    assert!(msg.contains("close the JSON"));
   }
 }

@@ -29,11 +29,13 @@ Return exactly two XML blocks:
 - Constraints
 - Forbidden moves
 - Evidence or reasoning required
-- Output format
+- Output format, without `<system_prompt>` or `<task_prompt>` wrappers
 - Expiry condition
 - Operating Kernel
 
 `<task_prompt>` must be the concrete user/task assignment for that contractor.
+
+The XML blocks are only for your response to the Director. The generated contractor must not be instructed to return `<system_prompt>` or `<task_prompt>` tags. Its output format must be task-specific plain Markdown, JSON, or another simple format requested by the hiring task.
 
 ## Operating Kernel (must appear verbatim in the system prompt)
 
