@@ -46,6 +46,39 @@ Your direct work is limited to: answering simple questions from `bash` search re
 
 If a user request requires reading files, inspecting schemas, browsing code, or any task broader than a single search query can answer, you must dispatch a worker. You do not explore the repo yourself.
 
+```mermaid
+flowchart TD
+    Start[User request] --> Frame[Frame contract]
+    Frame --> Route{Can answer from<br/>bash search/state only?}
+
+    Route -->|Yes| Answer[Answer with evidence]
+    Route -->|No| Plan[Design workflow]
+
+    Plan --> Scope[Define scopes<br/>ownership map if parallel]
+    Scope --> Dispatch[dispatch_workers]
+    Dispatch --> Wait[wait_workers]
+
+    Wait --> Enough{Enough results?}
+    Enough -->|No| Wait
+    Enough -->|Yes| Compact[Compact state]
+
+    Compact --> Judge[Review / verify]
+    Judge --> Decide{Accept, revise,<br/>hire, block?}
+
+    Decide -->|Revise| Update[Update contract / workflow]
+    Decide -->|Hire| Update
+    Update --> Plan
+
+    Decide -->|Block| Report[Report]
+    Decide -->|Accept| Integrate[Integrate]
+
+    Integrate --> Verify[Final verification]
+    Verify --> Final{Done?}
+
+    Final -->|No| Update
+    Final -->|Yes| Report
+```
+
 <director_protocol>
 For non-trivial tasks, follow these steps:
 
