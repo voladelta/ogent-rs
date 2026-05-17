@@ -55,6 +55,7 @@ Arguments:
 Rules:
 
 - `read`, `write`, `append` require non-empty `path`.
+- `write` and `append` require `content`.
 - `list` allows empty `path`; empty means list all keys.
 - State storage:
   - Director: `.ogent/sessions/{session_id}/states.json`

@@ -76,6 +76,29 @@ pub fn configured_worker_tools() -> Vec<Tool> {
   WORKER_TOOLS.get_or_init(build_worker_tools).clone()
 }
 
+fn state_schema_parameters() -> Value {
+  json!({
+    "type": "object",
+    "properties": {
+      "action": {"type": "string", "enum": ["read", "write", "append", "list"]},
+      "path": {"type": "string"},
+      "content": {"type": "string"}
+    },
+    "required": ["action"],
+    "allOf": [
+      {
+        "if": {"properties": {"action": {"const": "read"}}, "required": ["action"]},
+        "then": {"required": ["path"]}
+      },
+      {
+        "if": {"properties": {"action": {"enum": ["write", "append"]}}, "required": ["action"]},
+        "then": {"required": ["path", "content"]}
+      }
+    ],
+    "additionalProperties": false
+  })
+}
+
 fn build_director_tools() -> Vec<Tool> {
   vec![
     schema(
@@ -95,8 +118,8 @@ fn build_director_tools() -> Vec<Tool> {
     ),
     schema(
       "state",
-      "Read/write/list scoped runtime state in states.json. list accepts an empty path. read/write/append require a non-empty path.",
-      json!({"type":"object","properties":{"action":{"type":"string","enum":["read","write","append","list"]},"path":{"type":"string"},"content":{"type":"string"}},"required":["action"],"additionalProperties":false}),
+      "Read/write/list scoped runtime state in states.json. list accepts an empty path. read requires path. write/append require path and content.",
+      state_schema_parameters(),
     ),
     schema(
       "dispatch_workers",
@@ -165,8 +188,8 @@ fn build_worker_tools() -> Vec<Tool> {
     ),
     schema(
       "state",
-      "Read/write/list scoped runtime state in states.json. list accepts an empty path. read/write/append require a non-empty path.",
-      json!({"type":"object","properties":{"action":{"type":"string","enum":["read","write","append","list"]},"path":{"type":"string"},"content":{"type":"string"}},"required":["action"],"additionalProperties":false}),
+      "Read/write/list scoped runtime state in states.json. list accepts an empty path. read requires path. write/append require path and content.",
+      state_schema_parameters(),
     ),
   ]
 }
@@ -645,8 +668,7 @@ struct StateArgs {
   action: String,
   #[serde(default)]
   path: String,
-  #[serde(default)]
-  content: String,
+  content: Option<String>,
 }
 
 fn state(agent: &mut Agent, args: &str) -> Result<String> {
@@ -682,14 +704,20 @@ fn state(agent: &mut Agent, args: &str) -> Result<String> {
     }
     "write" => {
       require_nonempty(&args.path, "path")?;
-      map.insert(args.path, args.content);
+      let content = args
+        .content
+        .context("content is required for state write")?;
+      map.insert(args.path, content);
       write_state_map(&scope_path, &map)?;
       Ok("ok".to_string())
     }
     "append" => {
       require_nonempty(&args.path, "path")?;
+      let content = args
+        .content
+        .context("content is required for state append")?;
       let entry = map.entry(args.path).or_default();
-      entry.push_str(&args.content);
+      entry.push_str(&content);
       write_state_map(&scope_path, &map)?;
       Ok("ok".to_string())
     }
@@ -892,6 +920,17 @@ mod tests {
 
     let list = state(&mut agent, r#"{"action":"list","path":"foo"}"#).unwrap();
     assert!(list.contains(key));
+  }
+
+  #[test]
+  fn state_write_and_append_require_content() {
+    let mut agent = dummy_agent(None);
+
+    let write_err = state(&mut agent, r#"{"action":"write","path":"goal"}"#).unwrap_err();
+    assert!(write_err.to_string().contains("content is required"));
+
+    let append_err = state(&mut agent, r#"{"action":"append","path":"goal"}"#).unwrap_err();
+    assert!(append_err.to_string().contains("content is required"));
   }
 
   #[test]
