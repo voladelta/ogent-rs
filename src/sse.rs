@@ -87,9 +87,59 @@ impl AccToolCall {
       kind: self.kind,
       function: FunctionCall {
         name: self.name,
-        arguments: self.arguments,
+        arguments: repair_tool_arguments_json(&self.arguments),
       },
     }
+  }
+}
+
+fn repair_tool_arguments_json(arguments: &str) -> String {
+  if arguments.trim().is_empty() || serde_json::from_str::<serde_json::Value>(arguments).is_ok() {
+    return arguments.to_string();
+  }
+
+  let mut stack = Vec::new();
+  let mut in_string = false;
+  let mut escaped = false;
+
+  for ch in arguments.chars() {
+    if in_string {
+      if escaped {
+        escaped = false;
+      } else if ch == '\\' {
+        escaped = true;
+      } else if ch == '"' {
+        in_string = false;
+      }
+      continue;
+    }
+
+    match ch {
+      '"' => in_string = true,
+      '{' => stack.push('}'),
+      '[' => stack.push(']'),
+      '}' | ']' => {
+        if stack.pop() != Some(ch) {
+          return arguments.to_string();
+        }
+      }
+      _ => {}
+    }
+  }
+
+  if in_string || stack.is_empty() {
+    return arguments.to_string();
+  }
+
+  let mut repaired = arguments.to_string();
+  while let Some(ch) = stack.pop() {
+    repaired.push(ch);
+  }
+
+  if serde_json::from_str::<serde_json::Value>(&repaired).is_ok() {
+    repaired
+  } else {
+    arguments.to_string()
   }
 }
 
@@ -337,5 +387,45 @@ mod tests {
     assert_eq!(tc.kind, "function");
     assert_eq!(tc.function.name, "");
     assert_eq!(tc.function.arguments, "");
+  }
+
+  #[tokio::test]
+  async fn flush_tool_calls_repairs_missing_closing_delimiters() {
+    let mut resp = ChatResponse::default();
+    let mut acc = Vec::new();
+    let mut tc = false;
+    process_line(
+      r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"x","type":"function","function":{"name":"dispatch_workers","arguments":"{\"workers\":[{\"role\":\"implementer\",\"task\":\"fix it\"}"}}]}}]}"#,
+      &mut resp,
+      &mut acc,
+      &mut None,
+      &mut tc,
+    ).await;
+
+    flush_tool_calls(&mut acc, &mut resp);
+
+    let tc = resp.tool_calls.first().unwrap();
+    assert_eq!(
+      tc.function.arguments,
+      "{\"workers\":[{\"role\":\"implementer\",\"task\":\"fix it\"}]}"
+    );
+  }
+
+  #[test]
+  fn repair_tool_arguments_json_ignores_brackets_inside_strings() {
+    let repaired =
+      repair_tool_arguments_json(r#"{"command":"printf '] }'","items":[{"path":"src/sse.rs"}"#);
+
+    assert_eq!(
+      repaired,
+      r#"{"command":"printf '] }'","items":[{"path":"src/sse.rs"}]}"#
+    );
+  }
+
+  #[test]
+  fn repair_tool_arguments_json_leaves_mismatched_json_unchanged() {
+    let arguments = r#"{"items":[}]"#;
+
+    assert_eq!(repair_tool_arguments_json(arguments), arguments);
   }
 }
