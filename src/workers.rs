@@ -588,6 +588,45 @@ Some trailing text"#;
   }
 
   #[tokio::test]
+  async fn resolve_worker_prompts_uses_architecture_builtins() {
+    let (db_sys, db_task) = resolve_worker_prompts(
+      "database_architect",
+      "design seat-based subscriptions",
+      "## Context\n- subscription schemas",
+    )
+    .await
+    .unwrap();
+    assert!(db_sys.contains("Database Architect"));
+    assert!(db_sys.contains("schema shape and normalization tradeoffs"));
+    assert_eq!(db_task, "design seat-based subscriptions");
+
+    let (system_sys, system_task) = resolve_worker_prompts(
+      "system_architect",
+      "design seat assignment flow",
+      "## Context\n- existing subscription system",
+    )
+    .await
+    .unwrap();
+    assert!(system_sys.contains("System Architect"));
+    assert!(system_sys.contains("service, module, and API boundaries"));
+    assert_eq!(system_task, "design seat assignment flow");
+  }
+
+  #[tokio::test]
+  async fn resolve_worker_prompts_uses_visual_designer_builtin() {
+    let (sys, task) = resolve_worker_prompts(
+      "visual_designer",
+      "design subscription management UI",
+      "## Context\n- billing dashboard",
+    )
+    .await
+    .unwrap();
+    assert!(sys.contains("Visual Designer"));
+    assert!(sys.contains("visual style"));
+    assert_eq!(task, "design subscription management UI");
+  }
+
+  #[tokio::test]
   async fn dispatch_rejects_empty_worker_list() {
     let manager = WorkerManager::new();
     let err = manager
