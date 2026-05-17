@@ -5,8 +5,6 @@ use crate::tools::{ToolContext, execute_tool, is_read_only_tool};
 use crate::tui::{AgentState, SteerEvent, TuiHandle};
 use crate::types::{ChatResponse, Message, MessageOrigin, Tool, ToolCall};
 use crate::workers::WorkerManager;
-use anyhow::Context;
-use std::collections::BTreeMap;
 use std::io::{self, Write};
 
 #[derive(Debug, thiserror::Error)]
@@ -260,43 +258,7 @@ impl SteerState {
       }
 
       Self::FinishTurn { mut has_more } => {
-        if agent.completion_summary.is_some() {
-          tui
-            .log
-            .push("[steer] task complete; send a message to continue or /q to quit".to_string());
-          agent.completion_summary = None;
-
-          if agent.compact.compacting && agent.compact.threshold > 0.0 {
-            let ratio = agent.total_tokens as f64 / agent.compact.context_limit as f64;
-            if ratio >= agent.compact.threshold {
-              let compact_msg = String::from(
-                "Context budget exhausted. Produce a handoff brief now:\n\
-                 - ## Goal\n\
-                 - ## What was done\n\
-                 - ## Current state\n\
-                 - ## Relevant excerpts\n\
-                 - ## Next steps\n\n\
-                 Be concise. Specific facts only.",
-              );
-              agent.push_msg(internal_user_msg(compact_msg));
-              tui
-                .log
-                .push("[compact] autocompact triggered, requesting handoff brief...");
-              agent.pending_compact = CompactPending::NoFocus;
-              return Ok(Self::StartTurn);
-            }
-          }
-
-          return Ok(Self::Idle {
-            wait_for_input: true,
-          });
-        }
-
-        let should_exit = agent.finish_turn(&mut has_more, Some(&tui.log)).await?;
-
-        if should_exit {
-          return Ok(Self::Exit(agent.messages.clone()));
-        }
+        agent.finish_turn(&mut has_more, Some(&tui.log)).await?;
 
         let pending = std::mem::take(&mut agent.pending_compact);
         if !matches!(pending, CompactPending::None) {
@@ -356,7 +318,6 @@ impl SteerState {
 
             agent.compact.compacting = false;
             agent.compact.urgency = 0;
-            agent.completion_summary = None;
 
             if !agent.meta.flags.temp {
               session::write_meta(&agent.meta)?;
@@ -441,7 +402,6 @@ pub struct Agent {
   pub worker_manager: WorkerManager,
   pub total_tokens: u64,
   pub compact: CompactState,
-  pub completion_summary: Option<String>,
   pub meta: session::SessionMeta,
   pub worker_parent_session_id: Option<String>,
   pub worker_id: Option<String>,
@@ -474,7 +434,6 @@ impl Agent {
       worker_manager: WorkerManager::new(),
       total_tokens: 0,
       compact,
-      completion_summary: None,
       meta,
       worker_parent_session_id,
       worker_id,
@@ -513,9 +472,7 @@ impl Agent {
         .await?;
 
       let mut has_more = self.handle_turn_response(resp).await?;
-      if self.finish_turn(&mut has_more, None).await? {
-        return Ok(self.messages.clone());
-      }
+      self.finish_turn(&mut has_more, None).await?;
       if !has_more {
         return Ok(self.messages.clone());
       }
@@ -544,23 +501,11 @@ impl Agent {
     &mut self,
     has_more: &mut bool,
     _ui_log: Option<&crate::tui::UiLog>,
-  ) -> Result<bool, AgentError> {
-    if self.completion_summary.is_some() {
-      return Ok(true);
-    }
-    if !self.meta.flags.worker
-      && let Some(status) = read_state_key(&self.meta.session_id, "status")?
-    {
-      let status = status.trim().to_ascii_lowercase();
-      if matches!(status.as_str(), "done" | "blocked" | "failed" | "partial") {
-        self.completion_summary = self.last_assistant_message().or(Some(status));
-        return Ok(true);
-      }
-    }
+  ) -> Result<(), AgentError> {
     if *has_more {
       self.check_compact();
     }
-    Ok(false)
+    Ok(())
   }
 
   fn apply_steer_event(
@@ -607,9 +552,8 @@ impl Agent {
         self.dirty = false;
         self.tools = crate::tools::configured_director_tools();
         self.total_tokens = 0;
-        self.worker_manager = WorkerManager::new();
-        self.completion_summary = None;
-        self.compact.compacting = false;
+      self.worker_manager = WorkerManager::new();
+      self.compact.compacting = false;
         self.compact.urgency = 0;
         self.pending_compact = CompactPending::None;
         tui.log.clear();
@@ -815,9 +759,6 @@ impl Agent {
         output,
         success,
       });
-      if self.completion_summary.is_some() {
-        break;
-      }
     }
 
     if !read_only_batch.is_empty() {
@@ -884,20 +825,6 @@ impl Agent {
       .find(|m| m.role == "assistant")
       .map(|m| m.content.clone())
   }
-}
-
-fn read_state_key(session_id: &str, key: &str) -> Result<Option<String>, AgentError> {
-  let path = session::state_path(session_id);
-  if !path.exists() {
-    return Ok(None);
-  }
-  let data = std::fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
-  if data.trim().is_empty() {
-    return Ok(None);
-  }
-  let map: BTreeMap<String, String> =
-    serde_json::from_str(&data).with_context(|| format!("parse {}", path.display()))?;
-  Ok(map.get(key).cloned())
 }
 
 fn human_user_msg(content: impl Into<String>) -> Message {
@@ -1270,25 +1197,5 @@ mod dirty_state_machine_tests {
     assert!(matches!(agent.pending_compact, CompactPending::WithFocus(ref s) if s == "fix auth"));
     let last = agent.messages.last().unwrap();
     assert!(last.content.contains("fix auth"));
-  }
-
-  #[tokio::test]
-  async fn finish_turn_exits_on_exact_terminal_status() {
-    let mut agent = dummy_agent();
-    agent.push_msg(assistant_msg_with_reasoning("final output", ""));
-    let state_path = session::state_path(&agent.meta.session_id);
-    if let Some(parent) = state_path.parent() {
-      std::fs::create_dir_all(parent).unwrap();
-    }
-    std::fs::write(&state_path, r#"{"status":"done"}"#).unwrap();
-    let mut has_more = false;
-    let should_exit = agent.finish_turn(&mut has_more, None).await.unwrap();
-    assert!(should_exit);
-    assert_eq!(agent.completion_summary.as_deref(), Some("final output"));
-
-    std::fs::write(&state_path, r#"{"status":"done later"}"#).unwrap();
-    agent.completion_summary = None;
-    let should_not_exit = agent.finish_turn(&mut has_more, None).await.unwrap();
-    assert!(!should_not_exit);
   }
 }

@@ -12,7 +12,7 @@ Steer mode (`ogent --steer`) controls a Director session.
 | `/compact <focus>` | Compact with explicit focus |
 | `/q` | Exit TUI |
 
-`/complete` is deprecated. Finish by writing terminal `state.status` (`done`, `blocked`, `failed`, `partial`) and sending final assistant output.
+`/complete` is deprecated. Finish with a final assistant response.
 
 ## Notes
 

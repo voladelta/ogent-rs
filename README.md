@@ -1,8 +1,8 @@
 # ogent
 
-`ogent` is a Director-mode terminal agent.
+`ogent` is a Director-first terminal agent.
 
-The main agent does not edit workspace files directly. It plans work, manages state, dispatches workers, integrates results, and exits when a terminal status is written.
+The main process is the Director. It frames the task, inspects the repo, manages state, dispatches workers, integrates results, and reports the outcome. Workspace edits are done by worker subprocesses.
 
 ## Quick Start
 
@@ -29,11 +29,8 @@ ogent --worker=<parent_session_id> "<task prompt>"
 
 - Director tools include: `read_file`, `repo_map`, restricted `bash` (`colgrep`/`rg` only), web tools, `load_skill`, `state`, `dispatch_workers`.
 - Worker tools include editing tools (`write_file`, `read_hash_anchors`, `edit_hash_anchors`) plus read/web/bash/state tools.
-- Director exits only when state key `status` is exactly one of:
-  - `done`
-  - `blocked`
-  - `failed`
-  - `partial`
+- `dispatch_workers` runs a batch, waits for every worker in that batch, and returns ordered results.
+- A run ends when the Director sends a final assistant message (no tool calls).
 
 ## Runtime Layout
 
@@ -52,7 +49,7 @@ ogent --worker=<parent_session_id> "<task prompt>"
 
 ## Skill Creator
 
-`--create-skill` remains available:
+`--create-skill` is available:
 
 ```bash
 ogent --create-skill repo-audit "Review repositories for correctness and maintainability."

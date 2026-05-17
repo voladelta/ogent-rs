@@ -1,6 +1,6 @@
 # ogent Agent Guide
 
-`ogent` now runs as a Director by default. The main agent plans, dispatches workers, tracks state, and exits only when terminal status is written to state.
+`ogent` runs as a Director. The main agent plans, dispatches workers, tracks state, integrates results, and reports the outcome.
 
 ## Operating Rules
 
@@ -23,7 +23,7 @@ CLI / TUI
 ```
 
 - `src/main.rs`: CLI wiring, resume/fork, worker subprocess mode, steer mode, skill creation.
-- `src/agent.rs`: turn loop, streaming handling, tool dispatch integration, compaction, terminal status exit.
+- `src/agent.rs`: turn loop, streaming handling, tool dispatch integration, compaction.
 - `src/tools.rs`: Director/worker tool schemas and execution (`state`, `dispatch_workers`, read/write/web/bash/hashline).
 - `src/workers.rs`: worker batch dispatch, role prompt resolution, subprocess spawning.
 - `src/session.rs`: session/meta/messages persistence plus Director/worker state file paths.
@@ -60,7 +60,7 @@ CLI / TUI
 - Director `bash` allows only `colgrep` and `rg`.
 - Workspace edits happen through worker subprocesses.
 - `dispatch_workers` takes `{ workers: [{ role, task }] }`, waits for all, returns ordered results.
-- Terminal exit is driven by Director state key `status` exactly equal to `done`, `blocked`, `failed`, or `partial`.
+- A run ends when the Director sends a final assistant message (no tool calls).
 - Workers do not dispatch workers.
 - `load_skill` tool and startup skill injection stay enabled.
 

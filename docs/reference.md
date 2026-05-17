@@ -101,11 +101,4 @@ Output shape:
 
 ## Terminal Completion
 
-Director exits when state key `status` is exactly:
-
-- `done`
-- `blocked`
-- `failed`
-- `partial`
-
-The final user-facing output is the Director’s last assistant message.
+A run ends when the Director sends a final assistant message (no tool calls). The final user-facing output is the Director’s last assistant message.

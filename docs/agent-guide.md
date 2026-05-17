@@ -53,10 +53,7 @@ Unknown role or `factory` role uses contractor-factory generation.
 
 Director state lives in `.ogent/sessions/{session_id}/states.json`.
 
-After each turn, the agent checks key `status`.
-If `status` is exactly one of `done`, `blocked`, `failed`, `partial`, the Director loop exits.
-
-The final output shown to the user is the Director’s last assistant message.
+A run ends when the Director sends a final assistant message (no tool calls).
 
 ## Tool Split
 

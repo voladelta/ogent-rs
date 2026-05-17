@@ -38,7 +38,10 @@ Active-session compression remains part of ogent's existing compaction design an
   sessions/<session-id>/
     meta.json
     messages.jsonl
-    workflow-state.json
+    states.json
+    workers/<worker-id>/
+      messages.jsonl
+      states.json
   memory/
     memory.db
     traces.jsonl
@@ -250,17 +253,17 @@ Default flow:
 9. Extract outcome, artifacts, and atoms from the immutable snapshot.
 10. Insert episode, atoms, and FTS rows in one transaction.
 
-Active session if any condition is true:
+Active or incomplete session if any condition is true:
 
-- no successful `complete` or `worker_complete` tool result
+- no terminal Director result can be inferred from the final assistant message or `states.json` status
 - `meta.end_ts` is absent
 - source files change while ingestion reads them
 - session directory contains an implementation-created lock file
 
 Completion:
 
-- agent session complete: successful `complete` tool call and result
-- worker session complete: successful `worker_complete` tool call and result
+- Director session complete: final assistant output exists and the run ended normally, or `states.json` contains terminal `status`
+- worker session complete: worker subprocess exited successfully and produced output
 
 Outcome:
 
@@ -288,7 +291,7 @@ Atom kinds:
 - `verification`
 - `result`
 - `worker_report`
-- `workflow`
+- `director_state`
 
 Extraction rules:
 
@@ -300,7 +303,7 @@ Extraction rules:
 - `bash` -> `command`, `failure`, `verification`
 - non-zero command -> `failure`
 - later related pass after failure -> `fix` or `verification`
-- final `complete` summary -> `result`
+- final assistant output or terminal `status` -> `result`
 - visible worker summaries in parent transcript -> `worker_report`
 
 Do not infer a fix without failure, corrective action, and passing verification.
@@ -357,7 +360,7 @@ Memory is advisory. Verify current repo state before acting on it.
 
 ## Recall Tool
 
-Add `recall` to coder tools only. Exclude it from worker tools.
+Add `recall` to Director tools only. Exclude it from worker tools.
 
 ```json
 {
@@ -486,7 +489,7 @@ Rules:
 | `src/memory/recall.rs`   | Search, ranking, trace logging                           |
 | `src/memory/render.rs`   | Primer and recall rendering                              |
 | `src/memory/feedback.rs` | Feedback, activate, retire                               |
-| `src/tools.rs`           | Add coder-only `recall`; mark read-only                  |
+| `src/tools.rs`           | Add Director-only `recall`; mark read-only               |
 | `src/prompts.rs`         | Append startup primer to initial user context            |
 | `src/session.rs`         | Helpers for listing session dirs and raw paths           |
 

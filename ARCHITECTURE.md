@@ -2,7 +2,7 @@
 
 ## Runtime Shape
 
-`ogent` is Director-first.
+`ogent` is built around a Director/worker split.
 
 ```text
 main.rs
@@ -18,7 +18,7 @@ main.rs
 - `src/main.rs`
   - CLI parsing, mode wiring, resume/fork, steer boot, skill creation mode.
 - `src/agent.rs`
-  - Turn loop, stream handling, tool-call execution, compaction, terminal status exit.
+  - Turn loop, stream handling, tool-call execution, compaction.
 - `src/tools.rs`
   - Tool schemas and implementations.
   - Director/worker toolset split.
@@ -54,4 +54,4 @@ main.rs
 - Worker file edits are done via worker toolset (`write_file`, `edit_hash_anchors`).
 - `dispatch_workers` waits for the full batch and returns ordered `results`.
 - Worker subprocess state/transcript are scoped under parent session + worker ID.
-- Director loop exits only when state key `status` is exactly `done`, `blocked`, `failed`, or `partial`.
+- A run ends when the Director sends a final assistant message (no tool calls).

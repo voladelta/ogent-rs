@@ -244,8 +244,8 @@ async fn main() -> Result<()> {
     if let Some(last) = agent.last_assistant_message() {
       print!("{last}");
     }
-  } else if let Some(summary) = agent.completion_summary.as_deref() {
-    session::append_journal(&agent.meta.session_id, summary)?;
+  } else if let Some(last) = agent.last_assistant_message() {
+    session::append_journal(&agent.meta.session_id, &last)?;
   }
   if args.worker.is_none() && agent.dirty && !args.temp {
     io::stdout().flush()?;
