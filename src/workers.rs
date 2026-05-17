@@ -571,4 +571,33 @@ Some trailing text"#;
       .expect_err("empty list should fail");
     assert!(err.to_string().contains("at least one worker"));
   }
+
+  #[tokio::test]
+  async fn wait_returns_finished_workers() {
+    let manager = WorkerManager::new();
+    let done = tokio::spawn(async {
+      WorkerProcessResult {
+        output: "done".to_string(),
+        err: None,
+      }
+    });
+    tokio::task::yield_now().await;
+    manager.inner.lock().await.in_flight.push(InFlightWorker {
+      batch_id: "batch-1".to_string(),
+      index: 0,
+      role: "implementer".to_string(),
+      worker_id: "worker-1".to_string(),
+      done,
+    });
+
+    let out = manager
+      .wait_with_timeout(std::time::Duration::from_secs(30))
+      .await
+      .unwrap();
+
+    assert!(out.contains("\"worker_id\":\"worker-1\""));
+    assert!(out.contains("\"status\":\"completed\""));
+    assert!(out.contains("\"output\":\"done\""));
+    assert!(out.contains("\"running\":[]"));
+  }
 }
