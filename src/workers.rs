@@ -1,11 +1,14 @@
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, OnceLock};
 
 use tokio::process::Command;
 use tokio::sync::{Mutex, Notify};
+
+const WORKER_PROGRESS_PROMPT_SUFFIX: &str = "## Progress Reporting\n\nWhen work may take more than one tool call or one reasoning step, write concise current progress before each meaningful phase using the `state` tool:\n- `action`: `write`\n- `path`: `progress/current`\n- `content`: short factual status\n\nUpdate this value when the phase changes. Keep it brief and factual. Skip this for trivial one-shot answers.";
 
 #[derive(Debug, Clone)]
 pub struct WorkerProcessArgs {
@@ -66,6 +69,7 @@ struct WorkerStatus {
   role: String,
   worker_id: String,
   status: String,
+  progress: String,
 }
 
 pub struct WorkerManager {
@@ -84,6 +88,7 @@ struct Inner {
 }
 
 struct InFlightWorker {
+  parent_session_id: String,
   batch_id: String,
   index: usize,
   role: String,
@@ -208,8 +213,10 @@ impl WorkerManager {
         role: role.clone(),
         worker_id: worker_id.clone(),
         status: "running".to_string(),
+        progress: default_worker_progress(),
       });
       let in_flight = InFlightWorker {
+        parent_session_id: parent_session_id.to_string(),
         batch_id: batch_id.clone(),
         index,
         role,
@@ -279,17 +286,51 @@ impl WorkerManager {
 
   async fn running_workers(&self) -> Vec<WorkerStatus> {
     let inner = self.inner.lock().await;
-    inner
+    let workers: Vec<_> = inner
       .in_flight
       .iter()
-      .map(|worker| WorkerStatus {
-        batch_id: worker.batch_id.clone(),
-        index: worker.index,
-        role: worker.role.clone(),
-        worker_id: worker.worker_id.clone(),
-        status: "running".to_string(),
+      .map(|worker| {
+        (
+          worker.parent_session_id.clone(),
+          worker.batch_id.clone(),
+          worker.index,
+          worker.role.clone(),
+          worker.worker_id.clone(),
+        )
       })
+      .collect();
+    drop(inner);
+
+    workers
+      .into_iter()
+      .map(
+        |(parent_session_id, batch_id, index, role, worker_id)| WorkerStatus {
+          progress: read_worker_progress(&parent_session_id, &worker_id)
+            .unwrap_or_else(default_worker_progress),
+          batch_id,
+          index,
+          role,
+          worker_id,
+          status: "running".to_string(),
+        },
+      )
       .collect()
+  }
+}
+
+fn default_worker_progress() -> String {
+  "Starting".to_string()
+}
+
+fn read_worker_progress(parent_session_id: &str, worker_id: &str) -> Option<String> {
+  let path = crate::session::worker_state_path(parent_session_id, worker_id);
+  let text = std::fs::read_to_string(path).ok()?;
+  let states: Value = serde_json::from_str(&text).ok()?;
+  let progress = states.get("progress/current")?.as_str()?.trim();
+  if progress.is_empty() {
+    None
+  } else {
+    Some(progress.to_string())
   }
 }
 
@@ -453,7 +494,8 @@ pub async fn resolve_worker_prompts(
 ) -> Result<(String, String)> {
   let requested_role = normalize_role(role);
   if let Some(builtin) = crate::prompts::get_builtin_worker_prompt(requested_role) {
-    let system_prompt = format!("{builtin}\n\n## Context\n\n{}", context.trim());
+    let context_section = format!("## Context\n\n{}", context.trim());
+    let system_prompt = compose_worker_system_prompt(builtin, Some(&context_section));
     return Ok((system_prompt, task.trim().to_string()));
   }
 
@@ -481,7 +523,22 @@ pub async fn resolve_worker_prompts(
     .chat_json(&messages, &[])
     .await
     .context("architect LLM call failed")?;
-  parse_architect_output(&resp.content)
+  let (system_prompt, task_prompt) = parse_architect_output(&resp.content)?;
+  Ok((
+    compose_worker_system_prompt(&system_prompt, None),
+    task_prompt,
+  ))
+}
+
+fn compose_worker_system_prompt(base_prompt: &str, extra_section: Option<&str>) -> String {
+  let mut sections = vec![base_prompt.trim().to_string()];
+  if let Some(extra) = extra_section
+    && !extra.trim().is_empty()
+  {
+    sections.push(extra.trim().to_string());
+  }
+  sections.push(WORKER_PROGRESS_PROMPT_SUFFIX.to_string());
+  sections.join("\n\n")
 }
 
 fn normalize_role(role: &str) -> &str {
@@ -518,6 +575,9 @@ fn extract_tag(text: &str, tag: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use serde_json::Value;
+  use std::future;
+  use std::path::PathBuf;
 
   #[test]
   fn parse_architect_output_extracts_tags() {
@@ -569,6 +629,8 @@ Some trailing text"#;
     assert!(sys.contains("judge whether work satisfies the contract"));
     assert!(sys.contains("## Context"));
     assert!(sys.contains("src/lib.rs"));
+    assert!(sys.contains("## Progress Reporting"));
+    assert!(sys.contains("`path`: `progress/current`"));
     assert_eq!(task, "review src/lib.rs");
   }
 
@@ -584,7 +646,17 @@ Some trailing text"#;
     assert!(sys.contains("produce the requested artifact or code change"));
     assert!(sys.contains("## Context"));
     assert!(sys.contains("src/lib.rs"));
+    assert!(sys.contains("## Progress Reporting"));
     assert_eq!(task, "edit src/lib.rs");
+  }
+
+  #[test]
+  fn compose_worker_system_prompt_adds_progress_nudge_for_custom_factory_path() {
+    let sys = compose_worker_system_prompt("Custom system prompt", None);
+    assert!(sys.contains("Custom system prompt"));
+    assert!(sys.contains("## Progress Reporting"));
+    assert!(sys.contains("`action`: `write`"));
+    assert!(sys.contains("`path`: `progress/current`"));
   }
 
   #[tokio::test]
@@ -647,6 +719,7 @@ Some trailing text"#;
     });
     tokio::task::yield_now().await;
     manager.inner.lock().await.in_flight.push(InFlightWorker {
+      parent_session_id: "parent-session".to_string(),
       batch_id: "batch-1".to_string(),
       index: 0,
       role: "implementer".to_string(),
@@ -663,5 +736,84 @@ Some trailing text"#;
     assert!(out.contains("\"status\":\"completed\""));
     assert!(out.contains("\"output\":\"done\""));
     assert!(out.contains("\"running\":[]"));
+  }
+
+  #[tokio::test]
+  async fn wait_reports_default_progress_for_running_worker_without_state() {
+    let parent_session_id = format!("test-progress-missing-{}", crate::session::timestamp_ms());
+    cleanup_session_dir(&parent_session_id);
+
+    let manager = WorkerManager::new();
+    let done = tokio::spawn(async { future::pending::<WorkerProcessResult>().await });
+    manager.inner.lock().await.in_flight.push(InFlightWorker {
+      parent_session_id: parent_session_id.clone(),
+      batch_id: parent_session_id.clone(),
+      index: 0,
+      role: "implementer".to_string(),
+      worker_id: "worker-1".to_string(),
+      done,
+    });
+
+    let out = manager
+      .wait_with_timeout(std::time::Duration::from_millis(20))
+      .await
+      .unwrap();
+    let json: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(json["running"][0]["progress"], "Starting");
+
+    abort_all_in_flight(&manager).await;
+    cleanup_session_dir(&parent_session_id);
+  }
+
+  #[tokio::test]
+  async fn wait_reports_progress_for_running_worker_with_progress_state() {
+    let parent_session_id = format!("test-progress-present-{}", crate::session::timestamp_ms());
+    let worker_id = "worker-1";
+    cleanup_session_dir(&parent_session_id);
+
+    let state_path = crate::session::worker_state_path(&parent_session_id, worker_id);
+    let worker_dir = state_path.parent().unwrap();
+    std::fs::create_dir_all(worker_dir).unwrap();
+    std::fs::write(
+      &state_path,
+      r#"{"progress/current":"  indexing files  ","other":"value"}"#,
+    )
+    .unwrap();
+
+    let manager = WorkerManager::new();
+    let done = tokio::spawn(async { future::pending::<WorkerProcessResult>().await });
+    manager.inner.lock().await.in_flight.push(InFlightWorker {
+      parent_session_id: parent_session_id.clone(),
+      batch_id: parent_session_id.clone(),
+      index: 0,
+      role: "implementer".to_string(),
+      worker_id: worker_id.to_string(),
+      done,
+    });
+
+    let out = manager
+      .wait_with_timeout(std::time::Duration::from_millis(20))
+      .await
+      .unwrap();
+    let json: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(
+      json["running"][0]["progress"],
+      Value::String("indexing files".into())
+    );
+
+    abort_all_in_flight(&manager).await;
+    cleanup_session_dir(&parent_session_id);
+  }
+
+  async fn abort_all_in_flight(manager: &WorkerManager) {
+    let mut inner = manager.inner.lock().await;
+    for worker in inner.in_flight.drain(..) {
+      worker.done.abort();
+    }
+  }
+
+  fn cleanup_session_dir(parent_session_id: &str) {
+    let path = PathBuf::from(".ogent/sessions").join(parent_session_id);
+    let _ = std::fs::remove_dir_all(path);
   }
 }
