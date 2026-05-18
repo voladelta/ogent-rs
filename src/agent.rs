@@ -711,7 +711,7 @@ impl Agent {
     if !resp.content.is_empty() && !streamed {
       if let Some(log) = ui_log {
         log.log_push_assistant_markdown(&resp.content);
-      } else {
+      } else if self.output_sink.is_none() {
         cli_log(
           &self.output_source(),
           format!("content: {}", truncate(&resp.content, 200)),
