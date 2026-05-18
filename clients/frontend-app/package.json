@@ -9,9 +9,12 @@
     "preview": "vite preview --host 127.0.0.1"
   },
   "dependencies": {
+    "@floating-ui/dom": "^1.7.6",
     "@sveltejs/vite-plugin-svelte": "^7.1.2",
-    "vite": "^8.0.13",
-    "svelte": "^5.55.7"
+    "dompurify": "^3.4.5",
+    "md4x": "^0.0.25",
+    "svelte": "^5.55.7",
+    "vite": "^8.0.13"
   },
   "devDependencies": {}
 }

@@ -1,17 +1,35 @@
 <script>
   import { compactText, displayStatus, setupEventFromForm } from './lib/protocol.js';
+  import MarkdownView from './lib/MarkdownView.svelte';
+  import Popover from './lib/Popover.svelte';
 
   const profileOptions = ['ds-flash', 'ds-flash-max', 'ds-pro', 'ds-pro-max', 'kimi', 'glm'];
+  const prismPalette = [
+    '#5F4690',
+    '#1D6996',
+    '#38A6A5',
+    '#0F8554',
+    '#73AF48',
+    '#EDAD08',
+    '#E17C05',
+    '#CC503E',
+    '#94346E',
+    '#6F4070',
+    '#994E95',
+    '#666666'
+  ];
   const storageKey = 'ogent.frontend-app.settings';
 
   let groups = $state([
-    { id: 'group-main', name: 'Main', color: 'teal' },
-    { id: 'group-research', name: 'Research', color: 'amber' },
-    { id: 'group-ship', name: 'Ship', color: 'green' }
+    { id: 'group-main', name: 'Main', color: prismPalette[0] },
+    { id: 'group-research', name: 'Research', color: prismPalette[2] },
+    { id: 'group-ship', name: 'Ship', color: prismPalette[5] }
   ]);
   let activeGroupId = $state('group-main');
   let panes = $state([]);
   let settingsOpen = $state(false);
+  let groupPopoverOpen = $state(false);
+  let groupDraft = $state({ name: '', color: prismPalette[3] });
   let setup = $state(loadSettings());
 
   let activeGroup = $derived(groups.find((group) => group.id === activeGroupId) ?? groups[0]);
@@ -46,17 +64,25 @@
     return `${prefix}-${Math.random().toString(36).slice(2, 9)}`;
   }
 
-  function addGroup() {
-    const name = window.prompt('Group name');
-    if (!name?.trim()) return;
-    const colors = ['teal', 'amber', 'green', 'rose', 'blue'];
+  function paneCount(groupId) {
+    return panes.filter((pane) => pane.groupId === groupId).length;
+  }
+
+  function createGroup(close) {
+    const name = groupDraft.name.trim();
+    if (!name) return;
     const group = {
       id: createId('group'),
-      name: name.trim(),
-      color: colors[groups.length % colors.length]
+      name,
+      color: groupDraft.color
     };
     groups.push(group);
     activeGroupId = group.id;
+    groupDraft = {
+      name: '',
+      color: prismPalette[groups.length % prismPalette.length]
+    };
+    close();
   }
 
   function createActivity(kind, source, label, body, options = {}) {
@@ -268,19 +294,87 @@
       {#each groups as group}
         <button
           class:active={group.id === activeGroupId}
-          class="group-tab color-{group.color}"
+          class="group-tab"
+          style={`--group-color: ${group.color}`}
           type="button"
           onclick={() => (activeGroupId = group.id)}
         >
-          {group.name}
+          <span>{group.name}</span>
+          <span class="group-count">{paneCount(group.id)}</span>
         </button>
       {/each}
-      <button class="group-tab add-group" type="button" onclick={addGroup} aria-label="Add group">+</button>
+      <Popover bind:open={groupPopoverOpen}>
+        {#snippet trigger({ open, toggle })}
+          <button
+            class="group-tab add-group"
+            type="button"
+            onclick={toggle}
+            aria-label="Add group"
+            aria-expanded={open}
+          >
+            +
+          </button>
+        {/snippet}
+
+        {#snippet children({ close })}
+          <form class="group-popover" onsubmit={(event) => { event.preventDefault(); createGroup(close); }}>
+            <div>
+              <p class="eyebrow">New group</p>
+              <h2>Create group</h2>
+            </div>
+            <label>
+              Group name
+              <input bind:value={groupDraft.name} placeholder="e.g. Launch work" />
+            </label>
+            <div class="palette-field">
+              <span>Color</span>
+              <div class="palette-grid" aria-label="Prism palette">
+                {#each prismPalette as color}
+                  <button
+                    class:selected={groupDraft.color === color}
+                    type="button"
+                    class="palette-swatch"
+                    style={`--swatch: ${color}`}
+                    aria-label={`Use ${color}`}
+                    onclick={() => (groupDraft.color = color)}
+                  ></button>
+                {/each}
+              </div>
+            </div>
+            <div class="popover-actions">
+              <button type="button" onclick={close}>Cancel</button>
+              <button class="primary" type="submit" disabled={!groupDraft.name.trim()}>Create</button>
+            </div>
+          </form>
+        {/snippet}
+      </Popover>
     </nav>
-    <button class="settings-button" type="button" onclick={() => (settingsOpen = !settingsOpen)}>Settings</button>
+    <Popover bind:open={settingsOpen} placement="bottom-end">
+      {#snippet trigger({ open, toggle })}
+        <button class="settings-button" type="button" onclick={toggle} aria-expanded={open}>Settings</button>
+      {/snippet}
+
+      {#snippet children({ close })}
+        <aside class="settings-popover" aria-label="Settings">
+          <div class="drawer-head">
+            <div>
+              <p class="eyebrow">Settings</p>
+              <h2>Defaults</h2>
+            </div>
+            <button type="button" onclick={close}>Close</button>
+          </div>
+          <p>Session setup defaults are stored locally in this browser.</p>
+          <dl>
+            <div><dt>Active group</dt><dd>{activeGroup?.name}</dd></div>
+            <div><dt>Default profile</dt><dd>{setup.profile}</dd></div>
+            <div><dt>WebSocket</dt><dd>{setup.wsUrl}</dd></div>
+          </dl>
+        </aside>
+      {/snippet}
+    </Popover>
   </header>
 
-  <main class="pane-rail" aria-label={`${activeGroup?.name || 'Active'} sessions`}>
+  <main class:has-sessions={activePanes.length > 0} class="pane-rail" aria-label={`${activeGroup?.name || 'Active'} sessions`}>
     {#each activePanes as pane (pane.id)}
       <section class="session-pane" aria-label={pane.title}>
         <div class="pane-head">
@@ -315,7 +409,11 @@
                   <span>{item.label}</span>
                   <span>{item.source}</span>
                 </div>
-                <div class="activity-body">{item.body}</div>
+                {#if item.label === 'Assistant'}
+                  <MarkdownView content={item.body} />
+                {:else}
+                  <div class="activity-body">{item.body}</div>
+                {/if}
               {/if}
             </article>
           {/each}
@@ -338,7 +436,7 @@
       </section>
     {/each}
 
-    <section class="setup-pane" aria-label="Setup new session">
+    <section class:primary-setup={activePanes.length === 0} class="setup-pane" aria-label="Setup new session">
       <div class="setup-head">
         <p class="eyebrow">Setup</p>
         <h2>Add session</h2>
@@ -356,7 +454,7 @@
         </label>
         <div class="form-grid">
           <label>
-            Mode
+            Session mode
             <select bind:value={setup.mode}>
               <option value="start">start</option>
               <option value="resume">resume</option>
@@ -381,33 +479,28 @@
         <div class="form-grid">
           <label>
             Autocompact
-            <input type="number" min="-1" max="100" bind:value={setup.autocompact} />
+            <span class="percent-input">
+              <input type="number" min="-1" max="100" bind:value={setup.autocompact} aria-label="Autocompact percent" />
+              <span aria-hidden="true">%</span>
+            </span>
           </label>
-          <label class="check-row">
-            <input type="checkbox" bind:checked={setup.temp} disabled={setup.mode !== 'start'} />
-            <span>Temporary</span>
-          </label>
+          <fieldset class="storage-field" disabled={setup.mode !== 'start'}>
+            <legend>Session storage</legend>
+            <div class="storage-options">
+              <label class:active={!setup.temp} class="storage-option">
+                <input type="radio" name="storage" checked={!setup.temp} onchange={() => (setup.temp = false)} />
+                <span>Saved</span>
+              </label>
+              <label class:active={setup.temp} class="storage-option">
+                <input type="radio" name="storage" checked={setup.temp} onchange={() => (setup.temp = true)} />
+                <span>Temporary</span>
+              </label>
+            </div>
+          </fieldset>
         </div>
         <button class="primary connect-button" type="submit">Connect</button>
       </form>
     </section>
   </main>
 
-  {#if settingsOpen}
-    <aside class="settings-drawer" aria-label="Settings">
-      <div class="drawer-head">
-        <div>
-          <p class="eyebrow">Settings</p>
-          <h2>Defaults</h2>
-        </div>
-        <button type="button" onclick={() => (settingsOpen = false)}>Close</button>
-      </div>
-      <p>Settings are intentionally small for now. Session setup defaults are stored locally in this browser.</p>
-      <dl>
-        <div><dt>Active group</dt><dd>{activeGroup?.name}</dd></div>
-        <div><dt>Default profile</dt><dd>{setup.profile}</dd></div>
-        <div><dt>WebSocket</dt><dd>{setup.wsUrl}</dd></div>
-      </dl>
-    </aside>
-  {/if}
 </div>
