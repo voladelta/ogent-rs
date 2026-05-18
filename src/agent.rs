@@ -1,10 +1,12 @@
 use crate::client::{Client, ClientError};
 use crate::session;
 use crate::sse::{SseError, StreamEvent};
+use crate::steer::SteerChannel;
 use crate::tools::{ToolContext, execute_tool, is_read_only_tool};
-use crate::tui::{AgentState, SteerEvent, TuiHandle};
+use crate::tui::{AgentState, SteerEvent};
 use crate::types::{ChatResponse, Message, MessageOrigin, Tool, ToolCall};
 use crate::workers::WorkerManager;
+use crate::workspace::Workspace;
 use std::io::{self, Write};
 
 #[derive(Debug, thiserror::Error)]
@@ -55,19 +57,19 @@ impl SteerState {
   async fn step(
     self,
     agent: &mut Agent,
-    tui: &mut TuiHandle,
+    steer: &mut impl SteerChannel,
     _ctx: &mut SteerCtx,
   ) -> Result<Self, AgentError> {
     match self {
       Self::Exit(msgs) => Ok(Self::Exit(msgs)),
 
       Self::Idle { wait_for_input } => {
-        tui.status.set_state(AgentState::Idle);
+        steer.set_state(AgentState::Idle);
         let wait_baseline_len = agent.messages.len();
         let mut wait = wait_for_input;
 
-        while let Ok(event) = tui.rx.try_recv() {
-          if let Some(next) = Self::process_idle_event(agent, tui, _ctx, event)? {
+        while let Ok(event) = steer.try_recv_event() {
+          if let Some(next) = Self::process_idle_event(agent, steer, _ctx, event)? {
             return Ok(next);
           }
           if agent.messages.len() > wait_baseline_len
@@ -79,10 +81,10 @@ impl SteerState {
 
         if wait {
           loop {
-            let Some(event) = tui.rx.recv().await else {
+            let Some(event) = steer.recv_event().await else {
               continue;
             };
-            if let Some(next) = Self::process_idle_event(agent, tui, _ctx, event)? {
+            if let Some(next) = Self::process_idle_event(agent, steer, _ctx, event)? {
               return Ok(next);
             }
             if agent.messages.len() > wait_baseline_len
@@ -97,7 +99,7 @@ impl SteerState {
       }
 
       Self::StartTurn => {
-        tui.status.set_tokens(agent.total_tokens);
+        steer.set_tokens(agent.total_tokens);
 
         let cancel = tokio_util::sync::CancellationToken::new();
         let cancel_clone = cancel.clone();
@@ -111,7 +113,7 @@ impl SteerState {
             .await
         });
 
-        tui.log.start_stream();
+        steer.log_start_stream();
 
         Ok(Self::InFlight {
           chat,
@@ -137,24 +139,24 @@ impl SteerState {
             Some(ev) = stream_rx.recv() => {
               match ev {
                 StreamEvent::Content(chunk) => {
-                  tui.log.append_stream_chunk(&chunk);
+                  steer.log_append_stream_chunk(&chunk);
                   if !tool_calling {
-                    tui.status.set_state(AgentState::Replying);
+                    steer.set_state(AgentState::Replying);
                   }
                 }
                 StreamEvent::Reasoning(chunk) => {
-                  tui.log.append_reasoning_chunk(&chunk);
+                  steer.log_append_reasoning_chunk(&chunk);
                   if !tool_calling {
-                    tui.status.set_state(AgentState::Reasoning);
+                    steer.set_state(AgentState::Reasoning);
                   }
                 }
                 StreamEvent::ToolCalling => {
                   tool_calling = true;
-                  tui.status.set_state(AgentState::Working);
+                  steer.set_state(AgentState::Working);
                 }
               }
             }
-            maybe_event = tui.rx.recv(), if !cancelled && steer_msg.is_none() => {
+            maybe_event = steer.recv_event(), if !cancelled && steer_msg.is_none() => {
               let Some(event) = maybe_event else { continue; };
               match event {
                 SteerEvent::Cancel => {
@@ -173,19 +175,19 @@ impl SteerState {
                 }
                 SteerEvent::New => {
                   cancel.cancel();
-                  agent.apply_steer_event(SteerEvent::New, tui)?;
+                  agent.apply_steer_event(SteerEvent::New, steer)?;
                   chat.abort();
-                  tui.log.push(STEER_COMMANDS.to_string());
+                  steer.log_push(STEER_COMMANDS.to_string());
                   return Ok(Self::Idle { wait_for_input: true });
                 }
                 SteerEvent::Exit(exit_msg) => {
-                  agent.apply_steer_event(SteerEvent::Exit(exit_msg), tui)?;
+                  agent.apply_steer_event(SteerEvent::Exit(exit_msg), steer)?;
                   cancel.cancel();
                   chat.abort();
                   return Ok(Self::Exit(agent.messages.clone()));
                 }
                 other => {
-                  match agent.apply_steer_event(other, tui)? {
+                  match agent.apply_steer_event(other, steer)? {
                     SteerAction::Exit => {
                       cancel.cancel();
                       chat.abort();
@@ -194,7 +196,7 @@ impl SteerState {
                     SteerAction::Restart => {
                       cancel.cancel();
                       chat.abort();
-                      tui.log.push(STEER_COMMANDS.to_string());
+                      steer.log_push(STEER_COMMANDS.to_string());
                       return Ok(Self::Idle { wait_for_input: true });
                     }
                     SteerAction::Continue => {}
@@ -207,8 +209,8 @@ impl SteerState {
 
         while let Ok(ev) = stream_rx.try_recv() {
           match ev {
-            StreamEvent::Content(chunk) => tui.log.append_stream_chunk(&chunk),
-            StreamEvent::Reasoning(chunk) => tui.log.append_reasoning_chunk(&chunk),
+            StreamEvent::Content(chunk) => steer.log_append_stream_chunk(&chunk),
+            StreamEvent::Reasoning(chunk) => steer.log_append_reasoning_chunk(&chunk),
             StreamEvent::ToolCalling => {}
           }
         }
@@ -235,7 +237,7 @@ impl SteerState {
             }
             if let Some(msg) = steer_msg {
               agent.push_msg(human_user_msg(msg.clone()));
-              tui.log.push(format!("[steer] {}", truncate(&msg, 200)));
+              steer.log_push(format!("[steer] {}", truncate(&msg, 200)));
               return Ok(Self::StartTurn);
             }
             return Ok(Self::Exit(agent.messages.clone()));
@@ -249,16 +251,16 @@ impl SteerState {
 
       Self::ProcessResult(resp) => {
         let has_more = agent
-          .handle_turn_response_with_log(resp, Some(&tui.log), true)
+          .handle_turn_response_with_log(resp, Some(steer), true)
           .await?;
-        tui.log.end_stream();
-        tui.status.set_state(AgentState::Idle);
-        tui.status.set_tokens(agent.total_tokens);
+        steer.log_end_stream();
+        steer.set_state(AgentState::Idle);
+        steer.set_tokens(agent.total_tokens);
         Ok(Self::FinishTurn { has_more })
       }
 
       Self::FinishTurn { mut has_more } => {
-        agent.finish_turn(&mut has_more, Some(&tui.log)).await?;
+        agent.finish_turn(&mut has_more).await?;
 
         let pending = std::mem::take(&mut agent.pending_compact);
         if !matches!(pending, CompactPending::None) {
@@ -276,16 +278,18 @@ impl SteerState {
             .unwrap_or_default();
 
           if handoff.is_empty() {
-            tui
-              .log
-              .push("[compact] model returned empty response, not compacting");
+            steer.log_push("[compact] model returned empty response, not compacting".to_string());
           } else {
             let parent_id = agent.meta.session_id.clone();
 
             if !agent.meta.flags.temp {
               agent.meta.usage.total_tokens = agent.total_tokens;
-              session::write_meta(&agent.meta)?;
-              session::persist_session(&agent.messages, &agent.meta.session_id)?;
+              session::write_meta_in(&agent.workspace, &agent.meta)?;
+              session::persist_session_in(
+                &agent.workspace,
+                &agent.messages,
+                &agent.meta.session_id,
+              )?;
             }
 
             let mut new_messages = crate::prompts::build_messages("");
@@ -320,16 +324,20 @@ impl SteerState {
             agent.compact.urgency = 0;
 
             if !agent.meta.flags.temp {
-              session::write_meta(&agent.meta)?;
-              session::persist_session(&agent.messages, &agent.meta.session_id)?;
+              session::write_meta_in(&agent.workspace, &agent.meta)?;
+              session::persist_session_in(
+                &agent.workspace,
+                &agent.messages,
+                &agent.meta.session_id,
+              )?;
             }
 
-            tui.log.clear();
-            tui.log.push(format!(
+            steer.log_clear();
+            steer.log_push(format!(
               "[compact] {} → {} (parent preserved)",
               parent_id, agent.meta.session_id
             ));
-            tui.status.set_tokens(0);
+            steer.set_tokens(0);
           }
 
           return Ok(Self::Idle {
@@ -350,14 +358,14 @@ impl SteerState {
 
   fn process_idle_event(
     agent: &mut Agent,
-    tui: &mut TuiHandle,
+    steer: &mut impl SteerChannel,
     _ctx: &mut SteerCtx,
     event: SteerEvent,
   ) -> Result<Option<Self>, AgentError> {
-    match agent.apply_steer_event(event, tui)? {
+    match agent.apply_steer_event(event, steer)? {
       SteerAction::Exit => Ok(Some(Self::Exit(agent.messages.clone()))),
       SteerAction::Restart => {
-        tui.log.push(STEER_COMMANDS.to_string());
+        steer.log_push(STEER_COMMANDS.to_string());
         Ok(Some(Self::Idle {
           wait_for_input: true,
         }))
@@ -396,6 +404,7 @@ impl CompactState {
 }
 
 pub struct Agent {
+  pub workspace: Workspace,
   pub client: Client,
   pub messages: Vec<Message>,
   pub tools: Vec<Tool>,
@@ -419,6 +428,7 @@ pub struct ToolResult {
 
 impl Agent {
   pub fn new(
+    workspace: Workspace,
     client: Client,
     messages: Vec<Message>,
     tools: Vec<Tool>,
@@ -428,10 +438,11 @@ impl Agent {
     worker_id: Option<String>,
   ) -> Self {
     Self {
+      workspace: workspace.clone(),
       client,
       messages,
       tools,
-      worker_manager: WorkerManager::new(),
+      worker_manager: WorkerManager::new(Some(&meta.session_id), workspace),
       total_tokens: 0,
       compact,
       meta,
@@ -454,11 +465,16 @@ impl Agent {
         self.worker_parent_session_id.as_deref(),
         self.worker_id.as_deref(),
       ) {
-        session::persist_worker_session(&self.messages, parent_session_id, worker_id)?;
+        session::persist_worker_session_in(
+          &self.workspace,
+          &self.messages,
+          parent_session_id,
+          worker_id,
+        )?;
       } else {
         self.meta.usage.total_tokens = self.total_tokens;
-        session::write_meta(&self.meta)?;
-        session::persist_session(&self.messages, &self.meta.session_id)?;
+        session::write_meta_in(&self.workspace, &self.meta)?;
+        session::persist_session_in(&self.workspace, &self.messages, &self.meta.session_id)?;
       }
     }
     Ok(())
@@ -472,7 +488,7 @@ impl Agent {
         .await?;
 
       let mut has_more = self.handle_turn_response(resp).await?;
-      self.finish_turn(&mut has_more, None).await?;
+      self.finish_turn(&mut has_more).await?;
       if !has_more {
         return Ok(self.messages.clone());
       }
@@ -481,27 +497,23 @@ impl Agent {
 
   pub async fn steer_loop(
     &mut self,
-    mut tui: TuiHandle,
+    mut steer: impl SteerChannel,
     wait_for_input: bool,
   ) -> Result<Vec<Message>, AgentError> {
-    self.replay_messages_to_steer_log(&tui.log);
-    tui.log.push(STEER_COMMANDS);
+    self.replay_messages_to_steer_log(&steer);
+    steer.log_push(STEER_COMMANDS.to_string());
     let mut state = SteerState::Idle { wait_for_input };
     let mut ctx = SteerCtx;
 
     loop {
-      state = match state.step(self, &mut tui, &mut ctx).await? {
+      state = match state.step(self, &mut steer, &mut ctx).await? {
         SteerState::Exit(msgs) => return Ok(msgs),
         next => next,
       };
     }
   }
 
-  async fn finish_turn(
-    &mut self,
-    has_more: &mut bool,
-    _ui_log: Option<&crate::tui::UiLog>,
-  ) -> Result<(), AgentError> {
+  async fn finish_turn(&mut self, has_more: &mut bool) -> Result<(), AgentError> {
     if *has_more {
       self.check_compact();
     }
@@ -511,7 +523,7 @@ impl Agent {
   fn apply_steer_event(
     &mut self,
     event: SteerEvent,
-    tui: &TuiHandle,
+    steer: &impl SteerChannel,
   ) -> Result<SteerAction, AgentError> {
     match event {
       SteerEvent::Message(content) => {
@@ -520,24 +532,24 @@ impl Agent {
           self.meta.start_ts = Some(session::timestamp_ms());
         }
         self.push_msg(human_user_msg(content.clone()));
-        tui.log.push(format!("[user] {}", truncate(&content, 200)));
+        steer.log_push(format!("[user] {}", truncate(&content, 200)));
       }
       SteerEvent::Cancel => {
         self.meta.draft_input = None;
-        tui.log.push("[steer] no in-flight request to cancel");
+        steer.log_push("[steer] no in-flight request to cancel".to_string());
       }
       SteerEvent::Complete => {
         self.meta.draft_input = None;
-        tui.log.push(
-          "[steer] /complete is deprecated; set `state` key `status` to done/blocked/failed/partial when ready to exit",
+        steer.log_push(
+          "[steer] /complete is deprecated; set `state` key `status` to done/blocked/failed/partial when ready to exit".to_string(),
         );
       }
       SteerEvent::New => {
         self.meta.draft_input = None;
         if self.dirty && !self.meta.flags.temp {
           self.meta.usage.total_tokens = self.total_tokens;
-          session::write_meta(&self.meta)?;
-          session::persist_session(&self.messages, &self.meta.session_id)?;
+          session::write_meta_in(&self.workspace, &self.meta)?;
+          session::persist_session_in(&self.workspace, &self.messages, &self.meta.session_id)?;
         }
         let old_id = self.meta.session_id.clone();
         self.meta.session_id = session::generate_session_id();
@@ -552,22 +564,21 @@ impl Agent {
         self.dirty = false;
         self.tools = crate::tools::configured_director_tools();
         self.total_tokens = 0;
-        self.worker_manager = WorkerManager::new();
+        self.worker_manager =
+          WorkerManager::new(Some(&self.meta.session_id), self.workspace.clone());
         self.compact.compacting = false;
         self.compact.urgency = 0;
         self.pending_compact = CompactPending::None;
-        tui.log.clear();
-        tui.status.set_tokens(0);
-        tui.log.push("[steer] new session started");
+        steer.log_clear();
+        steer.set_tokens(0);
+        steer.log_push("[steer] new session started".to_string());
         return Ok(SteerAction::Restart);
       }
       SteerEvent::Compact(task_prompt) => {
         self.meta.draft_input = None;
         let has_assistant = self.messages.iter().any(|m| m.role == "assistant");
         if !has_assistant {
-          tui
-            .log
-            .push("[steer] nothing to compact; no assistant response yet");
+          steer.log_push("[steer] nothing to compact; no assistant response yet".to_string());
         } else {
           let mut compact_msg = String::from(
             "Produce a handoff brief for continuing this work in a fresh context window.\n\n\
@@ -583,7 +594,7 @@ impl Agent {
             compact_msg.push_str(&format!("\n\nFocus the new session on: {}", prompt));
           }
           self.push_msg(internal_user_msg(compact_msg));
-          tui.log.push("[compact] requesting handoff brief...");
+          steer.log_push("[compact] requesting handoff brief...".to_string());
           self.pending_compact = match task_prompt {
             Some(p) => CompactPending::WithFocus(p),
             None => CompactPending::NoFocus,
@@ -596,14 +607,12 @@ impl Agent {
           self.client = crate::providers::new_client(p)?;
           self.meta.profile = name.clone();
           self.compact.context_limit = p.context_limit;
-          tui.status.set_profile(name, p.model.to_string());
-          tui
-            .log
-            .push(format!("[steer] profile → {}", self.meta.profile));
+          steer.set_profile(name, p.model.to_string());
+          steer.log_push(format!("[steer] profile → {}", self.meta.profile));
         }
         None => {
           self.meta.draft_input = None;
-          tui.log.push(format!("[steer] unknown profile: {name}"));
+          steer.log_push(format!("[steer] unknown profile: {name}"));
         }
       },
       SteerEvent::Exit(exit_msg) => {
@@ -625,26 +634,26 @@ impl Agent {
     Ok(SteerAction::Continue)
   }
 
-  fn replay_messages_to_steer_log(&self, log: &crate::tui::UiLog) {
+  fn replay_messages_to_steer_log(&self, steer: &impl SteerChannel) {
     for msg in &self.messages {
       match msg.role.as_str() {
         "system" => {}
         "user" if msg.origin != MessageOrigin::Internal => {
-          log.push(format!("[user] {}", truncate(&msg.content, 200)));
+          steer.log_push(format!("[user] {}", truncate(&msg.content, 200)));
         }
         "user" => {}
         "assistant" => {
           if !msg.reasoning_content.is_empty() {
-            log.push(format!(
+            steer.log_push(format!(
               "reasoning: {}",
               truncate(&msg.reasoning_content, 300)
             ));
           }
           if !msg.content.is_empty() {
-            log.push_assistant_markdown(&msg.content);
+            steer.log_push_assistant_markdown(&msg.content);
           }
           for tc in &msg.tool_calls {
-            log.push(format!(
+            steer.log_push(format!(
               "tool: {}({})",
               tc.function.name,
               truncate(&tc.function.arguments, 120)
@@ -652,7 +661,7 @@ impl Agent {
           }
         }
         "tool" => {
-          log.push(format!("tool_result: {}", truncate(&msg.content, 200)));
+          steer.log_push(format!("tool_result: {}", truncate(&msg.content, 200)));
         }
         _ => {}
       }
@@ -660,20 +669,22 @@ impl Agent {
   }
 
   async fn handle_turn_response(&mut self, resp: ChatResponse) -> Result<bool, AgentError> {
-    self.handle_turn_response_with_log(resp, None, false).await
+    self
+      .handle_turn_response_with_log::<crate::tui::TuiHandle>(resp, None, false)
+      .await
   }
 
-  async fn handle_turn_response_with_log(
+  async fn handle_turn_response_with_log<S: SteerChannel + ?Sized>(
     &mut self,
     resp: ChatResponse,
-    ui_log: Option<&crate::tui::UiLog>,
+    ui_log: Option<&S>,
     streamed: bool,
   ) -> Result<bool, AgentError> {
     self.meta.end_ts = Some(session::timestamp_ms());
     self.total_tokens = resp.usage.total_tokens as u64;
     if !resp.reasoning_content.is_empty() && !streamed {
       if let Some(log) = ui_log {
-        log.push(format!(
+        log.log_push(format!(
           "reasoning: {}",
           truncate(&resp.reasoning_content, 300)
         ));
@@ -683,7 +694,7 @@ impl Agent {
     }
     if !resp.content.is_empty() && !streamed {
       if let Some(log) = ui_log {
-        log.push_assistant_markdown(&resp.content);
+        log.log_push_assistant_markdown(&resp.content);
       } else {
         eprintln!("content: {}", truncate(&resp.content, 200));
       }
@@ -706,14 +717,14 @@ impl Agent {
     for r in results {
       let indicator = if r.success { "ok" } else { "failed" };
       if let Some(log) = ui_log {
-        log.push(format!(
+        log.log_push(format!(
           "tool: {}({}) -> {}",
           r.name,
           truncate(&r.args, 120),
           indicator
         ));
         if !r.success {
-          log.push(format!("  => {}", truncate(&r.output, 200)));
+          log.log_push(format!("  => {}", truncate(&r.output, 200)));
         }
       } else {
         eprintln!(
@@ -749,7 +760,7 @@ impl Agent {
         continue;
       }
       if !read_only_batch.is_empty() {
-        results.extend(run_read_only_batch(&read_only_batch).await?);
+        results.extend(run_read_only_batch(&self.workspace, &read_only_batch).await?);
         read_only_batch.clear();
       }
       let (output, success) = self.run_tool_call(tc).await;
@@ -762,7 +773,7 @@ impl Agent {
     }
 
     if !read_only_batch.is_empty() {
-      results.extend(run_read_only_batch(&read_only_batch).await?);
+      results.extend(run_read_only_batch(&self.workspace, &read_only_batch).await?);
     }
 
     for (tc, r) in resp.tool_calls.iter().zip(results.iter()) {
@@ -772,9 +783,13 @@ impl Agent {
   }
 
   async fn run_tool_call(&mut self, tc: &ToolCall) -> (String, bool) {
+    let workspace = self.workspace.clone();
     let (output, success) = format_tool_result(
       execute_tool(
-        ToolContext { agent: Some(self) },
+        ToolContext {
+          agent: Some(self),
+          workspace,
+        },
         &tc.function.name,
         &tc.function.arguments,
       )
@@ -890,11 +905,18 @@ fn format_tool_result(result: anyhow::Result<String>) -> (String, bool) {
   }
 }
 
-async fn run_read_only_batch(batch: &[&ToolCall]) -> Result<Vec<ToolResult>, AgentError> {
+async fn run_read_only_batch(
+  workspace: &Workspace,
+  batch: &[&ToolCall],
+) -> Result<Vec<ToolResult>, AgentError> {
+  let workspace = workspace.clone();
   let futs = batch.iter().map(|tc| async {
     let (output, success) = format_tool_result(
       execute_tool(
-        ToolContext { agent: None },
+        ToolContext {
+          agent: None,
+          workspace: workspace.clone(),
+        },
         &tc.function.name,
         &tc.function.arguments,
       )
@@ -990,6 +1012,7 @@ mod dirty_state_machine_tests {
 
   fn dummy_agent() -> Agent {
     Agent::new(
+      Workspace::from_current_dir(),
       dummy_client(),
       crate::prompts::build_messages(""),
       Vec::new(),

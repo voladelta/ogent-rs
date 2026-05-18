@@ -18,12 +18,16 @@ Main flow:
 CLI / TUI
   -> src/main.rs
   -> src/agent.rs
+  -> src/steer.rs
+  -> src/websocket.rs (serve mode)
   -> src/client.rs + src/providers.rs + src/sse.rs
   -> src/tools.rs + src/workers.rs + src/session.rs
 ```
 
-- `src/main.rs`: CLI wiring, resume/fork, worker subprocess mode, steer mode, skill creation.
-- `src/agent.rs`: turn loop, streaming handling, tool dispatch integration, compaction.
+- `src/main.rs`: CLI wiring, resume/fork, worker subprocess mode, steer mode, websocket serve mode, skill creation.
+- `src/agent.rs`: turn loop, streaming handling, tool dispatch integration, compaction, transport-neutral steer logic.
+- `src/steer.rs`: steer transport boundary and adapters.
+- `src/websocket.rs`: websocket server and per-connection Director runtime.
 - `src/tools.rs`: Director/worker tool schemas and execution (`state`, `dispatch_workers`, `wait_workers`, read/write/web/bash/hashline).
 - `src/workers.rs`: worker batch dispatch/waiting, role prompt resolution, subprocess spawning.
 - `src/session.rs`: session/meta/messages persistence plus Director/worker state file paths.
@@ -34,7 +38,8 @@ CLI / TUI
 | Request area | Start here | Also check |
 | --- | --- | --- |
 | CLI flags, resume/fork/temp/worker/create-skill | `src/main.rs` | `docs/reference.md`, `README.md` |
-| Director loop/exit rules/compaction | `src/agent.rs` | `docs/agent-guide.md`, `ARCHITECTURE.md` |
+| Director loop/exit rules/compaction | `src/agent.rs` | `src/steer.rs`, `docs/agent-guide.md`, `ARCHITECTURE.md` |
+| Websocket serve mode/protocol | `src/websocket.rs` | `src/main.rs`, `docs/reference.md` |
 | Tool schema/behavior | `src/tools.rs` | `src/workers.rs`, `docs/reference.md` |
 | Worker dispatch/wait/spawn/prompt resolution | `src/workers.rs` | `prompts/workers/*.md`, `docs/agent-guide.md` |
 | Session/state pathing | `src/session.rs` | `src/main.rs`, `src/tools.rs`, `docs/reference.md` |
@@ -57,6 +62,7 @@ CLI / TUI
 ## Key Invariants
 
 - Main agent is Director (no direct file-edit tools in Director toolset).
+- In websocket serve mode, one websocket connection owns one Director Agent.
 - Director `bash` allows only `colgrep` and `rg`.
 - Workspace edits happen through worker subprocesses.
 - `dispatch_workers` takes `{ workers: [{ role, task }] }`, starts workers, and returns worker IDs immediately.
@@ -65,6 +71,7 @@ CLI / TUI
 - A run ends when the Director sends a final assistant message (no tool calls).
 - Workers do not dispatch workers.
 - `load_skill` tool and startup skill injection stay enabled.
+- `--resume` acquires a per-session lock file; concurrent resume on the same session is rejected.
 
 ## Verification
 

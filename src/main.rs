@@ -7,9 +7,11 @@ mod prompts;
 mod providers;
 mod session;
 mod sse;
+mod steer;
 mod tools;
 mod tui;
 mod types;
+mod websocket;
 mod workers;
 mod workspace;
 
@@ -17,6 +19,7 @@ use anyhow::{Context, Result, bail};
 use clap::{CommandFactory, Parser};
 use std::env;
 use std::io::{self, Write};
+use std::path::PathBuf;
 
 use agent::{Agent, CompactState};
 use artifact_creator::ArtifactAction;
@@ -43,14 +46,36 @@ struct Args {
   temp: bool,
   #[arg(long, value_name = "NAME")]
   create_skill: Option<String>,
+  #[arg(long, value_name = "ADDR")]
+  serve: Option<String>,
   prompt: Vec<String>,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
   let args = parse_args();
+  let workspace = if let Some(root) = std::env::var_os("OGENT_WORKSPACE_ROOT") {
+    crate::workspace::Workspace::from_root(PathBuf::from(root))
+  } else {
+    crate::workspace::Workspace::from_current_dir()
+  };
   if args.resume.is_some() && args.fork.is_some() {
     bail!("use either resume or fork, not both");
+  }
+  if args.serve.is_some()
+    && (args.worker.is_some()
+      || args.steer
+      || args.resume.is_some()
+      || args.fork.is_some()
+      || args.create_skill.is_some())
+  {
+    bail!("--serve cannot be combined with --worker, --steer, --resume, --fork, or --create-skill");
+  }
+  if args.serve.is_some() && !args.prompt.is_empty() {
+    bail!("--serve does not accept a prompt; send messages over the websocket connection");
+  }
+  if let Some(addr) = args.serve.as_deref() {
+    return websocket::serve(addr, &args.profile, args.autocompact, args.temp).await;
   }
   let creator_mode = args.create_skill.is_some();
   if creator_mode {
@@ -104,6 +129,7 @@ async fn main() -> Result<()> {
     end_ts: None,
   };
   let mut old_session_id: Option<String> = None;
+  let mut session_lock: Option<session::SessionLock> = None;
 
   let is_resume = args.resume.is_some();
   let is_fork = args.fork.is_some();
@@ -112,72 +138,78 @@ async fn main() -> Result<()> {
 
   let mut worker_parent_session_id = None;
   let mut worker_id = None;
-  let (messages, tools): (Vec<Message>, Vec<crate::types::Tool>) = if let Some(parent_session_id) =
-    args.worker.as_deref()
-  {
-    let system_prompt = read_stdin().await?.trim().to_string();
-    if system_prompt.is_empty() {
-      bail!("--worker requires system prompt on stdin");
-    }
-    let wid = std::env::var("OGENT_WORKER_ID")
-      .context("--worker requires OGENT_WORKER_ID environment variable")?;
-    worker_parent_session_id = Some(parent_session_id.to_string());
-    worker_id = Some(wid);
-    (
-      build_worker_messages(&system_prompt, &prompt, parent_session_id),
-      tools::configured_worker_tools(),
-    )
-  } else if is_loaded_session {
-    let path = match args.resume.or(args.fork) {
-      Some(Some(name)) => name,
-      Some(None) => session::find_latest_session(".ogent/sessions").context("no session found")?,
-      None => unreachable!(),
-    };
-    old_session_id = Some(
-      path
-        .strip_prefix(".ogent/sessions/")
-        .and_then(|p| p.strip_suffix(".jsonl"))
-        .unwrap_or(&path)
-        .to_string(),
-    );
-    let load_action = if is_fork { "fork" } else { "resume" };
-    eprintln!("[{load_action}] loading {path}");
-    let mut loaded = session::load_session(&path)?;
-    loaded.retain(|m| {
-      !(m.role == "user"
-        && m.content.is_empty()
-        && m.reasoning_content.is_empty()
-        && m.tool_calls.is_empty()
-        && m.tool_call_id.is_empty())
-    });
-    if is_resume {
-      meta.session_id = old_session_id.clone().expect("loaded session id");
-    }
-    if !prompt.is_empty() {
-      loaded.push(Message {
-        role: "user".into(),
-        content: prompt.clone(),
-        origin: MessageOrigin::Human,
-        ..Default::default()
+  let (messages, tools): (Vec<Message>, Vec<crate::types::Tool>) =
+    if let Some(parent_session_id) = args.worker.as_deref() {
+      let system_prompt = read_stdin().await?.trim().to_string();
+      if system_prompt.is_empty() {
+        bail!("--worker requires system prompt on stdin");
+      }
+      let wid = std::env::var("OGENT_WORKER_ID")
+        .context("--worker requires OGENT_WORKER_ID environment variable")?;
+      worker_parent_session_id = Some(parent_session_id.to_string());
+      worker_id = Some(wid);
+      (
+        build_worker_messages(&system_prompt, &prompt, parent_session_id),
+        tools::configured_worker_tools(),
+      )
+    } else if is_loaded_session {
+      let path = match args.resume.or(args.fork) {
+        Some(Some(name)) => name,
+        Some(None) => {
+          session::find_latest_session(&workspace.root().join(".ogent/sessions").to_string_lossy())
+            .context("no session found")?
+        }
+        None => unreachable!(),
+      };
+      old_session_id = Some(
+        path
+          .strip_prefix(".ogent/sessions/")
+          .and_then(|p| p.strip_suffix(".jsonl"))
+          .unwrap_or(&path)
+          .to_string(),
+      );
+      let load_action = if is_fork { "fork" } else { "resume" };
+      eprintln!("[{load_action}] loading {path}");
+      let mut loaded = session::load_session_in(&workspace, &path)?;
+      loaded.retain(|m| {
+        !(m.role == "user"
+          && m.content.is_empty()
+          && m.reasoning_content.is_empty()
+          && m.tool_calls.is_empty()
+          && m.tool_call_id.is_empty())
       });
-    }
-    (loaded, tools::configured_director_tools())
-  } else {
-    if prompt.is_empty() && !args.steer {
-      let mut cmd = Args::command();
-      cmd.print_help()?;
-      println!();
-      return Ok(());
-    }
-    let mut messages = prompts::build_messages(&prompt);
-    prompts::enrich_initial_messages(&mut messages);
-    (messages, tools::configured_director_tools())
-  };
+      if is_resume {
+        meta.session_id = old_session_id.clone().expect("loaded session id");
+        session_lock = Some(session::try_acquire_session_lock_in(
+          &workspace,
+          &meta.session_id,
+        )?);
+      }
+      if !prompt.is_empty() {
+        loaded.push(Message {
+          role: "user".into(),
+          content: prompt.clone(),
+          origin: MessageOrigin::Human,
+          ..Default::default()
+        });
+      }
+      (loaded, tools::configured_director_tools())
+    } else {
+      if prompt.is_empty() && !args.steer {
+        let mut cmd = Args::command();
+        cmd.print_help()?;
+        println!();
+        return Ok(());
+      }
+      let mut messages = prompts::build_messages(&prompt);
+      prompts::enrich_initial_messages(&mut messages);
+      (messages, tools::configured_director_tools())
+    };
   if !prompt.is_empty() {
     meta.start_ts = Some(session::timestamp_ms());
   }
   if let Some(ref sid) = old_session_id {
-    let old_session_meta = session::read_meta(sid).ok();
+    let old_session_meta = session::read_meta_in(&workspace, sid).ok();
     if is_fork {
       meta.parent_session = Some(sid.clone());
     } else if let Some(ref old_meta) = old_session_meta {
@@ -208,6 +240,7 @@ async fn main() -> Result<()> {
   let wait_for_steer_input = run_steer && prompt.is_empty();
   let initial_draft_input = meta.draft_input.clone();
   let mut agent = Agent::new(
+    workspace.clone(),
     client,
     messages,
     tools,
@@ -237,9 +270,11 @@ async fn main() -> Result<()> {
 
   if let Err(e) = loop_result {
     agent.persist_if_dirty()?;
+    drop(session_lock);
     return Err(e.into());
   }
   agent.persist_if_dirty()?;
+  drop(session_lock);
   if args.worker.is_some() {
     if let Some(last) = agent.last_assistant_message() {
       print!("{last}");
@@ -263,8 +298,13 @@ async fn main() -> Result<()> {
 }
 
 fn ensure_creator_mode_flags(args: &Args) -> Result<()> {
-  if args.resume.is_some() || args.fork.is_some() || args.worker.is_some() || args.steer {
-    bail!("creator mode cannot be combined with --resume, --fork, --worker, or --steer");
+  if args.resume.is_some()
+    || args.fork.is_some()
+    || args.worker.is_some()
+    || args.steer
+    || args.serve.is_some()
+  {
+    bail!("creator mode cannot be combined with --resume, --fork, --worker, --steer, or --serve");
   }
   if args.prompt.join(" ").trim().is_empty() {
     bail!("creator mode requires a description/objective prompt");

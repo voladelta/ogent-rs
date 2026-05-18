@@ -13,29 +13,31 @@ use tokio::time::{Duration, timeout};
 use crate::agent::Agent;
 use crate::hashline::{EditOp, apply_anchor_edits, render_hashlines};
 use crate::types::{Tool, ToolFunction};
+use crate::workspace::Workspace;
 
 pub struct ToolContext<'a> {
   pub agent: Option<&'a mut Agent>,
+  pub workspace: Workspace,
 }
 
 pub async fn execute_tool(mut ctx: ToolContext<'_>, name: &str, args: &str) -> Result<String> {
   match name {
-    "read_file" => read_file(args),
-    "write_file" => write_file(args),
+    "read_file" => read_file(&ctx.workspace, args),
+    "write_file" => write_file(&ctx.workspace, args),
     "bash" => {
       let director_mode = ctx
         .agent
         .as_ref()
         .is_some_and(|agent| !agent.meta.flags.worker);
       if director_mode {
-        director_bash(args).await
+        director_bash(&ctx.workspace, args).await
       } else {
-        bash(args).await
+        bash(&ctx.workspace, args).await
       }
     }
-    "repo_map" => repo_map(args),
-    "read_hash_anchors" => read_hash_anchors(args),
-    "edit_hash_anchors" => edit_hash_anchors(args),
+    "repo_map" => repo_map(&ctx.workspace, args),
+    "read_hash_anchors" => read_hash_anchors(&ctx.workspace, args),
+    "edit_hash_anchors" => edit_hash_anchors(&ctx.workspace, args),
     "web_search" => web_search(args).await,
     "web_read" => web_read(args).await,
     "web_code_context" => web_code_context(args).await,
@@ -241,10 +243,10 @@ struct ReadFileArgs {
   end: Option<usize>,
 }
 
-fn read_file(args: &str) -> Result<String> {
+fn read_file(workspace: &Workspace, args: &str) -> Result<String> {
   let args: ReadFileArgs = parse_args(args)?;
   require_nonempty(&args.path, "path")?;
-  let path = crate::workspace::readable_path(&args.path)?;
+  let path = workspace.readable_path(&args.path)?;
   let meta = fs::metadata(&path).with_context(|| format!("stat {}", args.path))?;
   if meta.len() > (1 << 20) {
     bail!(
@@ -283,10 +285,10 @@ struct WriteFileArgs {
   overwrite_existing: bool,
 }
 
-fn write_file(args: &str) -> Result<String> {
+fn write_file(workspace: &Workspace, args: &str) -> Result<String> {
   let args: WriteFileArgs = parse_args(args)?;
   require_nonempty(&args.path, "path")?;
-  let path = crate::workspace::workspace_path(&args.path)?;
+  let path = workspace.workspace_path(&args.path)?;
   if path.exists() && !args.overwrite_existing {
     bail!(
       "file {} already exists; use edit_hash_anchors for anchored edits or set overwrite_existing=true for intentional full-file replacement",
@@ -311,12 +313,12 @@ struct BashArgs {
   timeout_seconds: u64,
 }
 
-fn check_bash_cds(command: &str) -> Result<()> {
+fn check_bash_cds(workspace: &Workspace, command: &str) -> Result<()> {
   let mut cmd = command.to_string();
   for sep in ["&&", "||", "|", ";", "\n", "\r"] {
     cmd = cmd.replace(sep, "\n");
   }
-  let base = crate::workspace::workspace_root();
+  let base = workspace.root();
   for line in cmd.split('\n') {
     let mut words = line.split_whitespace();
     if words.next() == Some("cd") {
@@ -401,18 +403,18 @@ fn check_director_bash_allowlist(command: &str) -> Result<()> {
   Ok(())
 }
 
-async fn bash(args: &str) -> Result<String> {
-  bash_internal(args, false).await
+async fn bash(workspace: &Workspace, args: &str) -> Result<String> {
+  bash_internal(workspace, args, false).await
 }
 
-pub async fn director_bash(args: &str) -> Result<String> {
-  bash_internal(args, true).await
+pub async fn director_bash(workspace: &Workspace, args: &str) -> Result<String> {
+  bash_internal(workspace, args, true).await
 }
 
-async fn bash_internal(args: &str, director_mode: bool) -> Result<String> {
+async fn bash_internal(workspace: &Workspace, args: &str, director_mode: bool) -> Result<String> {
   let args: BashArgs = parse_args(args)?;
   require_nonempty(&args.command, "command")?;
-  check_bash_cds(&args.command)?;
+  check_bash_cds(workspace, &args.command)?;
   if director_mode {
     check_director_bash_allowlist(&args.command)?;
   }
@@ -428,7 +430,7 @@ async fn bash_internal(args: &str, director_mode: bool) -> Result<String> {
   cmd
     .arg("-c")
     .arg(&args.command)
-    .current_dir(crate::workspace::workspace_root())
+    .current_dir(workspace.root())
     .stdout(Stdio::piped())
     .stderr(Stdio::piped());
   let output = timeout(Duration::from_secs(secs), cmd.output()).await;
@@ -454,14 +456,14 @@ struct RepoMapArgs {
   levels: usize,
 }
 
-fn repo_map(args: &str) -> Result<String> {
+fn repo_map(workspace: &Workspace, args: &str) -> Result<String> {
   let args: RepoMapArgs = parse_args(args)?;
   let rel = if args.path.is_empty() {
     "."
   } else {
     &args.path
   };
-  let path = crate::workspace::readable_path(rel)?;
+  let path = workspace.readable_path(rel)?;
   let levels = if args.levels == 0 { 3 } else { args.levels };
   let mut out = String::new();
   repo_map_walk(&path, &path, levels, 0, &mut out)?;
@@ -499,13 +501,13 @@ fn repo_map_walk(
   Ok(())
 }
 
-fn read_hash_anchors(args: &str) -> Result<String> {
+fn read_hash_anchors(workspace: &Workspace, args: &str) -> Result<String> {
   let args: ReadFileArgs = parse_args(args)?;
   require_nonempty(&args.path, "path")?;
   if args.start == Some(0) || args.end == Some(0) {
     bail!("start and end line numbers must be >= 1 (1-indexed)");
   }
-  let path = crate::workspace::workspace_path(&args.path)?;
+  let path = workspace.workspace_path(&args.path)?;
   let source = fs::read_to_string(&path).with_context(|| format!("read {}", args.path))?;
   Ok(render_hashlines(&source, args.start, args.end))
 }
@@ -516,13 +518,13 @@ struct EditHashAnchorsArgs {
   ops: Vec<EditOp>,
 }
 
-fn edit_hash_anchors(args: &str) -> Result<String> {
+fn edit_hash_anchors(workspace: &Workspace, args: &str) -> Result<String> {
   let args: EditHashAnchorsArgs = parse_args(args)?;
   require_nonempty(&args.path, "path")?;
   if args.ops.is_empty() {
     bail!("ops array is required");
   }
-  let path = crate::workspace::workspace_path(&args.path)?;
+  let path = workspace.workspace_path(&args.path)?;
   let source = fs::read_to_string(&path).with_context(|| format!("read {}", args.path))?;
   let out = apply_anchor_edits(&source, &args.ops)?;
   fs::write(&path, out).with_context(|| format!("write {}", args.path))?;
@@ -678,9 +680,9 @@ fn state(agent: &mut Agent, args: &str) -> Result<String> {
     agent.worker_parent_session_id.as_deref(),
     agent.worker_id.as_deref(),
   ) {
-    crate::session::worker_state_path(parent_session_id, worker_id)
+    crate::session::worker_state_path_in(&agent.workspace, parent_session_id, worker_id)
   } else {
-    crate::session::state_path(&agent.meta.session_id)
+    crate::session::state_path_in(&agent.workspace, &agent.meta.session_id)
   };
 
   let mut map = read_state_map(&scope_path)?;
@@ -817,6 +819,7 @@ mod tests {
       end_ts: None,
     };
     Agent::new(
+      crate::workspace::Workspace::from_current_dir(),
       dummy_client(),
       crate::prompts::build_messages(""),
       configured_director_tools(),
@@ -956,7 +959,15 @@ mod tests {
 
   #[tokio::test]
   async fn execute_tool_unknown_returns_error() {
-    let result = execute_tool(ToolContext { agent: None }, "nonexistent_tool", "{}").await;
+    let result = execute_tool(
+      ToolContext {
+        agent: None,
+        workspace: crate::workspace::Workspace::from_current_dir(),
+      },
+      "nonexistent_tool",
+      "{}",
+    )
+    .await;
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("unknown tool"));
   }

@@ -7,18 +7,26 @@
 ```text
 main.rs
   -> agent.rs
+    -> steer.rs
     -> client.rs / providers.rs / sse.rs
     -> tools.rs
       -> workers.rs
       -> session.rs
+  -> websocket.rs (when `--serve`)
 ```
 
 ## Module Ownership
 
 - `src/main.rs`
-  - CLI parsing, mode wiring, resume/fork, steer boot, skill creation mode.
+  - CLI parsing, mode wiring, resume/fork, steer boot, websocket server mode, skill creation mode.
 - `src/agent.rs`
   - Turn loop, stream handling, tool-call execution, compaction.
+  - Transport-neutral steer loop over `SteerChannel`.
+- `src/steer.rs`
+  - Steer transport interface (`SteerChannel`) and TUI adapter.
+- `src/websocket.rs`
+  - WebSocket listener and per-connection Director lifecycle.
+  - JSON steer protocol mapping.
 - `src/tools.rs`
   - Tool schemas and implementations.
   - Director/worker toolset split.
@@ -52,9 +60,12 @@ main.rs
 ## Invariants
 
 - Main agent is Director and does not receive direct file-edit tools.
+- In `--serve` mode, each websocket connection starts unbound and can initialize exactly one Director Agent via setup (`start`/`fork`/`resume`).
 - Worker file edits are done via worker toolset (`write_file`, `edit_hash_anchors`).
 - `dispatch_workers` starts workers and returns worker IDs immediately.
 - `wait_workers` long-polls for completed worker results and reports still-running workers after a short wait.
 - Running worker reports include `progress`, read from worker state key `progress/current`; missing or empty progress is reported as `Starting`.
 - Worker subprocess state/transcript are scoped under parent session + worker ID.
+- `--resume` enforces single active process ownership with `.ogent/sessions/{session_id}/active.lock`.
+- Websocket `resume` uses an in-process active-session registry (not lock files) to prevent duplicate active sessions inside the serve process.
 - A run ends when the Director sends a final assistant message (no tool calls).

@@ -17,6 +17,7 @@ serde_yaml = "0.9"
 thiserror = "2"
 tokio = { version = "1", features = ["full"] }
 tokio-util = "0.7"
+tokio-tungstenite = "0.24"
 nucleo-matcher = "0.3"
 ratatui-textarea = "0.9.1"
 unicode-width = "0.2"

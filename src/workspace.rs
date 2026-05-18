@@ -2,60 +2,90 @@ use anyhow::{Result, bail};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-pub fn workspace_root() -> &'static Path {
-  static ROOT: OnceLock<PathBuf> = OnceLock::new();
-  ROOT.get_or_init(|| {
+#[derive(Debug, Clone)]
+pub struct Workspace {
+  root: PathBuf,
+}
+
+impl Workspace {
+  pub fn from_current_dir() -> Self {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    normalize(&cwd)
-  })
+    Self {
+      root: normalize(&cwd),
+    }
+  }
+
+  pub fn from_root(root: PathBuf) -> Self {
+    Self {
+      root: normalize(&root),
+    }
+  }
+
+  pub fn root(&self) -> &Path {
+    &self.root
+  }
+
+  pub fn workspace_path(&self, path: &str) -> Result<PathBuf> {
+    if path.is_empty() {
+      bail!("path is required");
+    }
+    let abs = self.absolute_tool_path(path);
+    if self.path_in_workspace(&abs) {
+      return Ok(abs);
+    }
+    bail!("path {path} is outside workspace {}", self.root.display())
+  }
+
+  pub fn readable_path(&self, path: &str) -> Result<PathBuf> {
+    if path.is_empty() {
+      bail!("path is required");
+    }
+    let abs = self.absolute_tool_path(path);
+    if self.path_in_workspace(&abs) || path_in_allowed_root(&abs) {
+      return Ok(abs);
+    }
+    bail!("path {path} is outside workspace {}", self.root.display())
+  }
+
+  fn absolute_tool_path(&self, path: &str) -> PathBuf {
+    if let Some(rest) = path.strip_prefix("~/")
+      && let Some(home) = std::env::var_os("HOME")
+    {
+      return PathBuf::from(home).join(rest);
+    }
+    let p = PathBuf::from(path);
+    if p.is_absolute() {
+      normalize(&p)
+    } else {
+      normalize(&self.root.join(p))
+    }
+  }
+
+  fn path_in_workspace(&self, path: &Path) -> bool {
+    let path = normalize(path);
+    path == self.root || path.starts_with(&self.root)
+  }
 }
 
+pub fn workspace_root() -> &'static Path {
+  static ROOT: OnceLock<Workspace> = OnceLock::new();
+  ROOT.get_or_init(Workspace::from_current_dir).root()
+}
+
+#[allow(dead_code)]
 pub fn workspace_path(path: &str) -> Result<PathBuf> {
-  if path.is_empty() {
-    bail!("path is required");
-  }
-  let abs = absolute_tool_path(path);
-  if path_in_workspace(&abs) {
-    return Ok(abs);
-  }
-  bail!(
-    "path {path} is outside workspace {}",
-    workspace_root().display()
-  )
+  static ROOT: OnceLock<Workspace> = OnceLock::new();
+  ROOT
+    .get_or_init(Workspace::from_current_dir)
+    .workspace_path(path)
 }
 
+#[allow(dead_code)]
 pub fn readable_path(path: &str) -> Result<PathBuf> {
-  if path.is_empty() {
-    bail!("path is required");
-  }
-  let abs = absolute_tool_path(path);
-  if path_in_workspace(&abs) || path_in_allowed_root(&abs) {
-    return Ok(abs);
-  }
-  bail!(
-    "path {path} is outside workspace {}",
-    workspace_root().display()
-  )
-}
-
-fn absolute_tool_path(path: &str) -> PathBuf {
-  if let Some(rest) = path.strip_prefix("~/")
-    && let Some(home) = std::env::var_os("HOME")
-  {
-    return PathBuf::from(home).join(rest);
-  }
-  let p = PathBuf::from(path);
-  if p.is_absolute() {
-    normalize(&p)
-  } else {
-    normalize(&workspace_root().join(p))
-  }
-}
-
-fn path_in_workspace(path: &Path) -> bool {
-  let path = normalize(path);
-  let root = workspace_root();
-  path == *root || path.starts_with(root)
+  static ROOT: OnceLock<Workspace> = OnceLock::new();
+  ROOT
+    .get_or_init(Workspace::from_current_dir)
+    .readable_path(path)
 }
 
 fn path_in_allowed_root(path: &Path) -> bool {
@@ -87,41 +117,48 @@ mod tests {
 
   #[test]
   fn workspace_path_rejects_empty() {
-    assert!(workspace_path("").is_err());
+    let ws = Workspace::from_current_dir();
+    assert!(ws.workspace_path("").is_err());
   }
 
   #[test]
   fn workspace_path_accepts_relative_in_workspace() {
-    assert!(workspace_path("src/main.rs").is_ok());
-    assert!(workspace_path("./src/main.rs").is_ok());
-    assert!(workspace_path(".").is_ok());
+    let ws = Workspace::from_current_dir();
+    assert!(ws.workspace_path("src/main.rs").is_ok());
+    assert!(ws.workspace_path("./src/main.rs").is_ok());
+    assert!(ws.workspace_path(".").is_ok());
   }
 
   #[test]
   fn workspace_path_rejects_outside_workspace() {
-    assert!(workspace_path("/etc/passwd").is_err());
-    assert!(workspace_path("/tmp/foo").is_err());
+    let ws = Workspace::from_current_dir();
+    assert!(ws.workspace_path("/etc/passwd").is_err());
+    assert!(ws.workspace_path("/tmp/foo").is_err());
   }
 
   #[test]
   fn workspace_path_rejects_ogent_config() {
-    assert!(workspace_path("~/.ogent/skills/test.md").is_err());
+    let ws = Workspace::from_current_dir();
+    assert!(ws.workspace_path("~/.ogent/skills/test.md").is_err());
   }
 
   #[test]
   fn readable_path_rejects_empty() {
-    assert!(readable_path("").is_err());
+    let ws = Workspace::from_current_dir();
+    assert!(ws.readable_path("").is_err());
   }
 
   #[test]
   fn readable_path_accepts_relative_in_workspace() {
-    assert!(readable_path("src/main.rs").is_ok());
+    let ws = Workspace::from_current_dir();
+    assert!(ws.readable_path("src/main.rs").is_ok());
   }
 
   #[test]
   fn readable_path_rejects_outside_workspace_and_ogent() {
-    assert!(readable_path("/etc/passwd").is_err());
-    assert!(readable_path("/tmp/foo").is_err());
+    let ws = Workspace::from_current_dir();
+    assert!(ws.readable_path("/etc/passwd").is_err());
+    assert!(ws.readable_path("/tmp/foo").is_err());
   }
 
   #[test]
@@ -129,7 +166,15 @@ mod tests {
     if std::env::var_os("HOME").is_none() {
       return;
     }
-    assert!(readable_path("~/.ogent/skills/test.md").is_ok());
+    let ws = Workspace::from_current_dir();
+    assert!(ws.readable_path("~/.ogent/skills/test.md").is_ok());
+  }
+
+  #[test]
+  fn workspace_from_root_resolves_relative_paths_against_given_root() {
+    let ws = Workspace::from_root(PathBuf::from("/tmp/example"));
+    let p = ws.workspace_path("dir/file.txt").unwrap();
+    assert_eq!(p, PathBuf::from("/tmp/example/dir/file.txt"));
   }
 
   #[test]

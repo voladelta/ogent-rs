@@ -12,8 +12,69 @@
 | `--fork[=<session_id>]` | Fork existing session into a child session |
 | `--temp` | Ephemeral mode (no session persistence) |
 | `--create-skill <name>` | Generate/update `.ogent/skills/<name>/SKILL.md` |
+| `--serve <addr>` | WebSocket server mode (`ws://<addr>`) |
 
-`--create-skill` cannot be combined with `--resume`, `--fork`, `--worker`, or `--steer`.
+`--create-skill` cannot be combined with `--resume`, `--fork`, `--worker`, `--steer`, or `--serve`.
+`--serve` cannot be combined with `--resume`, `--fork`, `--worker`, `--steer`, or an initial prompt.
+
+## WebSocket Protocol (`--serve`)
+
+Each websocket connection starts unbound. It does not create an Agent/session until setup succeeds.
+
+Inbound JSON:
+
+- `{"type":"start","repo":"/path/to/repo","temp":true,"profile":"ds-flash","autocompact":80}`
+- `{"type":"fork","repo":"/path/to/repo","session":"<session_id>","profile":"ds-flash","autocompact":80}`
+- `{"type":"resume","repo":"/path/to/repo","session":"<session_id>","profile":"ds-flash","autocompact":80}`
+- `{"type":"message","content":"..."}`
+- `{"type":"cancel"}`
+- `{"type":"new"}`
+- `{"type":"compact","focus":"optional focus task"}`
+- `{"type":"profile","profile":"ds-flash"}`
+- `{"type":"exit"}`
+
+Setup rules:
+
+- `start`, `fork`, and `resume` require `repo`.
+- `repo` is canonicalized and must exist as a directory.
+- `temp` is valid only on `start`; `fork`/`resume` reject it.
+- `profile` and `autocompact` are valid on `start`/`fork`/`resume`; omitted values default to server startup values.
+- Before setup, non-setup events are rejected with `error.code = "not_initialized"`.
+- After setup, `start`/`fork`/`resume` are rejected with `error.code = "already_initialized"`.
+- `resume` is rejected with `error.code = "session_active"` if that session is already active in this websocket server process.
+
+Websocket active-session protection:
+
+- The server keeps an in-process active session registry for websocket runs.
+- `start` and `fork` create and register fresh session IDs.
+- `resume` registers the target session only if it is not already active.
+- IDs are unregistered when the connection/agent ends.
+
+Outbound JSON:
+
+- `session`: setup success payload:
+  - `status`: `"ok"`
+  - `session_id`
+  - `mode`: `"start" | "fork" | "resume"`
+  - `profile`
+  - `repo`
+- `status`: current agent state/tokens/profile/model
+- `log`: textual stream/log lines (`level` + `line`)
+- `error`: protocol/runtime error with machine-readable `code` and human-readable `message`
+
+Disconnect behavior:
+
+- The connection is treated as exit.
+- Dirty session data is persisted unless `--temp`.
+- In-flight request is cancelled via steer-loop exit path.
+
+Known limitation:
+
+- Tool execution, worker subprocesses, state, and session files are scoped to the setup `repo`; skill discovery and custom system prompt discovery still use the server startup cwd and home config.
+
+## Resume Locking
+
+`--resume` acquires `{workspace_root}/.ogent/sessions/{session_id}/active.lock` for the process lifetime. A second resume attempt for the same active session fails fast.
 
 ## Director Tools
 
@@ -59,8 +120,8 @@ Rules:
 - `list` allows empty `path`; empty means list all keys.
 - Workers use state key `progress/current` for concise current-phase progress. `wait_workers` reads this key for running workers.
 - State storage:
-  - Director: `.ogent/sessions/{session_id}/states.json`
-  - Worker: `.ogent/sessions/{parent_session_id}/workers/{worker_id}/states.json`
+  - Director: `{workspace_root}/.ogent/sessions/{session_id}/states.json`
+  - Worker: `{workspace_root}/.ogent/sessions/{parent_session_id}/workers/{worker_id}/states.json`
 
 ## `dispatch_workers` Tool
 

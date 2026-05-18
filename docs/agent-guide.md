@@ -31,8 +31,8 @@ Environment:
 
 Worker persistence:
 
-- transcript: `.ogent/sessions/{parent_session_id}/workers/{worker_id}/messages.jsonl`
-- state: `.ogent/sessions/{parent_session_id}/workers/{worker_id}/states.json`
+- transcript: `{workspace_root}/.ogent/sessions/{parent_session_id}/workers/{worker_id}/messages.jsonl`
+- state: `{workspace_root}/.ogent/sessions/{parent_session_id}/workers/{worker_id}/states.json`
 
 Worker waiting:
 
@@ -67,7 +67,7 @@ All worker system prompts include the shared progress-reporting nudge, including
 
 ## State and Exit
 
-Director state lives in `.ogent/sessions/{session_id}/states.json`.
+Director state lives in `{workspace_root}/.ogent/sessions/{session_id}/states.json`.
 
 For non-trivial runs, the Director may keep a compact `decision/current` packet with goal, assumptions, worker IDs, acceptance criteria, evidence, and next decision.
 
