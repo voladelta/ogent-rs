@@ -15,7 +15,7 @@
 Main flow:
 
 ```text
-CLI / TUI
+CLI
   -> src/main.rs
   -> src/agent.rs
   -> src/steer.rs
@@ -25,9 +25,9 @@ CLI / TUI
   -> src/tools.rs + src/workers.rs + src/session.rs
 ```
 
-- `src/main.rs`: CLI wiring, resume/fork, worker subprocess mode, steer mode, websocket serve mode, skill creation.
+- `src/main.rs`: CLI wiring, resume/fork, worker subprocess mode, websocket serve mode, skill creation.
 - `src/agent.rs`: turn loop, streaming handling, tool dispatch integration, compaction, transport-neutral steer logic, Agent-owned `Workspace`.
-- `src/steer.rs`: steer transport boundary and adapters.
+- `src/steer.rs`: transport-neutral steer events/state and the `SteerChannel` interface used by websocket control.
 - `src/websocket.rs`: websocket server, lazy `start`/`fork`/`resume` setup, per-connection Director runtime.
 - `src/workspace.rs`: explicit workspace root and path resolution.
 - `src/tools.rs`: Director/worker tool schemas and execution (`state`, `dispatch_workers`, `wait_workers`, read/write/web/bash/hashline).
@@ -65,7 +65,7 @@ CLI / TUI
 
 - Main agent is Director (no direct file-edit tools in Director toolset).
 - In websocket serve mode, each connection starts unbound and initializes one Director Agent with `start`, `fork`, or `resume`.
-- Every Agent owns one immutable `Workspace`. WebSocket setup gets it from `repo`; CLI/TUI use current dir; worker mode uses `OGENT_WORKSPACE_ROOT` when set.
+- Every Agent owns one immutable `Workspace`. WebSocket setup gets it from `repo`; CLI uses current dir; worker mode uses `OGENT_WORKSPACE_ROOT` when set.
 - Director `bash` allows only `colgrep` and `rg`.
 - Workspace edits happen through worker subprocesses.
 - Tools, state, sessions, and worker subprocesses must use the Agent workspace, not process-global cwd.

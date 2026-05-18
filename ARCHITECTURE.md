@@ -19,19 +19,19 @@ main.rs
 ## Module Ownership
 
 - `src/main.rs`
-  - CLI parsing, mode wiring, resume/fork, steer boot, websocket server mode, skill creation mode.
+  - CLI parsing, mode wiring, resume/fork, websocket server mode, skill creation mode.
 - `src/agent.rs`
   - Turn loop, stream handling, tool-call execution, compaction.
   - Transport-neutral steer loop over `SteerChannel`.
   - Owns an immutable `Workspace` used by tools, workers, and session persistence.
 - `src/steer.rs`
-  - Steer transport interface (`SteerChannel`) and TUI adapter.
+  - Transport-neutral steer events/state plus the `SteerChannel` interface used by websocket control.
 - `src/websocket.rs`
   - WebSocket listener and per-connection Director lifecycle.
   - JSON steer protocol mapping.
 - `src/workspace.rs`
   - Workspace root abstraction and safe path resolution.
-  - Provides current-dir compatibility wrappers for CLI/TUI paths.
+  - Provides current-dir compatibility wrappers for CLI paths.
 - `src/tools.rs`
   - Tool schemas and implementations.
   - Director/worker toolset split.
@@ -67,7 +67,7 @@ main.rs
 
 - Main agent is Director and does not receive direct file-edit tools.
 - In `--serve` mode, each websocket connection starts unbound and can initialize exactly one Director Agent via setup (`start`/`fork`/`resume`).
-- Each Agent has one immutable workspace root. WebSocket setup derives it from `repo`; CLI/TUI use the process current directory; worker mode uses `OGENT_WORKSPACE_ROOT` when present.
+- Each Agent has one immutable workspace root. WebSocket setup derives it from `repo`; CLI runs use the process current directory; worker mode uses `OGENT_WORKSPACE_ROOT` when present.
 - Tool execution, bash current directory, state paths, session files, and worker subprocesses are workspace-scoped. Do not use global `std::env::set_current_dir` for per-connection behavior.
 - Worker file edits are done via worker toolset (`write_file`, `edit_hash_anchors`).
 - `dispatch_workers` starts workers and returns worker IDs immediately.

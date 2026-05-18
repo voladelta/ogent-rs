@@ -9,7 +9,6 @@ mod session;
 mod sse;
 mod steer;
 mod tools;
-mod tui;
 mod types;
 mod websocket;
 mod workers;
@@ -32,8 +31,6 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 struct Args {
   #[arg(long, default_value = "ds-flash")]
   profile: String,
-  #[arg(long, default_value_t = false)]
-  steer: bool,
   #[arg(long, value_name = "PARENT_SESSION_ID")]
   worker: Option<String>,
   #[arg(long, default_value_t = 80)]
@@ -64,12 +61,11 @@ async fn main() -> Result<()> {
   }
   if args.serve.is_some()
     && (args.worker.is_some()
-      || args.steer
       || args.resume.is_some()
       || args.fork.is_some()
       || args.create_skill.is_some())
   {
-    bail!("--serve cannot be combined with --worker, --steer, --resume, --fork, or --create-skill");
+    bail!("--serve cannot be combined with --worker, --resume, --fork, or --create-skill");
   }
   if args.serve.is_some() && !args.prompt.is_empty() {
     bail!("--serve does not accept a prompt; send messages over the websocket connection");
@@ -103,11 +99,8 @@ async fn main() -> Result<()> {
     .worker
     .clone()
     .unwrap_or_else(session::generate_session_id);
-  let mut run_steer = args.steer && args.worker.is_none();
-  let mut mode = if args.worker.is_some() {
+  let mode = if args.worker.is_some() {
     "worker"
-  } else if run_steer {
-    "steer"
   } else {
     "default"
   };
@@ -117,7 +110,7 @@ async fn main() -> Result<()> {
     profile: args.profile.clone(),
     mode: mode.to_string(),
     flags: session::SessionFlags {
-      steer: run_steer,
+      steer: false,
       worker: args.worker.is_some(),
       autocompact: args.autocompact,
       resume: args.resume.is_some(),
@@ -195,7 +188,7 @@ async fn main() -> Result<()> {
       }
       (loaded, tools::configured_director_tools())
     } else {
-      if prompt.is_empty() && !args.steer {
+      if prompt.is_empty() {
         let mut cmd = Args::command();
         cmd.print_help()?;
         println!();
@@ -217,10 +210,6 @@ async fn main() -> Result<()> {
       meta.start_ts = old_meta.start_ts;
       meta.end_ts = old_meta.end_ts;
       meta.draft_input = old_meta.draft_input.clone();
-      if args.worker.is_none() && !args.steer && old_meta.mode == "steer" {
-        run_steer = true;
-        mode = "steer";
-      }
     }
     if let Some(old_meta) = old_session_meta.as_ref() {
       eprintln!(
@@ -236,9 +225,7 @@ async fn main() -> Result<()> {
     meta.draft_input = None;
   }
   meta.mode = mode.to_string();
-  meta.flags.steer = run_steer;
-  let wait_for_steer_input = run_steer && prompt.is_empty();
-  let initial_draft_input = meta.draft_input.clone();
+  meta.flags.steer = false;
   let mut agent = Agent::new(
     workspace.clone(),
     client,
@@ -252,21 +239,7 @@ async fn main() -> Result<()> {
   if args.worker.is_some() || is_loaded_session || !prompt.is_empty() {
     agent.dirty = true;
   }
-  let loop_result = if run_steer {
-    let tui = tui::start(
-      args.profile.clone(),
-      profile.model.to_string(),
-      crate::prompts::discover_skill_names(),
-      initial_draft_input,
-    )?;
-    if args.autocompact >= 0 {
-      tui.status.set_compact_threshold(args.autocompact);
-      tui.status.set_context_limit(profile.context_limit);
-    }
-    agent.steer_loop(tui, wait_for_steer_input).await
-  } else {
-    agent.run_loop().await
-  };
+  let loop_result = agent.run_loop().await;
 
   if let Err(e) = loop_result {
     agent.persist_if_dirty()?;
@@ -284,13 +257,8 @@ async fn main() -> Result<()> {
   }
   if args.worker.is_none() && agent.dirty && !args.temp {
     io::stdout().flush()?;
-    let steer_flag = if agent.meta.mode == "steer" {
-      "--steer "
-    } else {
-      ""
-    };
     eprintln!(
-      "\nogent {steer_flag}--resume={} to continue this session",
+      "\nogent --resume={} to continue this session",
       agent.meta.session_id
     );
   }
@@ -298,13 +266,8 @@ async fn main() -> Result<()> {
 }
 
 fn ensure_creator_mode_flags(args: &Args) -> Result<()> {
-  if args.resume.is_some()
-    || args.fork.is_some()
-    || args.worker.is_some()
-    || args.steer
-    || args.serve.is_some()
-  {
-    bail!("creator mode cannot be combined with --resume, --fork, --worker, --steer, or --serve");
+  if args.resume.is_some() || args.fork.is_some() || args.worker.is_some() || args.serve.is_some() {
+    bail!("creator mode cannot be combined with --resume, --fork, --worker, or --serve");
   }
   if args.prompt.join(" ").trim().is_empty() {
     bail!("creator mode requires a description/objective prompt");

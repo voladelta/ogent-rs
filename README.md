@@ -18,9 +18,6 @@ cargo run -- "Fix the failing tests without overcomplicating"
 # Director run
 ogent "Implement feature X"
 
-# Steer-mode Director (TUI)
-ogent --steer
-
 # WebSocket server mode
 ogent --serve 127.0.0.1:9876
 
@@ -95,5 +92,4 @@ cargo test
 
 - [docs/reference.md](docs/reference.md)
 - [docs/agent-guide.md](docs/agent-guide.md)
-- [docs/steer-mode.md](docs/steer-mode.md)
 - [ARCHITECTURE.md](ARCHITECTURE.md)

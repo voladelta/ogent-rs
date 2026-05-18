@@ -5,7 +5,6 @@
 | Flag | Meaning |
 | --- | --- |
 | `--profile <name>` | Model/profile selection |
-| `--steer` | Start TUI steer mode (Director) |
 | `--worker=<parent_session_id>` | Internal worker subprocess mode |
 | `--autocompact <percent>` | Auto-compaction threshold (`-1` disables) |
 | `--resume[=<session_id>]` | Resume existing session |
@@ -14,8 +13,8 @@
 | `--create-skill <name>` | Generate/update `.ogent/skills/<name>/SKILL.md` |
 | `--serve <addr>` | WebSocket server mode (`ws://<addr>`) |
 
-`--create-skill` cannot be combined with `--resume`, `--fork`, `--worker`, `--steer`, or `--serve`.
-`--serve` cannot be combined with `--resume`, `--fork`, `--worker`, `--steer`, or an initial prompt.
+`--create-skill` cannot be combined with `--resume`, `--fork`, `--worker`, or `--serve`.
+`--serve` cannot be combined with `--resume`, `--fork`, `--worker`, or an initial prompt.
 
 ## WebSocket Protocol (`--serve`)
 

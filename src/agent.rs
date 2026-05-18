@@ -1,9 +1,8 @@
 use crate::client::{Client, ClientError};
 use crate::session;
 use crate::sse::{SseError, StreamEvent};
-use crate::steer::SteerChannel;
+use crate::steer::{AgentState, SteerChannel, SteerEvent};
 use crate::tools::{ToolContext, execute_tool, is_read_only_tool};
-use crate::tui::{AgentState, SteerEvent};
 use crate::types::{ChatResponse, Message, MessageOrigin, Tool, ToolCall};
 use crate::workers::WorkerManager;
 use crate::workspace::Workspace;
@@ -167,17 +166,10 @@ impl SteerState {
                   cancel.cancel();
                   steer_msg = Some(content);
                 }
-                SteerEvent::Complete => {
-                  cancel.cancel();
-                  steer_msg = Some(
-                    "Reminder: set `state` key `status` to done/blocked/failed/partial when the Director is ready to finish.".to_string(),
-                  );
-                }
                 SteerEvent::New => {
                   cancel.cancel();
                   agent.apply_steer_event(SteerEvent::New, steer)?;
                   chat.abort();
-                  steer.log_push(STEER_COMMANDS.to_string());
                   return Ok(Self::Idle { wait_for_input: true });
                 }
                 SteerEvent::Exit(exit_msg) => {
@@ -196,7 +188,6 @@ impl SteerState {
                     SteerAction::Restart => {
                       cancel.cancel();
                       chat.abort();
-                      steer.log_push(STEER_COMMANDS.to_string());
                       return Ok(Self::Idle { wait_for_input: true });
                     }
                     SteerAction::Continue => {}
@@ -237,7 +228,7 @@ impl SteerState {
             }
             if let Some(msg) = steer_msg {
               agent.push_msg(human_user_msg(msg.clone()));
-              steer.log_push(format!("[steer] {}", truncate(&msg, 200)));
+              steer.log_push(format!("[user] {}", truncate(&msg, 200)));
               return Ok(Self::StartTurn);
             }
             return Ok(Self::Exit(agent.messages.clone()));
@@ -364,12 +355,9 @@ impl SteerState {
   ) -> Result<Option<Self>, AgentError> {
     match agent.apply_steer_event(event, steer)? {
       SteerAction::Exit => Ok(Some(Self::Exit(agent.messages.clone()))),
-      SteerAction::Restart => {
-        steer.log_push(STEER_COMMANDS.to_string());
-        Ok(Some(Self::Idle {
-          wait_for_input: true,
-        }))
-      }
+      SteerAction::Restart => Ok(Some(Self::Idle {
+        wait_for_input: true,
+      })),
       SteerAction::Continue => Ok(None),
     }
   }
@@ -502,7 +490,6 @@ impl Agent {
     wait_for_input: bool,
   ) -> Result<Vec<Message>, AgentError> {
     self.replay_messages_to_steer_log(&steer);
-    steer.log_push(STEER_COMMANDS.to_string());
     let mut state = SteerState::Idle { wait_for_input };
     let mut ctx = SteerCtx;
 
@@ -537,13 +524,7 @@ impl Agent {
       }
       SteerEvent::Cancel => {
         self.meta.draft_input = None;
-        steer.log_push("[steer] no in-flight request to cancel".to_string());
-      }
-      SteerEvent::Complete => {
-        self.meta.draft_input = None;
-        steer.log_push(
-          "[steer] /complete is deprecated; set `state` key `status` to done/blocked/failed/partial when ready to exit".to_string(),
-        );
+        steer.log_push("[control] no in-flight request to cancel".to_string());
       }
       SteerEvent::New => {
         self.meta.draft_input = None;
@@ -572,14 +553,14 @@ impl Agent {
         self.pending_compact = CompactPending::None;
         steer.log_clear();
         steer.set_tokens(0);
-        steer.log_push("[steer] new session started".to_string());
+        steer.log_push("[control] new session started".to_string());
         return Ok(SteerAction::Restart);
       }
       SteerEvent::Compact(task_prompt) => {
         self.meta.draft_input = None;
         let has_assistant = self.messages.iter().any(|m| m.role == "assistant");
         if !has_assistant {
-          steer.log_push("[steer] nothing to compact; no assistant response yet".to_string());
+          steer.log_push("[control] nothing to compact; no assistant response yet".to_string());
         } else {
           let mut compact_msg = String::from(
             "Produce a handoff brief for continuing this work in a fresh context window.\n\n\
@@ -609,11 +590,11 @@ impl Agent {
           self.meta.profile = name.clone();
           self.compact.context_limit = p.context_limit;
           steer.set_profile(name, p.model.to_string());
-          steer.log_push(format!("[steer] profile → {}", self.meta.profile));
+          steer.log_push(format!("[control] profile → {}", self.meta.profile));
         }
         None => {
           self.meta.draft_input = None;
-          steer.log_push(format!("[steer] unknown profile: {name}"));
+          steer.log_push(format!("[control] unknown profile: {name}"));
         }
       },
       SteerEvent::Exit(exit_msg) => {
@@ -671,7 +652,7 @@ impl Agent {
 
   async fn handle_turn_response(&mut self, resp: ChatResponse) -> Result<bool, AgentError> {
     self
-      .handle_turn_response_with_log::<crate::tui::TuiHandle>(resp, None, false)
+      .handle_turn_response_with_log::<crate::steer::NoopSteer>(resp, None, false)
       .await
   }
 
@@ -971,8 +952,6 @@ mod truncate_tests {
   }
 }
 
-const STEER_COMMANDS: &str = "[steer] commands: /cancel /new /compact [/compact <focus>] /q";
-
 #[cfg(test)]
 mod dirty_state_machine_tests {
   use super::*;
@@ -1062,9 +1041,9 @@ mod dirty_state_machine_tests {
   #[tokio::test]
   async fn first_message_sets_start_ts() {
     let mut agent = dummy_agent();
-    let tui = crate::tui::TuiHandle::test_handle();
+    let steer = crate::steer::TestSteerHandle::new();
     let action = agent
-      .apply_steer_event(SteerEvent::Message("fix bug".into()), &tui)
+      .apply_steer_event(SteerEvent::Message("fix bug".into()), &steer)
       .unwrap();
     assert!(matches!(action, SteerAction::Continue));
     assert!(agent.dirty);
@@ -1074,13 +1053,13 @@ mod dirty_state_machine_tests {
   #[tokio::test]
   async fn second_message_preserves_start_ts() {
     let mut agent = dummy_agent();
-    let tui = crate::tui::TuiHandle::test_handle();
+    let steer = crate::steer::TestSteerHandle::new();
     agent
-      .apply_steer_event(SteerEvent::Message("fix bug".into()), &tui)
+      .apply_steer_event(SteerEvent::Message("fix bug".into()), &steer)
       .unwrap();
     let start_ts = agent.meta.start_ts;
     agent
-      .apply_steer_event(SteerEvent::Message("more context".into()), &tui)
+      .apply_steer_event(SteerEvent::Message("more context".into()), &steer)
       .unwrap();
     assert_eq!(agent.meta.start_ts, start_ts);
   }
@@ -1088,17 +1067,8 @@ mod dirty_state_machine_tests {
   #[tokio::test]
   async fn cancel_does_not_change_dirty() {
     let mut agent = dummy_agent();
-    let tui = crate::tui::TuiHandle::test_handle();
-    let action = agent.apply_steer_event(SteerEvent::Cancel, &tui).unwrap();
-    assert!(matches!(action, SteerAction::Continue));
-    assert!(!agent.dirty);
-  }
-
-  #[tokio::test]
-  async fn complete_command_is_deprecated() {
-    let mut agent = dummy_agent();
-    let tui = crate::tui::TuiHandle::test_handle();
-    let action = agent.apply_steer_event(SteerEvent::Complete, &tui).unwrap();
+    let steer = crate::steer::TestSteerHandle::new();
+    let action = agent.apply_steer_event(SteerEvent::Cancel, &steer).unwrap();
     assert!(matches!(action, SteerAction::Continue));
     assert!(!agent.dirty);
   }
@@ -1106,9 +1076,9 @@ mod dirty_state_machine_tests {
   #[tokio::test]
   async fn exit_returns_exit_action() {
     let mut agent = dummy_agent();
-    let tui = crate::tui::TuiHandle::test_handle();
+    let steer = crate::steer::TestSteerHandle::new();
     let action = agent
-      .apply_steer_event(SteerEvent::Exit(None), &tui)
+      .apply_steer_event(SteerEvent::Exit(None), &steer)
       .unwrap();
     assert!(matches!(action, SteerAction::Exit));
     assert!(!agent.dirty);
@@ -1117,10 +1087,10 @@ mod dirty_state_machine_tests {
   #[tokio::test]
   async fn exit_with_message_sets_draft_only() {
     let mut agent = dummy_agent();
-    let tui = crate::tui::TuiHandle::test_handle();
+    let steer = crate::steer::TestSteerHandle::new();
     let before_len = agent.messages.len();
     let action = agent
-      .apply_steer_event(SteerEvent::Exit(Some("save this".into())), &tui)
+      .apply_steer_event(SteerEvent::Exit(Some("save this".into())), &steer)
       .unwrap();
     assert!(matches!(action, SteerAction::Exit));
     assert_eq!(agent.meta.draft_input, Some("save this".into()));
@@ -1131,9 +1101,9 @@ mod dirty_state_machine_tests {
   #[tokio::test]
   async fn new_on_clean_resets_without_files() {
     let mut agent = dummy_agent();
-    let tui = crate::tui::TuiHandle::test_handle();
+    let steer = crate::steer::TestSteerHandle::new();
     let old_id = agent.meta.session_id.clone();
-    let action = agent.apply_steer_event(SteerEvent::New, &tui).unwrap();
+    let action = agent.apply_steer_event(SteerEvent::New, &steer).unwrap();
     assert!(matches!(action, SteerAction::Restart));
     assert!(!agent.dirty);
     assert_eq!(agent.meta.start_ts, None);
@@ -1145,11 +1115,11 @@ mod dirty_state_machine_tests {
   #[tokio::test]
   async fn new_on_dirty_persists_old_then_resets() {
     let mut agent = dummy_agent();
-    let tui = crate::tui::TuiHandle::test_handle();
+    let steer = crate::steer::TestSteerHandle::new();
     agent.push_msg(human_user_msg("hello"));
     let old_id = agent.meta.session_id.clone();
 
-    let action = agent.apply_steer_event(SteerEvent::New, &tui).unwrap();
+    let action = agent.apply_steer_event(SteerEvent::New, &steer).unwrap();
     assert!(matches!(action, SteerAction::Restart));
 
     // old session should have been persisted
@@ -1270,10 +1240,10 @@ mod dirty_state_machine_tests {
   #[tokio::test]
   async fn compact_on_empty_is_noop() {
     let mut agent = dummy_agent();
-    let tui = crate::tui::TuiHandle::test_handle();
+    let steer = crate::steer::TestSteerHandle::new();
     let old_id = agent.meta.session_id.clone();
     let action = agent
-      .apply_steer_event(SteerEvent::Compact(None), &tui)
+      .apply_steer_event(SteerEvent::Compact(None), &steer)
       .unwrap();
     assert!(matches!(action, SteerAction::Continue));
     assert!(!agent.dirty);
@@ -1284,14 +1254,14 @@ mod dirty_state_machine_tests {
   #[tokio::test]
   async fn compact_pushes_handoff_message() {
     let mut agent = dummy_agent();
-    let tui = crate::tui::TuiHandle::test_handle();
+    let steer = crate::steer::TestSteerHandle::new();
     agent.push_msg(human_user_msg("hello"));
     agent.push_msg(assistant_msg_with_reasoning("ok", ""));
     let old_id = agent.meta.session_id.clone();
     let old_len = agent.messages.len();
 
     let action = agent
-      .apply_steer_event(SteerEvent::Compact(None), &tui)
+      .apply_steer_event(SteerEvent::Compact(None), &steer)
       .unwrap();
     assert!(matches!(action, SteerAction::Continue));
     assert!(agent.dirty);
@@ -1306,12 +1276,12 @@ mod dirty_state_machine_tests {
   #[tokio::test]
   async fn compact_with_focus_includes_prompt() {
     let mut agent = dummy_agent();
-    let tui = crate::tui::TuiHandle::test_handle();
+    let steer = crate::steer::TestSteerHandle::new();
     agent.push_msg(human_user_msg("hello"));
     agent.push_msg(assistant_msg_with_reasoning("ok", ""));
 
     let action = agent
-      .apply_steer_event(SteerEvent::Compact(Some("fix auth".into())), &tui)
+      .apply_steer_event(SteerEvent::Compact(Some("fix auth".into())), &steer)
       .unwrap();
     assert!(matches!(action, SteerAction::Continue));
     assert!(matches!(agent.pending_compact, CompactPending::WithFocus(ref s) if s == "fix auth"));

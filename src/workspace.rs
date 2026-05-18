@@ -67,11 +67,6 @@ impl Workspace {
   }
 }
 
-pub fn workspace_root() -> &'static Path {
-  static ROOT: OnceLock<Workspace> = OnceLock::new();
-  ROOT.get_or_init(Workspace::from_current_dir).root()
-}
-
 #[allow(dead_code)]
 pub fn workspace_path(path: &str) -> Result<PathBuf> {
   static ROOT: OnceLock<Workspace> = OnceLock::new();
