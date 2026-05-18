@@ -234,7 +234,7 @@ async fn process_line(
   }
   let Ok(chunk) = serde_json::from_str::<StreamChunk>(data) else {
     eprintln!(
-      "[error] failed to parse sse data chunk: {}",
+      "failed to parse sse data chunk: {}",
       truncate_for_log(data, 240)
     );
     return;

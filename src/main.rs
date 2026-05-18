@@ -49,7 +49,7 @@ struct Args {
 async fn main() -> Result<()> {
   let args = parse_args();
   if let Err(err) = tools::ensure_exa_api_key_set() {
-    eprintln!("[error] {err}");
+    eprintln!("{err}");
     std::process::exit(2);
   }
   let workspace = crate::workspace::Workspace::from_current_dir();
