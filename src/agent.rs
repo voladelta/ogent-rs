@@ -7,6 +7,7 @@ use crate::types::{ChatResponse, Message, MessageOrigin, Tool, ToolCall};
 use crate::workers::WorkerManager;
 use crate::workspace::Workspace;
 use std::io::{self, Write};
+use std::sync::{Arc, Mutex, OnceLock};
 
 #[derive(Debug, thiserror::Error)]
 pub enum AgentError {
@@ -28,6 +29,10 @@ pub(crate) enum CompactPending {
   None,
   NoFocus,
   WithFocus(String),
+}
+
+pub trait AgentOutputSink: Send + Sync {
+  fn message(&self, source: &str, message: &Message);
 }
 
 enum SteerState {
@@ -215,11 +220,13 @@ impl SteerState {
               || !resp.tool_calls.is_empty()
             {
               agent.total_tokens = resp.usage.total_tokens as u64;
-              agent.push_msg(assistant_msg_full(
+              let msg = assistant_msg_full(
                 resp.content.clone(),
                 resp.reasoning_content.clone(),
                 resp.tool_calls.clone(),
-              ));
+              );
+              agent.push_msg(msg.clone());
+              agent.emit_message(&msg);
             }
             if cancelled {
               return Ok(Self::Idle {
@@ -403,6 +410,8 @@ pub struct Agent {
   pub worker_parent_session_id: Option<String>,
   pub worker_id: Option<String>,
   pub dirty: bool,
+  pub progress_sink: Option<Arc<Mutex<String>>>,
+  pub output_sink: Option<Arc<dyn AgentOutputSink>>,
 
   pub pending_compact: CompactPending,
 }
@@ -438,6 +447,8 @@ impl Agent {
       worker_parent_session_id,
       worker_id,
       dirty: false,
+      progress_sink: None,
+      output_sink: None,
 
       pending_compact: CompactPending::None,
     }
@@ -446,6 +457,24 @@ impl Agent {
   fn push_msg(&mut self, msg: Message) {
     self.dirty = true;
     self.messages.push(msg);
+  }
+
+  pub fn set_output_sink(&mut self, output_sink: Option<Arc<dyn AgentOutputSink>>) {
+    self.worker_manager.set_output_sink(output_sink.clone());
+    self.output_sink = output_sink;
+  }
+
+  fn output_source(&self) -> String {
+    self
+      .worker_id
+      .clone()
+      .unwrap_or_else(|| "director".to_string())
+  }
+
+  fn emit_message(&self, message: &Message) {
+    if let Some(sink) = &self.output_sink {
+      sink.message(&self.output_source(), message);
+    }
   }
 
   pub fn persist_if_dirty(&mut self) -> anyhow::Result<()> {
@@ -546,8 +575,10 @@ impl Agent {
         self.dirty = false;
         self.tools = crate::tools::configured_director_tools();
         self.total_tokens = 0;
+        let output_sink = self.output_sink.clone();
         self.worker_manager =
           WorkerManager::new(Some(&self.meta.session_id), self.workspace.clone());
+        self.worker_manager.set_output_sink(output_sink);
         self.compact.compacting = false;
         self.compact.urgency = 0;
         self.pending_compact = CompactPending::None;
@@ -671,25 +702,32 @@ impl Agent {
           truncate(&resp.reasoning_content, 300)
         ));
       } else {
-        eprintln!("reasoning: {}", truncate(&resp.reasoning_content, 300));
+        cli_log(
+          &self.output_source(),
+          format!("reasoning: {}", truncate(&resp.reasoning_content, 300)),
+        );
       }
     }
     if !resp.content.is_empty() && !streamed {
       if let Some(log) = ui_log {
         log.log_push_assistant_markdown(&resp.content);
       } else {
-        eprintln!("content: {}", truncate(&resp.content, 200));
+        cli_log(
+          &self.output_source(),
+          format!("content: {}", truncate(&resp.content, 200)),
+        );
       }
     }
 
     if resp.tool_calls.is_empty() {
-      self.push_msg(assistant_msg_with_reasoning(
-        resp.content.clone(),
-        resp.reasoning_content,
-      ));
+      let msg = assistant_msg_with_reasoning(resp.content.clone(), resp.reasoning_content);
+      self.push_msg(msg.clone());
+      self.emit_message(&msg);
+      if ui_log.is_none() && !self.meta.flags.worker && self.output_sink.is_none() {
+        cli_write_stdout_block(&self.output_source(), &resp.content)
+          .map_err(anyhow::Error::from)?;
+      }
       if ui_log.is_none() && !self.meta.flags.worker {
-        print!("{}", resp.content);
-        io::stdout().flush().map_err(anyhow::Error::from)?;
         self.report_tokens();
       }
       return Ok(false);
@@ -709,14 +747,20 @@ impl Agent {
           log.log_push(format!("  => {}", truncate(&r.output, 200)));
         }
       } else {
-        eprintln!(
-          "tool: {}({}) -> {}",
-          r.name,
-          truncate(&r.args, 120),
-          indicator
+        cli_log(
+          &self.output_source(),
+          format!(
+            "tool: {}({}) -> {}",
+            r.name,
+            truncate(&r.args, 120),
+            indicator
+          ),
         );
         if !r.success {
-          eprintln!("  => {}", truncate(&r.output, 200));
+          cli_log(
+            &self.output_source(),
+            format!("  => {}", truncate(&r.output, 200)),
+          );
         }
       }
     }
@@ -727,11 +771,13 @@ impl Agent {
     &mut self,
     resp: &ChatResponse,
   ) -> Result<Vec<ToolResult>, AgentError> {
-    self.push_msg(assistant_msg_full(
+    let assistant = assistant_msg_full(
       resp.content.clone(),
       resp.reasoning_content.clone(),
       resp.tool_calls.clone(),
-    ));
+    );
+    self.push_msg(assistant.clone());
+    self.emit_message(&assistant);
 
     let mut results = Vec::with_capacity(resp.tool_calls.len());
     let mut read_only_batch: Vec<&ToolCall> = Vec::new();
@@ -759,7 +805,9 @@ impl Agent {
     }
 
     for (tc, r) in resp.tool_calls.iter().zip(results.iter()) {
-      self.push_msg(tool_msg(r.output.clone(), tc.id.clone()));
+      let msg = tool_msg(r.output.clone(), tc.id.clone());
+      self.push_msg(msg.clone());
+      self.emit_message(&msg);
     }
     Ok(results)
   }
@@ -811,7 +859,10 @@ impl Agent {
   }
 
   fn report_tokens(&self) {
-    eprintln!("\n\ntokens: {}", self.total_tokens);
+    cli_log(
+      &self.output_source(),
+      format!("tokens: {}", self.total_tokens),
+    );
   }
 
   pub fn last_assistant_message(&self) -> Option<String> {
@@ -822,6 +873,39 @@ impl Agent {
       .find(|m| m.role == "assistant")
       .map(|m| m.content.clone())
   }
+}
+
+pub fn cli_output_sink() -> Arc<dyn AgentOutputSink> {
+  static SINK: OnceLock<Arc<CliOutputSink>> = OnceLock::new();
+  SINK.get_or_init(|| Arc::new(CliOutputSink)).clone()
+}
+
+struct CliOutputSink;
+
+impl AgentOutputSink for CliOutputSink {
+  fn message(&self, source: &str, message: &Message) {
+    if message.role == "assistant" && !message.content.is_empty() {
+      let _ = cli_write_stdout_block(source, &message.content);
+    }
+  }
+}
+
+fn cli_write_stdout_block(source: &str, content: &str) -> io::Result<()> {
+  if content.is_empty() {
+    return Ok(());
+  }
+  let mut out = io::stdout().lock();
+  for line in content.lines() {
+    writeln!(out, "[{source}] {line}")?;
+  }
+  if content.ends_with('\n') {
+    writeln!(out, "[{source}]")?;
+  }
+  out.flush()
+}
+
+fn cli_log(source: &str, line: impl AsRef<str>) {
+  eprintln!("[{source}] {}", line.as_ref());
 }
 
 fn human_user_msg(content: impl Into<String>) -> Message {
@@ -1166,8 +1250,8 @@ mod dirty_state_machine_tests {
   async fn persisted_trace_keeps_failed_dispatch_then_valid_wait() {
     let mut agent = dummy_agent();
     agent.worker_manager = WorkerManager::new_for_test(|args| async move {
-      crate::workers::WorkerProcessResult {
-        output: format!("finished {}", args.worker_id),
+      crate::workers::WorkerRunResult {
+        output: format!("finished {} with {}", args.worker_id, args.profile_name),
         err: None,
       }
     });
@@ -1226,7 +1310,7 @@ mod dirty_state_machine_tests {
       m.role == "tool"
         && m.tool_call_id == "wait-workers"
         && m.content.contains("\"status\":\"completed\"")
-        && m.content.contains("finished worker-1")
+        && m.content.contains("finished worker-1 with test")
     })
     .unwrap();
 

@@ -1,12 +1,10 @@
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::{Arc, OnceLock};
 
-use tokio::process::Command;
 use tokio::sync::{Mutex, Notify};
 
 const WORKER_PROGRESS_PROMPT_SUFFIX: &str = r#"## Progress Reporting
@@ -42,18 +40,20 @@ Open questions:
 Next action: accept | revise | verify | block
 ```"#;
 
-#[derive(Debug, Clone)]
-pub struct WorkerProcessArgs {
+#[derive(Clone)]
+pub struct WorkerRunArgs {
   pub system_prompt: String,
   pub task_prompt: String,
-  pub stream_stderr: bool,
   pub parent_session_id: String,
   pub worker_id: String,
+  pub profile_name: String,
   pub workspace_root: PathBuf,
+  pub progress_sink: Arc<std::sync::Mutex<String>>,
+  pub output_sink: Option<Arc<dyn crate::agent::AgentOutputSink>>,
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct WorkerProcessResult {
+pub struct WorkerRunResult {
   pub output: String,
   pub err: Option<String>,
 }
@@ -110,10 +110,11 @@ pub struct WorkerManager {
   inner: Mutex<Inner>,
   notify: Arc<Notify>,
   runner: WorkerRunner,
+  output_sink: Option<Arc<dyn crate::agent::AgentOutputSink>>,
 }
 
-type WorkerRunFuture = Pin<Box<dyn Future<Output = WorkerProcessResult> + Send>>;
-type WorkerRunner = Arc<dyn Fn(WorkerProcessArgs) -> WorkerRunFuture + Send + Sync>;
+type WorkerRunFuture = Pin<Box<dyn Future<Output = WorkerRunResult> + Send>>;
+type WorkerRunner = Arc<dyn Fn(WorkerRunArgs) -> WorkerRunFuture + Send + Sync>;
 
 struct Inner {
   next_id: usize,
@@ -122,13 +123,12 @@ struct Inner {
 }
 
 struct InFlightWorker {
-  workspace: crate::workspace::Workspace,
-  parent_session_id: String,
   batch_id: String,
   index: usize,
   role: String,
   worker_id: String,
-  done: tokio::task::JoinHandle<WorkerProcessResult>,
+  done: tokio::task::JoinHandle<WorkerRunResult>,
+  progress_sink: Arc<std::sync::Mutex<String>>,
 }
 
 impl WorkerManager {
@@ -143,15 +143,20 @@ impl WorkerManager {
         in_flight: Vec::new(),
       }),
       notify: Arc::new(Notify::new()),
-      runner: Arc::new(|args| Box::pin(run_worker_process(args))),
+      runner: Arc::new(|args| Box::pin(run_worker_agent(args))),
+      output_sink: None,
     }
+  }
+
+  pub fn set_output_sink(&mut self, output_sink: Option<Arc<dyn crate::agent::AgentOutputSink>>) {
+    self.output_sink = output_sink;
   }
 
   #[cfg(test)]
   pub(crate) fn new_for_test<F, Fut>(runner: F) -> Self
   where
-    F: Fn(WorkerProcessArgs) -> Fut + Send + Sync + 'static,
-    Fut: Future<Output = WorkerProcessResult> + Send + 'static,
+    F: Fn(WorkerRunArgs) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = WorkerRunResult> + Send + 'static,
   {
     Self {
       workspace: crate::workspace::Workspace::from_current_dir(),
@@ -162,6 +167,7 @@ impl WorkerManager {
       }),
       notify: Arc::new(Notify::new()),
       runner: Arc::new(move |args| Box::pin(runner(args))),
+      output_sink: None,
     }
   }
 
@@ -169,6 +175,7 @@ impl WorkerManager {
     &self,
     args: DispatchWorkersArgs,
     parent_session_id: &str,
+    profile_name: &str,
   ) -> Result<String> {
     if args.workers.is_empty() {
       bail!("workers must contain at least one worker");
@@ -232,13 +239,16 @@ impl WorkerManager {
         }
       };
 
-      let run_args = WorkerProcessArgs {
+      let progress_sink = Arc::new(std::sync::Mutex::new(default_worker_progress()));
+      let run_args = WorkerRunArgs {
         system_prompt,
         task_prompt,
-        stream_stderr: false,
         parent_session_id: parent_session_id.to_string(),
         worker_id: worker_id.clone(),
+        profile_name: profile_name.to_string(),
         workspace_root: self.workspace.root().to_path_buf(),
+        progress_sink: Arc::clone(&progress_sink),
+        output_sink: self.output_sink.clone(),
       };
       let notify = Arc::clone(&self.notify);
       let runner = Arc::clone(&self.runner);
@@ -256,13 +266,12 @@ impl WorkerManager {
         progress: default_worker_progress(),
       });
       let in_flight = InFlightWorker {
-        workspace: self.workspace.clone(),
-        parent_session_id: parent_session_id.to_string(),
         batch_id: batch_id.clone(),
         index,
         role,
         worker_id,
         done,
+        progress_sink,
       };
       self.inner.lock().await.in_flight.push(in_flight);
     }
@@ -327,35 +336,24 @@ impl WorkerManager {
 
   async fn running_workers(&self) -> Vec<WorkerStatus> {
     let inner = self.inner.lock().await;
-    let workers: Vec<_> = inner
+    inner
       .in_flight
       .iter()
       .map(|worker| {
-        (
-          worker.workspace.clone(),
-          worker.parent_session_id.clone(),
-          worker.batch_id.clone(),
-          worker.index,
-          worker.role.clone(),
-          worker.worker_id.clone(),
-        )
-      })
-      .collect();
-    drop(inner);
-
-    workers
-      .into_iter()
-      .map(
-        |(workspace, parent_session_id, batch_id, index, role, worker_id)| WorkerStatus {
-          progress: read_worker_progress(&workspace, &parent_session_id, &worker_id)
-            .unwrap_or_else(default_worker_progress),
-          batch_id,
-          index,
-          role,
-          worker_id,
+        let p = worker.progress_sink.lock().unwrap().trim().to_string();
+        WorkerStatus {
+          progress: if p.is_empty() {
+            "Starting".to_string()
+          } else {
+            p
+          },
+          batch_id: worker.batch_id.clone(),
+          index: worker.index,
+          role: worker.role.clone(),
+          worker_id: worker.worker_id.clone(),
           status: "running".to_string(),
-        },
-      )
+        }
+      })
       .collect()
   }
 }
@@ -385,26 +383,10 @@ fn default_worker_progress() -> String {
   "Starting".to_string()
 }
 
-fn read_worker_progress(
-  workspace: &crate::workspace::Workspace,
-  parent_session_id: &str,
-  worker_id: &str,
-) -> Option<String> {
-  let path = crate::session::worker_state_path_in(workspace, parent_session_id, worker_id);
-  let text = std::fs::read_to_string(path).ok()?;
-  let states: Value = serde_json::from_str(&text).ok()?;
-  let progress = states.get("progress/current")?.as_str()?.trim();
-  if progress.is_empty() {
-    None
-  } else {
-    Some(progress.to_string())
-  }
-}
-
 async fn collect_results(workers: Vec<InFlightWorker>) -> Vec<DispatchWorkerResult> {
   let mut results = Vec::with_capacity(workers.len());
   for worker in workers {
-    let result = worker.done.await.unwrap_or_else(|e| WorkerProcessResult {
+    let result = worker.done.await.unwrap_or_else(|e| WorkerRunResult {
       err: Some(e.to_string()),
       ..Default::default()
     });
@@ -448,97 +430,87 @@ fn wait_message(has_completed: bool, has_running: bool) -> String {
   }
 }
 
-pub async fn run_worker_process(args: WorkerProcessArgs) -> WorkerProcessResult {
-  let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("ogent"));
-  let mut cmd = Command::new(exe);
-  cmd.arg(format!("--worker={}", args.parent_session_id));
-  cmd.arg(&args.task_prompt);
-  cmd.current_dir(&args.workspace_root);
-  cmd.env("OGENT_WORKSPACE_ROOT", &args.workspace_root);
-  cmd.env("OGENT_WORKER_ID", &args.worker_id);
-  cmd.stdin(std::process::Stdio::piped());
-  cmd.stdout(std::process::Stdio::piped());
-  cmd.stderr(std::process::Stdio::piped());
-  let mut child = match cmd.spawn() {
-    Ok(child) => child,
-    Err(e) => {
-      return WorkerProcessResult {
-        err: Some(format!("start worker: {e}")),
-        ..Default::default()
-      };
-    }
-  };
-  if let Some(mut stdin) = child.stdin.take() {
-    let prompt = args.system_prompt;
-    tokio::spawn(async move {
-      use tokio::io::AsyncWriteExt;
-      let _ = stdin.write_all(prompt.as_bytes()).await;
-    });
+pub async fn run_worker_agent(args: WorkerRunArgs) -> WorkerRunResult {
+  match run_worker_agent_inner(args).await {
+    Ok(output) => WorkerRunResult { output, err: None },
+    Err(e) => WorkerRunResult {
+      output: String::new(),
+      err: Some(e.to_string()),
+    },
   }
+}
 
-  let Some(mut stdout) = child.stdout.take() else {
-    return WorkerProcessResult {
-      err: Some("worker stdout pipe unavailable after spawn".into()),
+async fn run_worker_agent_inner(args: WorkerRunArgs) -> Result<String> {
+  let profile_name = args.profile_name.clone();
+  let profile = crate::profiles::get_profile(&profile_name)
+    .with_context(|| format!("unknown profile: {profile_name}"))?;
+  let client = crate::providers::new_client(profile)?;
+  let workspace = crate::workspace::Workspace::from_root(args.workspace_root);
+  let messages = build_worker_messages(
+    &args.system_prompt,
+    &args.task_prompt,
+    &args.parent_session_id,
+  );
+  let compact = crate::agent::CompactState::new(0.80, profile.context_limit);
+  let meta = crate::session::SessionMeta {
+    session_id: args.parent_session_id.clone(),
+    parent_session: None,
+    profile: profile_name.clone(),
+    mode: "worker".to_string(),
+    flags: crate::session::SessionFlags {
+      steer: false,
+      worker: true,
+      autocompact: 80,
+      resume: false,
+      temp: false,
+    },
+    usage: crate::session::SessionUsage { total_tokens: 0 },
+    draft_input: None,
+    start_ts: Some(crate::session::timestamp_ms()),
+    end_ts: None,
+  };
+  let mut agent = crate::agent::Agent::new(
+    workspace,
+    client,
+    messages,
+    crate::tools::configured_worker_tools(),
+    compact,
+    meta,
+    Some(args.parent_session_id),
+    Some(args.worker_id),
+  );
+  agent.dirty = true;
+  agent.progress_sink = Some(args.progress_sink);
+  agent.output_sink = args.output_sink.clone();
+  agent.worker_manager.set_output_sink(args.output_sink);
+  let loop_result = agent.run_loop().await;
+  if let Err(e) = loop_result {
+    agent.persist_if_dirty()?;
+    return Err(e.into());
+  }
+  agent.persist_if_dirty()?;
+  Ok(agent.last_assistant_message().unwrap_or_default())
+}
+
+fn build_worker_messages(
+  system_prompt: &str,
+  prompt: &str,
+  session_id: &str,
+) -> Vec<crate::types::Message> {
+  vec![
+    crate::types::Message {
+      role: "system".into(),
+      content: system_prompt.to_string(),
+      origin: crate::types::MessageOrigin::Internal,
       ..Default::default()
-    };
-  };
-  let Some(mut stderr) = child.stderr.take() else {
-    return WorkerProcessResult {
-      err: Some("worker stderr pipe unavailable after spawn".into()),
+    },
+    crate::types::Message {
+      role: "user".into(),
+      content: format!("[session: {session_id}]\n\n{prompt}"),
+      origin: crate::types::MessageOrigin::Human,
       ..Default::default()
-    };
-  };
-
-  let stdout_task = tokio::spawn(async move {
-    let mut buf = Vec::new();
-    tokio::io::AsyncReadExt::read_to_end(&mut stdout, &mut buf)
-      .await
-      .ok();
-    String::from_utf8_lossy(&buf).to_string()
-  });
-
-  let stream_stderr = args.stream_stderr;
-  let stderr_task = tokio::spawn(async move {
-    let mut buf = Vec::new();
-    tokio::io::AsyncReadExt::read_to_end(&mut stderr, &mut buf)
-      .await
-      .ok();
-    let s = String::from_utf8_lossy(&buf).to_string();
-    if stream_stderr {
-      let _ = tokio::io::AsyncWriteExt::write_all(&mut tokio::io::stderr(), s.as_bytes()).await;
-    }
-    s
-  });
-
-  let status = match child.wait().await {
-    Ok(s) => s,
-    Err(e) => {
-      let out = stdout_task.await.unwrap_or_default();
-      let err = stderr_task.await.unwrap_or_default();
-      return WorkerProcessResult {
-        output: out.trim().to_string(),
-        err: Some(format!("{e}\n{err}")),
-      };
-    }
-  };
-
-  let out = stdout_task.await.unwrap_or_default();
-  let err = stderr_task.await.unwrap_or_default();
-
-  if !status.success() {
-    return WorkerProcessResult {
-      output: out.trim().to_string(),
-      err: Some(if err.trim().is_empty() {
-        status.to_string()
-      } else {
-        format!("{}\n{}", status, err.trim())
-      }),
-    };
-  }
-  WorkerProcessResult {
-    output: out.trim().to_string(),
-    err: None,
-  }
+    },
+  ]
 }
 
 static ARCHITECT_CLIENT: OnceLock<Result<crate::client::Client, String>> = OnceLock::new();
@@ -643,6 +615,7 @@ fn extract_tag(text: &str, tag: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
   use super::*;
+
   use serde_json::Value;
   use std::future;
   use std::path::PathBuf;
@@ -770,7 +743,11 @@ Some trailing text"#;
   async fn dispatch_rejects_empty_worker_list() {
     let manager = WorkerManager::new(None, crate::workspace::Workspace::from_current_dir());
     let err = manager
-      .dispatch(DispatchWorkersArgs { workers: vec![] }, "parent-session")
+      .dispatch(
+        DispatchWorkersArgs { workers: vec![] },
+        "parent-session",
+        "ds-flash",
+      )
       .await
       .expect_err("empty list should fail");
     assert!(err.to_string().contains("at least one worker"));
@@ -780,20 +757,19 @@ Some trailing text"#;
   async fn wait_returns_finished_workers() {
     let manager = WorkerManager::new(None, crate::workspace::Workspace::from_current_dir());
     let done = tokio::spawn(async {
-      WorkerProcessResult {
+      WorkerRunResult {
         output: "done".to_string(),
         err: None,
       }
     });
     tokio::task::yield_now().await;
     manager.inner.lock().await.in_flight.push(InFlightWorker {
-      workspace: crate::workspace::Workspace::from_current_dir(),
-      parent_session_id: "parent-session".to_string(),
       batch_id: "batch-1".to_string(),
       index: 0,
       role: "implementer".to_string(),
       worker_id: "worker-1".to_string(),
       done,
+      progress_sink: Arc::new(std::sync::Mutex::new(String::new())),
     });
 
     let out = manager
@@ -813,15 +789,14 @@ Some trailing text"#;
     cleanup_session_dir(&parent_session_id);
 
     let manager = WorkerManager::new(None, crate::workspace::Workspace::from_current_dir());
-    let done = tokio::spawn(async { future::pending::<WorkerProcessResult>().await });
+    let done = tokio::spawn(async { future::pending::<WorkerRunResult>().await });
     manager.inner.lock().await.in_flight.push(InFlightWorker {
-      workspace: crate::workspace::Workspace::from_current_dir(),
-      parent_session_id: parent_session_id.clone(),
       batch_id: parent_session_id.clone(),
       index: 0,
       role: "implementer".to_string(),
       worker_id: "worker-1".to_string(),
       done,
+      progress_sink: Arc::new(std::sync::Mutex::new("Starting".to_string())),
     });
 
     let out = manager
@@ -841,25 +816,15 @@ Some trailing text"#;
     let worker_id = "worker-1";
     cleanup_session_dir(&parent_session_id);
 
-    let state_path = crate::session::worker_state_path(&parent_session_id, worker_id);
-    let worker_dir = state_path.parent().unwrap();
-    std::fs::create_dir_all(worker_dir).unwrap();
-    std::fs::write(
-      &state_path,
-      r#"{"progress/current":"  indexing files  ","other":"value"}"#,
-    )
-    .unwrap();
-
     let manager = WorkerManager::new(None, crate::workspace::Workspace::from_current_dir());
-    let done = tokio::spawn(async { future::pending::<WorkerProcessResult>().await });
+    let done = tokio::spawn(async { future::pending::<WorkerRunResult>().await });
     manager.inner.lock().await.in_flight.push(InFlightWorker {
-      workspace: crate::workspace::Workspace::from_current_dir(),
-      parent_session_id: parent_session_id.clone(),
       batch_id: parent_session_id.clone(),
       index: 0,
       role: "implementer".to_string(),
       worker_id: worker_id.to_string(),
       done,
+      progress_sink: Arc::new(std::sync::Mutex::new("indexing files".to_string())),
     });
 
     let out = manager

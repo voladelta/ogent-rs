@@ -5,7 +5,6 @@
 | Flag | Meaning |
 | --- | --- |
 | `--profile <name>` | Model/profile selection |
-| `--worker=<parent_session_id>` | Internal worker subprocess mode |
 | `--autocompact <percent>` | Auto-compaction threshold (`-1` disables) |
 | `--resume[=<session_id>]` | Resume existing session |
 | `--fork[=<session_id>]` | Fork existing session into a child session |
@@ -13,8 +12,8 @@
 | `--create-skill <name>` | Generate/update `.ogent/skills/<name>/SKILL.md` |
 | `--serve <addr>` | WebSocket server mode (`ws://<addr>`) |
 
-`--create-skill` cannot be combined with `--resume`, `--fork`, `--worker`, or `--serve`.
-`--serve` cannot be combined with `--resume`, `--fork`, `--worker`, or an initial prompt.
+`--create-skill` cannot be combined with `--resume`, `--fork`, or `--serve`.
+`--serve` cannot be combined with `--resume`, `--fork`, or an initial prompt.
 
 ## WebSocket Protocol (`--serve`)
 
@@ -58,7 +57,13 @@ Outbound JSON:
   - `profile`
   - `repo`
 - `status`: current agent state/tokens/profile/model
-- `log`: textual stream/log lines (`level` + `line`)
+- `message`: transcript message from the Director or a worker:
+  - `source`: `"director"` or a worker id such as `"worker-1"`
+  - `role`: transcript role such as `"assistant"` or `"tool"`
+  - `content`
+  - `reasoning_content`
+  - `tool_calls`
+  - `tool_call_id`
 - `error`: protocol/runtime error with machine-readable `code` and human-readable `message`
 
 Disconnect behavior:
@@ -69,7 +74,7 @@ Disconnect behavior:
 
 Known limitation:
 
-- Tool execution, worker subprocesses, state, and session files are scoped to the setup `repo`; skill discovery and custom system prompt discovery still use the server startup cwd and home config.
+- Tool execution, workers, state, and session files are scoped to the setup `repo`; skill discovery and custom system prompt discovery still use the server startup cwd and home config.
 
 ## Resume Locking
 

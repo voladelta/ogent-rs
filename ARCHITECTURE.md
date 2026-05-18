@@ -40,7 +40,7 @@ main.rs
 - `src/workers.rs`
   - Worker prompt resolution.
   - Shared worker progress prompt injection.
-  - Worker subprocess spawn (`--worker=<parent_session_id>`, `OGENT_WORKER_ID`, `OGENT_WORKSPACE_ROOT`).
+  - In-process worker dispatch via `Agent::run_loop` in spawned async tasks.
   - Batch dispatch, async worker tracking, progress polling, and result collation.
 - `src/session.rs`
   - Session meta/messages persistence.
@@ -67,13 +67,13 @@ main.rs
 
 - Main agent is Director and does not receive direct file-edit tools.
 - In `--serve` mode, each websocket connection starts unbound and can initialize exactly one Director Agent via setup (`start`/`fork`/`resume`).
-- Each Agent has one immutable workspace root. WebSocket setup derives it from `repo`; CLI runs use the process current directory; worker mode uses `OGENT_WORKSPACE_ROOT` when present.
-- Tool execution, bash current directory, state paths, session files, and worker subprocesses are workspace-scoped. Do not use global `std::env::set_current_dir` for per-connection behavior.
+- Each Agent has one immutable workspace root. WebSocket setup derives it from `repo`; CLI runs use the process current directory.
+- Tool execution, bash current directory, state paths, session files, and spawned workers are workspace-scoped. Do not use global `std::env::set_current_dir` for per-connection behavior.
 - Worker file edits are done via worker toolset (`write_file`, `edit_hash_anchors`).
 - `dispatch_workers` starts workers and returns worker IDs immediately.
 - `wait_workers` long-polls for completed worker results and reports still-running workers after a short wait.
 - Running worker reports include `progress`, read from worker state key `progress/current`; missing or empty progress is reported as `Starting`.
-- Worker subprocess state/transcript are scoped under parent session + worker ID.
+- Worker state/transcript are scoped under parent session + worker ID.
 - `--resume` enforces single active process ownership with `{workspace_root}/.ogent/sessions/{session_id}/active.lock`.
 - Websocket `resume` uses an in-process active-session registry (not lock files) to prevent duplicate active sessions inside the serve process.
 - A run ends when the Director sends a final assistant message (no tool calls).

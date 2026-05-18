@@ -2,7 +2,7 @@
 
 `ogent` is a Director-first coding agent.
 
-The main agent is the Director. It frames the task, inspects the repo, manages state, dispatches workers, integrates results, and reports the outcome. Workspace edits are done by worker subprocesses.
+The main agent is the Director. It frames the task, inspects the repo, manages state, dispatches workers, integrates results, and reports the outcome. Workspace edits are done by workers.
 
 ## Quick Start
 
@@ -21,8 +21,6 @@ ogent "Implement feature X"
 # WebSocket server mode
 ogent --serve 127.0.0.1:9876
 
-# Internal worker subprocess mode
-ogent --worker=<parent_session_id> "<task prompt>"
 ```
 
 ## WebSocket Mode
@@ -44,7 +42,7 @@ After setup, send normal control messages:
 {"type":"exit"}
 ```
 
-Each WebSocket Director owns an immutable workspace root from `repo`. Tools, worker subprocesses, state, and session files are scoped to that workspace, so one server process can host connections for different repos.
+Each WebSocket Director owns an immutable workspace root from `repo`. Tools, workers, state, and session files are scoped to that workspace, so one server process can host connections for different repos.
 
 ## Key Behavior
 

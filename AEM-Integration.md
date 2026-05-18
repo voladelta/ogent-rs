@@ -263,7 +263,7 @@ Active or incomplete session if any condition is true:
 Completion:
 
 - Director session complete: final assistant output exists and the run ended normally, or `states.json` contains terminal `status`
-- worker session complete: worker subprocess exited successfully and produced output
+- worker session complete: worker finished successfully and produced output
 
 Outcome:
 

@@ -1,4 +1,4 @@
-use crate::agent::{Agent, CompactState};
+use crate::agent::{Agent, AgentOutputSink, CompactState};
 use crate::profiles;
 use crate::prompts;
 use crate::providers;
@@ -73,9 +73,13 @@ enum OutboundEvent {
     profile: String,
     model: String,
   },
-  Log {
-    level: String,
-    line: String,
+  Message {
+    source: String,
+    role: String,
+    content: String,
+    reasoning_content: String,
+    tool_calls: Vec<crate::types::ToolCall>,
+    tool_call_id: String,
   },
   Error {
     code: String,
@@ -133,13 +137,6 @@ impl WsSteerHandle {
         state: AgentState::Idle,
       })),
     }
-  }
-
-  fn emit_log(&self, level: &str, line: impl Into<String>) {
-    let _ = self.tx.send(OutboundEvent::Log {
-      level: level.to_string(),
-      line: line.into(),
-    });
   }
 
   fn emit_status(&self) {
@@ -215,33 +212,42 @@ impl SteerChannel for WsSteerHandle {
   }
 
   fn log_push(&self, line: String) {
-    self.emit_log("info", line);
+    let _ = line;
   }
 
   fn log_push_assistant_markdown(&self, content: &str) {
-    for line in content.lines() {
-      self.emit_log("assistant", line.to_string());
-    }
+    let _ = content;
   }
 
-  fn log_clear(&self) {
-    self.emit_log("control", "clear");
-  }
+  fn log_clear(&self) {}
 
-  fn log_start_stream(&self) {
-    self.emit_log("stream_start", "");
-  }
+  fn log_start_stream(&self) {}
 
   fn log_append_stream_chunk(&self, chunk: &str) {
-    self.emit_log("stream", chunk.to_string());
+    let _ = chunk;
   }
 
   fn log_append_reasoning_chunk(&self, chunk: &str) {
-    self.emit_log("reasoning", chunk.to_string());
+    let _ = chunk;
   }
 
-  fn log_end_stream(&self) {
-    self.emit_log("stream_end", "");
+  fn log_end_stream(&self) {}
+}
+
+struct WsMessageSink {
+  tx: mpsc::UnboundedSender<OutboundEvent>,
+}
+
+impl AgentOutputSink for WsMessageSink {
+  fn message(&self, source: &str, message: &crate::types::Message) {
+    let _ = self.tx.send(OutboundEvent::Message {
+      source: source.to_string(),
+      role: message.role.clone(),
+      content: message.content.clone(),
+      reasoning_content: message.reasoning_content.clone(),
+      tool_calls: message.tool_calls.clone(),
+      tool_call_id: message.tool_call_id.clone(),
+    });
   }
 }
 
@@ -732,6 +738,7 @@ fn launch_agent(
     None,
     None,
   );
+  agent.set_output_sink(Some(Arc::new(WsMessageSink { tx: out_tx.clone() })));
   agent.dirty = true;
   let _ = out_tx.send(OutboundEvent::Session {
     status: "ok".to_string(),

@@ -19,15 +19,7 @@ The Director does not directly edit workspace files.
 
 ## Worker Runtime
 
-Workers are subprocesses spawned by the Director:
-
-```bash
-ogent --worker=<parent_session_id> "<task prompt>"
-```
-
-Environment:
-
-- `OGENT_WORKER_ID` is required in worker mode.
+Workers are async tasks spawned by the Director. Each worker runs an independent `Agent` loop with the worker toolset.
 
 Worker persistence:
 

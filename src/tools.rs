@@ -709,8 +709,12 @@ fn state(agent: &mut Agent, args: &str) -> Result<String> {
       let content = args
         .content
         .context("content is required for state write")?;
-      map.insert(args.path, content);
+      let is_progress = args.path == "progress/current";
+      map.insert(args.path, content.clone());
       write_state_map(&scope_path, &map)?;
+      if is_progress && let Some(ref sink) = agent.progress_sink {
+        *sink.lock().unwrap() = content;
+      }
       Ok("ok".to_string())
     }
     "append" => {
@@ -718,8 +722,12 @@ fn state(agent: &mut Agent, args: &str) -> Result<String> {
       let content = args
         .content
         .context("content is required for state append")?;
+      let is_progress = args.path == "progress/current";
       let entry = map.entry(args.path).or_default();
       entry.push_str(&content);
+      if is_progress && let Some(ref sink) = agent.progress_sink {
+        *sink.lock().unwrap() = entry.clone();
+      }
       write_state_map(&scope_path, &map)?;
       Ok("ok".to_string())
     }
@@ -759,7 +767,7 @@ async fn dispatch_workers(agent: &mut Agent, args: &str) -> Result<String> {
     })?;
   agent
     .worker_manager
-    .dispatch(args, &agent.meta.session_id)
+    .dispatch(args, &agent.meta.session_id, &agent.meta.profile)
     .await
 }
 
