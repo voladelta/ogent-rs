@@ -509,10 +509,10 @@ async fn handle_connection(
   if let Some(tx) = &agent_tx {
     let _ = tx.send(SteerEvent::Exit(None));
   }
-  if let Some(join) = agent_join {
-    if let Ok(Err(err)) = join.await {
-      emit_error(&out_tx, "agent_error", err.to_string());
-    }
+  if let Some(join) = agent_join
+    && let Ok(Err(err)) = join.await
+  {
+    emit_error(&out_tx, "agent_error", err.to_string());
   }
   if let Some(session_key) = session_key_for_cleanup.take() {
     unregister_session(active_sessions, &session_key).await;
@@ -599,6 +599,7 @@ fn build_start_setup(
   })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_fork_or_resume_setup(
   mode: &str,
   repo: String,

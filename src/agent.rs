@@ -427,6 +427,7 @@ pub struct ToolResult {
 }
 
 impl Agent {
+  #[allow(clippy::too_many_arguments)]
   pub fn new(
     workspace: Workspace,
     client: Client,
