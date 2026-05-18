@@ -319,6 +319,7 @@ fn check_bash_cds(workspace: &Workspace, command: &str) -> Result<()> {
     cmd = cmd.replace(sep, "\n");
   }
   let base = workspace.root();
+  let tmp = Path::new("/tmp");
   for line in cmd.split('\n') {
     let mut words = line.split_whitespace();
     if words.next() == Some("cd") {
@@ -328,30 +329,10 @@ fn check_bash_cds(workspace: &Workspace, command: &str) -> Result<()> {
           "cd without argument is not allowed (would go to $HOME). Use a relative path within the workspace (e.g., ./foo) or /tmp."
         );
       }
-      let target = if path == "~" {
-        if let Some(home) = std::env::var_os("HOME") {
-          PathBuf::from(home)
-        } else {
-          bail!(
-            "cd to ~ is not allowed. Use a relative path within the workspace (e.g., ./foo) or /tmp."
-          );
-        }
-      } else if let Some(rest) = path.strip_prefix("~/") {
-        if let Some(home) = std::env::var_os("HOME") {
-          PathBuf::from(home).join(rest)
-        } else {
-          bail!(
-            "cd to ~/... is not allowed. Use a relative path within the workspace (e.g., ./foo) or /tmp."
-          );
-        }
-      } else if path.starts_with('/') {
-        PathBuf::from(path)
-      } else {
-        base.join(path)
-      };
+      let target = resolve_cd_target(base, path)?;
       let norm = crate::workspace::normalize(&target);
       let in_workspace = norm.starts_with(base);
-      let in_tmp = norm.starts_with(Path::new("/tmp"));
+      let in_tmp = norm.starts_with(tmp);
       if !in_workspace && !in_tmp {
         bail!(
           "cd to {path} is not allowed. You cannot cd outside the workspace or /tmp. Use relative paths within the workspace (e.g., ./foo or foo)."
@@ -360,6 +341,24 @@ fn check_bash_cds(workspace: &Workspace, command: &str) -> Result<()> {
     }
   }
   Ok(())
+}
+
+fn resolve_cd_target(base: &Path, path: &str) -> Result<PathBuf> {
+  if path == "~" {
+    return std::env::var_os("HOME").map(PathBuf::from).context(
+      "cd to ~ is not allowed. Use a relative path within the workspace (e.g., ./foo) or /tmp.",
+    );
+  }
+  if let Some(rest) = path.strip_prefix("~/") {
+    let home = std::env::var_os("HOME").context(
+      "cd to ~/... is not allowed. Use a relative path within the workspace (e.g., ./foo) or /tmp.",
+    )?;
+    return Ok(PathBuf::from(home).join(rest));
+  }
+  if path.starts_with('/') {
+    return Ok(PathBuf::from(path));
+  }
+  Ok(base.join(path))
 }
 
 fn check_director_bash_allowlist(command: &str) -> Result<()> {

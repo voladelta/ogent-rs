@@ -180,11 +180,11 @@ pub fn append_journal(session_id: &str, summary: &str) -> Result<()> {
 }
 
 pub fn find_latest_session(dir: &str) -> Option<String> {
-  let latest_dir = find_latest_session_dir(dir);
-  if latest_dir.is_some() {
-    return latest_dir;
-  }
-  find_latest_file(dir, "jsonl", |name| !name.contains("-worker-"))
+  find_latest_session_dir(dir).or_else(|| find_latest_file(dir, "jsonl", is_non_worker_jsonl))
+}
+
+fn is_non_worker_jsonl(name: &str) -> bool {
+  !name.contains("-worker-")
 }
 
 fn find_latest_session_dir(dir: &str) -> Option<String> {
@@ -218,32 +218,33 @@ fn find_latest_file(dir: &str, ext: &str, name_filter: fn(&str) -> bool) -> Opti
 }
 
 pub fn load_session_in(workspace: &Workspace, path_or_id: &str) -> Result<Vec<Message>> {
-  let dir = session_dir_in(workspace, path_or_id);
-  if dir.join("messages.jsonl").exists() {
-    return load_jsonl_file(&dir.join("messages.jsonl"));
-  }
-  let p = path_or_id;
-  let p = p.strip_suffix("/messages.jsonl").unwrap_or(p);
-  let p = p.strip_suffix(".jsonl").unwrap_or(p);
-  if let Some(id) = p.strip_prefix(".ogent/sessions/") {
-    let id = id.strip_suffix('/').unwrap_or(id);
-    let dir = session_dir_in(workspace, id);
-    if dir.join("messages.jsonl").exists() {
-      return load_jsonl_file(&dir.join("messages.jsonl"));
+  for candidate in session_candidates_in(workspace, path_or_id) {
+    if candidate.exists() {
+      return load_jsonl_file(&candidate);
     }
-  }
-  let jsonl_path = PathBuf::from(path_or_id);
-  if jsonl_path.exists() {
-    return load_jsonl_file(&jsonl_path);
-  }
-  let jsonl_path = PathBuf::from(format!("{path_or_id}.jsonl"));
-  if jsonl_path.exists() {
-    return load_jsonl_file(&jsonl_path);
   }
   anyhow::bail!("session not found: {path_or_id}")
 }
 
-fn load_jsonl_file(path: &PathBuf) -> Result<Vec<Message>> {
+fn session_candidates_in(workspace: &Workspace, path_or_id: &str) -> Vec<PathBuf> {
+  let mut candidates = vec![session_dir_in(workspace, path_or_id).join("messages.jsonl")];
+  let trimmed = path_or_id
+    .strip_suffix("/messages.jsonl")
+    .unwrap_or(path_or_id)
+    .strip_suffix(".jsonl")
+    .unwrap_or(path_or_id);
+  if let Some(id) = trimmed
+    .strip_prefix(".ogent/sessions/")
+    .map(|id| id.strip_suffix('/').unwrap_or(id))
+  {
+    candidates.push(session_dir_in(workspace, id).join("messages.jsonl"));
+  }
+  candidates.push(PathBuf::from(path_or_id));
+  candidates.push(PathBuf::from(format!("{path_or_id}.jsonl")));
+  candidates
+}
+
+fn load_jsonl_file(path: &std::path::Path) -> Result<Vec<Message>> {
   let data = fs::read_to_string(path)?;
   data
     .lines()

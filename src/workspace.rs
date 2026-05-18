@@ -25,22 +25,19 @@ impl Workspace {
   }
 
   pub fn workspace_path(&self, path: &str) -> Result<PathBuf> {
-    if path.is_empty() {
-      bail!("path is required");
-    }
-    let abs = self.absolute_tool_path(path);
-    if self.path_in_workspace(&abs) {
-      return Ok(abs);
-    }
-    bail!("path {path} is outside workspace {}", self.root.display())
+    self.resolve_scoped_path(path, false)
   }
 
   pub fn readable_path(&self, path: &str) -> Result<PathBuf> {
+    self.resolve_scoped_path(path, true)
+  }
+
+  fn resolve_scoped_path(&self, path: &str, allow_ogent_root: bool) -> Result<PathBuf> {
     if path.is_empty() {
       bail!("path is required");
     }
     let abs = self.absolute_tool_path(path);
-    if self.path_in_workspace(&abs) || path_in_allowed_root(&abs) {
+    if self.path_in_workspace(&abs) || (allow_ogent_root && path_in_allowed_root(&abs)) {
       return Ok(abs);
     }
     bail!("path {path} is outside workspace {}", self.root.display())
