@@ -1,8 +1,8 @@
 # ogent
 
-`ogent` is a Director-first terminal agent.
+`ogent` is a Director-first coding agent.
 
-The main process is the Director. It frames the task, inspects the repo, manages state, dispatches workers, integrates results, and reports the outcome. Workspace edits are done by worker subprocesses.
+The main agent is the Director. It frames the task, inspects the repo, manages state, dispatches workers, integrates results, and reports the outcome. Workspace edits are done by worker subprocesses.
 
 ## Quick Start
 
@@ -21,23 +21,48 @@ ogent "Implement feature X"
 # Steer-mode Director (TUI)
 ogent --steer
 
+# WebSocket server mode
+ogent --serve 127.0.0.1:9876
+
 # Internal worker subprocess mode
 ogent --worker=<parent_session_id> "<task prompt>"
 ```
 
+## WebSocket Mode
+
+`--serve` starts a localhost-friendly WebSocket server. Each connection starts unbound and creates exactly one Director after a setup message:
+
+```json
+{"type":"start","repo":"/path/to/repo","profile":"ds-flash","autocompact":80}
+{"type":"fork","repo":"/path/to/repo","session":"<session_id>","profile":"ds-flash"}
+{"type":"resume","repo":"/path/to/repo","session":"<session_id>","profile":"ds-flash"}
+```
+
+After setup, send normal control messages:
+
+```json
+{"type":"message","content":"Fix the failing tests"}
+{"type":"cancel"}
+{"type":"compact","focus":"handoff for next step"}
+{"type":"exit"}
+```
+
+Each WebSocket Director owns an immutable workspace root from `repo`. Tools, worker subprocesses, state, and session files are scoped to that workspace, so one server process can host connections for different repos.
+
 ## Key Behavior
 
-- Director tools include: `read_file`, `repo_map`, restricted `bash` (`colgrep`/`rg` only), web tools, `load_skill`, `state`, `dispatch_workers`, `wait_workers`.
+- Director tools include: `repo_map`, restricted `bash` (`colgrep`/`rg` only), `load_skill`, `state`, `dispatch_workers`, `wait_workers`.
 - Worker tools include editing tools (`write_file`, `read_hash_anchors`, `edit_hash_anchors`) plus read/web/bash/state tools.
 - `dispatch_workers` starts a worker batch and returns worker IDs immediately.
 - `wait_workers` returns completed worker results as soon as any worker finishes, or reports still-running workers after a short wait.
 - Running worker statuses include `progress`. Workers are prompted to write `progress/current` in their state; until they do, progress is `Starting`.
 - A run ends when the Director sends a final assistant message (no tool calls).
+- WebSocket `resume` rejects duplicate active sessions inside the same serve process.
 
 ## Runtime Layout
 
 ```txt
-.ogent/
+{workspace_root}/.ogent/
   sessions/
     {session_id}/
       meta.json
@@ -62,6 +87,7 @@ ogent --create-skill repo-audit "Review repositories for correctness and maintai
 ```bash
 cargo fmt
 cargo check
+cargo clippy --all-targets --all-features -- -D warnings
 cargo test
 ```
 
