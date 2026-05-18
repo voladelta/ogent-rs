@@ -53,38 +53,18 @@ pub fn generate_session_id() -> String {
   )
 }
 
-#[allow(dead_code)]
-pub fn session_dir(session_id: &str) -> PathBuf {
-  session_dir_in(&Workspace::from_current_dir(), session_id)
-}
-
 pub fn session_dir_in(workspace: &Workspace, session_id: &str) -> PathBuf {
   workspace.root().join(".ogent/sessions").join(session_id)
-}
-
-#[allow(dead_code)]
-pub fn state_path(session_id: &str) -> PathBuf {
-  state_path_in(&Workspace::from_current_dir(), session_id)
 }
 
 pub fn state_path_in(workspace: &Workspace, session_id: &str) -> PathBuf {
   session_dir_in(workspace, session_id).join("states.json")
 }
 
-#[allow(dead_code)]
-pub fn worker_dir(parent_session_id: &str, worker_id: &str) -> PathBuf {
-  worker_dir_in(&Workspace::from_current_dir(), parent_session_id, worker_id)
-}
-
 pub fn worker_dir_in(workspace: &Workspace, parent_session_id: &str, worker_id: &str) -> PathBuf {
   session_dir_in(workspace, parent_session_id)
     .join("workers")
     .join(worker_id)
-}
-
-#[allow(dead_code)]
-pub fn worker_state_path(parent_session_id: &str, worker_id: &str) -> PathBuf {
-  worker_state_path_in(&Workspace::from_current_dir(), parent_session_id, worker_id)
 }
 
 pub fn worker_state_path_in(
@@ -95,22 +75,12 @@ pub fn worker_state_path_in(
   worker_dir_in(workspace, parent_session_id, worker_id).join("states.json")
 }
 
-#[allow(dead_code)]
-pub fn worker_messages_path(parent_session_id: &str, worker_id: &str) -> PathBuf {
-  worker_messages_path_in(&Workspace::from_current_dir(), parent_session_id, worker_id)
-}
-
 pub fn worker_messages_path_in(
   workspace: &Workspace,
   parent_session_id: &str,
   worker_id: &str,
 ) -> PathBuf {
   worker_dir_in(workspace, parent_session_id, worker_id).join("messages.jsonl")
-}
-
-#[allow(dead_code)]
-pub fn write_meta(meta: &SessionMeta) -> Result<()> {
-  write_meta_in(&Workspace::from_current_dir(), meta)
 }
 
 pub fn write_meta_in(workspace: &Workspace, meta: &SessionMeta) -> Result<()> {
@@ -131,11 +101,6 @@ impl Drop for SessionLock {
   }
 }
 
-#[allow(dead_code)]
-pub fn try_acquire_session_lock(session_id: &str) -> Result<SessionLock> {
-  try_acquire_session_lock_in(&Workspace::from_current_dir(), session_id)
-}
-
 pub fn try_acquire_session_lock_in(workspace: &Workspace, session_id: &str) -> Result<SessionLock> {
   let dir = session_dir_in(workspace, session_id);
   fs::create_dir_all(&dir)?;
@@ -150,21 +115,11 @@ pub fn try_acquire_session_lock_in(workspace: &Workspace, session_id: &str) -> R
   Ok(SessionLock { path: lock_path })
 }
 
-#[allow(dead_code)]
-pub fn read_meta(session_id: &str) -> Result<SessionMeta> {
-  read_meta_in(&Workspace::from_current_dir(), session_id)
-}
-
 pub fn read_meta_in(workspace: &Workspace, session_id: &str) -> Result<SessionMeta> {
   let path = session_dir_in(workspace, session_id).join("meta.json");
   let data =
     fs::read_to_string(&path).with_context(|| format!("no meta.json in session {session_id}"))?;
   serde_json::from_str(&data).context("invalid meta.json")
-}
-
-#[allow(dead_code)]
-pub fn persist_session(messages: &[Message], session_id: &str) -> Result<()> {
-  persist_session_in(&Workspace::from_current_dir(), messages, session_id)
 }
 
 pub fn persist_session_in(
@@ -174,20 +129,6 @@ pub fn persist_session_in(
 ) -> Result<()> {
   let path = session_dir_in(workspace, session_id).join("messages.jsonl");
   persist_messages(messages, &path)
-}
-
-#[allow(dead_code)]
-pub fn persist_worker_session(
-  messages: &[Message],
-  parent_session_id: &str,
-  worker_id: &str,
-) -> Result<()> {
-  persist_worker_session_in(
-    &Workspace::from_current_dir(),
-    messages,
-    parent_session_id,
-    worker_id,
-  )
 }
 
 pub fn persist_worker_session_in(
@@ -274,11 +215,6 @@ fn find_latest_file(dir: &str, ext: &str, name_filter: fn(&str) -> bool) -> Opti
     .collect();
   entries.sort_by_key(|e| e.metadata().and_then(|m| m.modified()).ok());
   entries.last().map(|e| e.path().display().to_string())
-}
-
-#[allow(dead_code)]
-pub fn load_session(path_or_id: &str) -> Result<Vec<Message>> {
-  load_session_in(&Workspace::from_current_dir(), path_or_id)
 }
 
 pub fn load_session_in(workspace: &Workspace, path_or_id: &str) -> Result<Vec<Message>> {
@@ -404,13 +340,14 @@ mod tests {
 
   #[test]
   fn session_lock_is_exclusive() {
+    let ws = Workspace::from_current_dir();
     let session_id = format!("lock-test-{}", timestamp_ms());
-    let lock1 = try_acquire_session_lock(&session_id).unwrap();
-    assert!(try_acquire_session_lock(&session_id).is_err());
+    let lock1 = try_acquire_session_lock_in(&ws, &session_id).unwrap();
+    assert!(try_acquire_session_lock_in(&ws, &session_id).is_err());
     drop(lock1);
-    let lock2 = try_acquire_session_lock(&session_id).unwrap();
+    let lock2 = try_acquire_session_lock_in(&ws, &session_id).unwrap();
     drop(lock2);
-    let _ = std::fs::remove_dir_all(session_dir(&session_id));
+    let _ = std::fs::remove_dir_all(session_dir_in(&ws, &session_id));
   }
 
   #[test]

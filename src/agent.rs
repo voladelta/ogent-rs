@@ -1207,7 +1207,7 @@ mod dirty_state_machine_tests {
     assert!(matches!(action, SteerAction::Restart));
 
     // old session should have been persisted
-    let old_dir = session::session_dir(&old_id);
+    let old_dir = session::session_dir_in(&agent.workspace, &old_id);
     assert!(
       old_dir.join("meta.json").exists(),
       "old meta should be persisted"
@@ -1274,7 +1274,7 @@ mod dirty_state_machine_tests {
     assert!(agent.handle_turn_response(wait).await.unwrap());
 
     agent.persist_if_dirty().unwrap();
-    let messages = session::load_session(&agent.meta.session_id).unwrap();
+    let messages = session::load_session_in(&agent.workspace, &agent.meta.session_id).unwrap();
 
     let bad_dispatch_idx = first_message_index(&messages, |m| {
       m.tool_calls

@@ -952,7 +952,8 @@ mod tests {
       r#"{"action":"write","path":"status","content":"director"}"#,
     )
     .unwrap();
-    let director_path = crate::session::state_path(&director.meta.session_id);
+    let director_path =
+      crate::session::state_path_in(&director.workspace, &director.meta.session_id);
     assert!(director_path.exists());
 
     let mut worker = dummy_agent(Some((&director.meta.session_id, "worker-test-1")));
@@ -961,7 +962,11 @@ mod tests {
       r#"{"action":"write","path":"status","content":"worker"}"#,
     )
     .unwrap();
-    let worker_path = crate::session::worker_state_path(&director.meta.session_id, "worker-test-1");
+    let worker_path = crate::session::worker_state_path_in(
+      &worker.workspace,
+      &director.meta.session_id,
+      "worker-test-1",
+    );
     assert!(worker_path.exists());
   }
 

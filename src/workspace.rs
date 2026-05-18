@@ -1,6 +1,5 @@
 use anyhow::{Result, bail};
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
 
 #[derive(Debug, Clone)]
 pub struct Workspace {
@@ -65,22 +64,6 @@ impl Workspace {
     let path = normalize(path);
     path == self.root || path.starts_with(&self.root)
   }
-}
-
-#[allow(dead_code)]
-pub fn workspace_path(path: &str) -> Result<PathBuf> {
-  static ROOT: OnceLock<Workspace> = OnceLock::new();
-  ROOT
-    .get_or_init(Workspace::from_current_dir)
-    .workspace_path(path)
-}
-
-#[allow(dead_code)]
-pub fn readable_path(path: &str) -> Result<PathBuf> {
-  static ROOT: OnceLock<Workspace> = OnceLock::new();
-  ROOT
-    .get_or_init(Workspace::from_current_dir)
-    .readable_path(path)
 }
 
 fn path_in_allowed_root(path: &Path) -> bool {
