@@ -129,7 +129,7 @@ fn build_director_tools() -> Vec<Tool> {
     ),
     schema(
       "wait_workers",
-      "Wait for worker results. Returns immediately if any worker has completed; otherwise waits about 10 seconds before reporting still-running workers. Use after dispatch_workers and repeat until all needed worker results are returned.",
+      "Wait for worker results. Returns immediately if any worker has completed; otherwise waits about 15 seconds before reporting still-running workers. Use after dispatch_workers and repeat until all needed worker results are returned.",
       json!({"type":"object","properties":{},"additionalProperties":false}),
     ),
   ]

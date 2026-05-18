@@ -489,7 +489,7 @@ You normally have no implementation work to do while workers are running.
 
 `wait_workers` returns completed results immediately when any worker finishes.
 
-If none finish within about 10 seconds, it reports the still-running workers.
+If none finish within about 15 seconds, it reports the still-running workers.
 
 Repeat `wait_workers` until you have the results needed to integrate, verify, retry, or report.
 

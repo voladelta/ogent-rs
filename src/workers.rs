@@ -287,7 +287,7 @@ impl WorkerManager {
 
   pub async fn wait(&self) -> Result<String> {
     self
-      .wait_with_timeout(std::time::Duration::from_secs(10))
+      .wait_with_timeout(std::time::Duration::from_secs(15))
       .await
   }
 
@@ -415,7 +415,7 @@ fn dispatch_message(running_count: usize) -> String {
   if running_count == 0 {
     return "No workers are running. Inspect `completed` for dispatch-time failures.".to_string();
   }
-  "Workers dispatched successfully. Their results are not available yet. Next action: call `wait_workers`. `wait_workers` returns completed worker results as soon as any worker finishes; if none finish within about 10 seconds, it reports that workers are still running.".to_string()
+  "Workers dispatched successfully. Their results are not available yet. Next action: call `wait_workers`. `wait_workers` returns completed worker results as soon as any worker finishes; if none finish within about 15 seconds, it reports that workers are still running.".to_string()
 }
 
 fn wait_message(has_completed: bool, has_running: bool) -> String {
@@ -427,7 +427,7 @@ fn wait_message(has_completed: bool, has_running: bool) -> String {
       "All available worker results have been returned. No workers are still running.".to_string()
     }
     (false, true) => {
-      "No workers completed after waiting about 10 seconds. Workers are still running; call `wait_workers` again to continue waiting.".to_string()
+      "No workers completed after waiting about 15 seconds. Workers are still running; call `wait_workers` again to continue waiting.".to_string()
     }
     (false, false) => "No workers are running and no new worker results are available.".to_string(),
   }

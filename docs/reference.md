@@ -22,64 +22,304 @@
 
 ## WebSocket Protocol (`--serve`)
 
-Each websocket connection starts unbound. It does not create an Agent/session until setup succeeds.
+`--serve` exposes a single-agent websocket control protocol for clients such as TUIs, editor integrations, or browser UIs.
 
-Inbound JSON:
+Start a server:
 
-- `{"type":"start","repo":"/path/to/repo","temp":true,"profile":"ds-flash","autocompact":80}`
-- `{"type":"fork","repo":"/path/to/repo","session":"<session_id>","profile":"ds-flash","autocompact":80}`
-- `{"type":"resume","repo":"/path/to/repo","session":"<session_id>","profile":"ds-flash","autocompact":80}`
-- `{"type":"message","content":"..."}`
-- `{"type":"cancel"}`
-- `{"type":"new"}`
-- `{"type":"compact","focus":"optional focus task"}`
-- `{"type":"profile","profile":"ds-flash"}`
-- `{"type":"exit"}`
+```bash
+ogent --serve 127.0.0.1:9876
+```
+
+Or during development:
+
+```bash
+cargo run -- --serve 127.0.0.1:9876
+```
+
+Each websocket connection starts unbound. The first valid event must be `start`, `fork`, or `resume`; setup creates exactly one Director agent for that connection.
+
+### Client State Machine
+
+```text
+connect
+  -> send start | fork | resume
+  -> wait for session event
+  -> send message/control events
+  -> render status/message/error events until exit or close
+```
+
+Clients should treat outbound events as asynchronous. A `status` event can arrive before or after the setup `session` event.
+
+### Inbound Events
+
+Send each event as one websocket text frame containing JSON.
+
+Start a new session:
+
+```json
+{"type":"start","repo":"/path/to/repo","temp":false,"profile":"ds-flash","autocompact":80}
+```
+
+Fork an existing session into a new child session:
+
+```json
+{"type":"fork","repo":"/path/to/repo","session":"<session_id>","profile":"ds-flash","autocompact":80}
+```
+
+Resume an existing session:
+
+```json
+{"type":"resume","repo":"/path/to/repo","session":"<session_id>","profile":"ds-flash","autocompact":80}
+```
+
+Send user input:
+
+```json
+{"type":"message","content":"Fix the failing tests"}
+```
+
+Control the active agent:
+
+```json
+{"type":"cancel"}
+{"type":"new"}
+{"type":"compact","focus":"optional focus task"}
+{"type":"profile","profile":"ds-flash"}
+{"type":"exit"}
+```
 
 Setup rules:
 
 - `start`, `fork`, and `resume` require `repo`.
 - `repo` is canonicalized and must exist as a directory.
-- `temp` is valid only on `start`; `fork`/`resume` reject it.
-- `profile` and `autocompact` are valid on `start`/`fork`/`resume`; omitted values default to server startup values.
-- Before setup, non-setup events are rejected with `error.code = "not_initialized"`.
-- After setup, `start`/`fork`/`resume` are rejected with `error.code = "already_initialized"`.
-- `resume` is rejected with `error.code = "session_active"` if that session is already active in this websocket server process.
+- `temp` is valid only on `start`; `fork` and `resume` reject it.
+- `profile` and `autocompact` are valid on `start`, `fork`, and `resume`.
+- Omitted `profile`, `autocompact`, and `temp` values use the server startup defaults.
+- Before setup, non-setup events return `error.code = "not_initialized"`.
+- After setup, `start`, `fork`, and `resume` return `error.code = "already_initialized"`.
+- `resume` returns `error.code = "session_active"` if that session is already active in this websocket server process.
 
-Websocket active-session protection:
+Runtime control behavior:
+
+- `message` while idle starts a turn.
+- `message` during an in-flight turn cancels the current model request, preserves any partial assistant response already received, appends the new user message, and starts a new turn.
+- `cancel` cancels only an in-flight turn. If idle, it is effectively a no-op.
+- `profile` changes the model profile for later requests. Unknown profiles do not emit a websocket `error` or `status` change.
+- `exit` ends the agent loop and closes the websocket after persistence.
+- `new` starts a fresh child session inside the same connection.
+- `compact` asks the model for a handoff, then starts a fresh child session seeded with that handoff.
+
+Current tracking limitation:
+
+- `new` and successful `compact` rotate the internal `session_id`, but the websocket layer does not currently emit a new `session` event for the replacement session.
+- Active-session protection continues tracking the original setup session after `new` or `compact`, not the replacement session.
+- Clients that must know or protect the active session ID should avoid these controls for now or discover sessions from `.ogent/sessions/` after the fact.
+
+### Outbound Events
+
+Every outbound event is one websocket text frame containing JSON.
+
+Setup success:
+
+```json
+{
+  "type": "session",
+  "status": "ok",
+  "session_id": "<session_id>",
+  "mode": "start",
+  "profile": "ds-flash",
+  "repo": "/canonical/path/to/repo"
+}
+```
+
+`mode` is one of `start`, `fork`, or `resume`.
+
+Status update:
+
+```json
+{
+  "type": "status",
+  "state": "idle",
+  "tokens": 12345,
+  "profile": "ds-flash",
+  "model": "deepseek-v4-flash"
+}
+```
+
+`state` is one of:
+
+- `idle`: waiting for input or between internal turns.
+- `reasoning`: receiving reasoning stream chunks from the provider.
+- `replying`: receiving assistant content stream chunks from the provider.
+- `working`: the model is requesting or running tools.
+
+Clients should keep only the latest `status` as current state.
+
+Transcript message:
+
+```json
+{
+  "type": "message",
+  "source": "director",
+  "role": "assistant",
+  "content": "Done.",
+  "reasoning_content": "",
+  "tool_calls": [],
+  "tool_call_id": ""
+}
+```
+
+Fields:
+
+- `source` is `director` or a worker id such as `worker-1`.
+- `role` is the stored transcript role, commonly `assistant` or `tool`.
+- `content` is the visible message or tool result content.
+- `reasoning_content` may contain model reasoning text when the provider returns it.
+- `tool_calls` contains assistant tool call requests.
+- `tool_call_id` links a `tool` role message back to the tool call.
+
+Important rendering behavior:
+
+- The websocket protocol currently emits completed transcript messages, not token-level streaming chunks.
+- Use `status.state` for live progress indicators while waiting for the next `message`.
+- Assistant messages with non-empty `tool_calls` are intermediate; the Director will continue after tool results.
+- A final assistant message with empty `tool_calls` means the current turn is complete and the agent is idle again.
+
+Error:
+
+```json
+{
+  "type": "error",
+  "code": "not_initialized",
+  "message": "connection is not initialized; send start, fork, or resume first"
+}
+```
+
+Known error codes:
+
+- `invalid_event`: the inbound text frame was not valid protocol JSON.
+- `websocket_read_error`: the websocket read loop failed.
+- `not_initialized`: a non-setup event was sent before setup.
+- `already_initialized`: setup was attempted after this connection already had an agent.
+- `setup_failed`: setup validation or agent launch failed.
+- `session_active`: the requested resume session is already active in this server process.
+- `agent_error`: the agent loop failed after launch.
+- `serialization_failed`: outbound JSON serialization failed.
+
+Most protocol errors do not close the connection. The client may correct the request and continue unless the socket closes.
+
+### Browser Client Example
+
+This minimal HTML/JS client starts a session, appends assistant/tool messages, and tracks status.
+
+```html
+<!doctype html>
+<meta charset="utf-8" />
+<input id="repo" value="/Users/me/project" />
+<button id="connect">Connect</button>
+<pre id="status">disconnected</pre>
+<div id="log"></div>
+<input id="input" placeholder="Ask ogent..." />
+<button id="send">Send</button>
+
+<script>
+let ws;
+
+const log = (text) => {
+  const el = document.createElement("pre");
+  el.textContent = text;
+  document.querySelector("#log").appendChild(el);
+};
+
+document.querySelector("#connect").onclick = () => {
+  ws = new WebSocket("ws://127.0.0.1:9876");
+
+  ws.onopen = () => {
+    ws.send(JSON.stringify({
+      type: "start",
+      repo: document.querySelector("#repo").value,
+      profile: "ds-flash",
+      autocompact: 80
+    }));
+  };
+
+  ws.onmessage = (event) => {
+    const msg = JSON.parse(event.data);
+    if (msg.type === "session") {
+      log(`session ${msg.session_id} (${msg.mode})`);
+    } else if (msg.type === "status") {
+      document.querySelector("#status").textContent =
+        `${msg.state} | ${msg.tokens} tokens | ${msg.profile}`;
+    } else if (msg.type === "message") {
+      log(`[${msg.source}:${msg.role}] ${msg.content}`);
+    } else if (msg.type === "error") {
+      log(`[error:${msg.code}] ${msg.message}`);
+    }
+  };
+
+  ws.onclose = () => {
+    document.querySelector("#status").textContent = "closed";
+  };
+};
+
+document.querySelector("#send").onclick = () => {
+  const input = document.querySelector("#input");
+  ws.send(JSON.stringify({ type: "message", content: input.value }));
+  input.value = "";
+};
+</script>
+```
+
+### TUI Client Shape
+
+A TUI should split websocket reading from user input:
+
+```text
+main
+  connect ws://127.0.0.1:9876
+  send setup event
+  spawn reader task:
+    for each outbound event:
+      session -> store session_id and repo
+      status  -> update status bar
+      message -> append transcript row
+      error   -> append error row
+  input loop:
+    Enter      -> send {"type":"message","content":buffer}
+    Ctrl-C     -> send {"type":"cancel"}
+    Ctrl-N     -> send {"type":"new"} only if session-id tracking is not required
+    Ctrl-X     -> send {"type":"exit"} and close after server closes
+```
+
+Do not block the websocket reader while waiting for keyboard input. The agent can emit status and messages while the user is idle.
+
+### Session Protection
 
 - The server keeps an in-process active session registry for websocket runs.
 - `start` and `fork` create and register fresh session IDs.
 - `resume` registers the target session only if it is not already active.
-- IDs are unregistered when the connection/agent ends.
+- IDs are unregistered when the connection or agent ends.
 
-Outbound JSON:
+This only protects sessions inside one websocket server process. CLI `--resume` uses a separate workspace lock file described below.
 
-- `session`: setup success payload:
-  - `status`: `"ok"`
-  - `session_id`
-  - `mode`: `"start" | "fork" | "resume"`
-  - `profile`
-  - `repo`
-- `status`: current agent state/tokens/profile/model
-- `message`: transcript message from the Director or a worker:
-  - `source`: `"director"` or a worker id such as `"worker-1"`
-  - `role`: transcript role such as `"assistant"` or `"tool"`
-  - `content`
-  - `reasoning_content`
-  - `tool_calls`
-  - `tool_call_id`
-- `error`: protocol/runtime error with machine-readable `code` and human-readable `message`
+### Disconnect Behavior
 
-Disconnect behavior:
+- Client disconnect is treated as `exit`.
+- Dirty session data is persisted unless the session is temporary.
+- An in-flight request is cancelled through the steer-loop exit path.
 
-- The connection is treated as exit.
-- Dirty session data is persisted unless `--temp`.
-- In-flight request is cancelled via steer-loop exit path.
+### Security Notes
 
-Known limitation:
+- The websocket server has no authentication or origin checks.
+- Prefer binding to `127.0.0.1:<port>` for local clients.
+- Do not bind to a public interface unless you put an authenticated, trusted boundary in front of it.
+
+### Known Limitations
 
 - Tool execution, workers, state, and session files are scoped to the setup `repo`; skill discovery and custom system prompt discovery still use the server startup cwd and home config.
+- The protocol does not currently expose token-level stream chunks. It exposes status changes plus completed transcript messages.
+- `new` and `compact` do not currently send a replacement `session` event after rotating sessions.
+- Active-session protection is not updated to the replacement session after `new` or `compact`.
 
 ## Resume Locking
 
@@ -195,7 +435,7 @@ Input:
 Behavior:
 
 - Returns immediately if any unseen worker result is available.
-- Otherwise waits about 10 seconds.
+- Otherwise waits about 15 seconds.
 - If no worker finishes during that wait, returns the still-running workers.
 - Running worker statuses include `progress`.
 - `progress` is read from the worker state key `progress/current`.
