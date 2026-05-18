@@ -8,6 +8,7 @@ The main agent is the Director. It frames the task, inspects the repo, manages s
 
 ```bash
 export DEEPSEEK_API_KEY="sk-..."
+export EXA_API_KEY="..."
 
 cargo run -- "Fix the failing tests without overcomplicating"
 ```

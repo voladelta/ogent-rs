@@ -48,6 +48,10 @@ struct Args {
 #[tokio::main]
 async fn main() -> Result<()> {
   let args = parse_args();
+  if let Err(err) = tools::ensure_exa_api_key_set() {
+    eprintln!("[error] {err}");
+    std::process::exit(2);
+  }
   let workspace = crate::workspace::Workspace::from_current_dir();
   if args.resume.is_some() && args.fork.is_some() {
     bail!("use either resume or fork, not both");

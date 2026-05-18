@@ -149,6 +149,16 @@ fn flush_tool_calls(acc: &mut Vec<AccToolCall>, result: &mut ChatResponse) {
   );
 }
 
+fn truncate_for_log(s: &str, limit: usize) -> String {
+  if s.len() <= limit {
+    return s.to_string();
+  }
+  let end = s.floor_char_boundary(limit);
+  let mut out = s[..end].to_string();
+  out.push_str("...");
+  out
+}
+
 async fn send_event(tx: &mut Option<tokio::sync::mpsc::Sender<StreamEvent>>, ev: StreamEvent) {
   if let Some(t) = tx
     && t.send(ev).await.is_err()
@@ -223,6 +233,10 @@ async fn process_line(
     return;
   }
   let Ok(chunk) = serde_json::from_str::<StreamChunk>(data) else {
+    eprintln!(
+      "[error] failed to parse sse data chunk: {}",
+      truncate_for_log(data, 240)
+    );
     return;
   };
   if let Some(usage) = chunk.usage {

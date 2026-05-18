@@ -230,9 +230,17 @@ fn schema(name: &str, description: &str, parameters: Value) -> Tool {
   }
 }
 
-fn exa_client() -> &'static reqwest::Client {
+fn exa_client() -> Result<&'static reqwest::Client> {
   static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-  CLIENT.get_or_init(reqwest::Client::new)
+  if let Some(client) = CLIENT.get() {
+    return Ok(client);
+  }
+  let client = reqwest::Client::builder()
+    .timeout(Duration::from_secs(60))
+    .build()
+    .context("build exa client")?;
+  let _ = CLIENT.set(client);
+  CLIENT.get().context("exa client unavailable")
 }
 
 #[derive(Deserialize)]
@@ -626,18 +634,21 @@ async fn web_code_context(args: &str) -> Result<String> {
   Ok(v["response"].as_str().unwrap_or("").to_string())
 }
 
-fn exa_api_key() -> Result<&'static str> {
-  static KEY: OnceLock<String> = OnceLock::new();
-  let key = KEY.get_or_init(|| std::env::var("EXA_API_KEY").unwrap_or_default());
-  if key.is_empty() {
-    bail!("EXA_API_KEY not set");
+fn exa_api_key() -> Result<String> {
+  let key = std::env::var("EXA_API_KEY").unwrap_or_default();
+  if key.trim().is_empty() {
+    bail!("EXA_API_KEY is not set. Set EXA_API_KEY before running ogent.");
   }
   Ok(key)
 }
 
+pub fn ensure_exa_api_key_set() -> Result<()> {
+  exa_api_key().map(|_| ())
+}
+
 async fn exa_post(url: &str, body: Value) -> Result<Value> {
   let key = exa_api_key()?;
-  let resp = exa_client()
+  let resp = exa_client()?
     .post(url)
     .header("x-api-key", key)
     .json(&body)
@@ -646,10 +657,16 @@ async fn exa_post(url: &str, body: Value) -> Result<Value> {
   let status = resp.status();
   let text = resp.text().await?;
   if !status.is_success() {
+    eprintln!(
+      "[error] exa request failed: {} {}",
+      status.as_u16(),
+      text.trim()
+    );
     bail!("exa {}: {}", status.as_u16(), text.trim());
   }
   let v: Value = serde_json::from_str(&text).context("unmarshal exa response")?;
   if let Some(err) = v["error"].as_str().filter(|s| !s.is_empty()) {
+    eprintln!("[error] exa returned error: {err}");
     bail!("exa error: {err}");
   }
   Ok(v)

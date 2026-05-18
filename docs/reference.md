@@ -15,6 +15,11 @@
 `--create-skill` cannot be combined with `--resume`, `--fork`, or `--serve`.
 `--serve` cannot be combined with `--resume`, `--fork`, or an initial prompt.
 
+## Required Environment
+
+- `DEEPSEEK_API_KEY` must be set for provider access.
+- `EXA_API_KEY` must be set at startup. If missing/empty, `ogent` exits immediately with an error.
+
 ## WebSocket Protocol (`--serve`)
 
 Each websocket connection starts unbound. It does not create an Agent/session until setup succeeds.
@@ -78,7 +83,7 @@ Known limitation:
 
 ## Resume Locking
 
-`--resume` acquires `{workspace_root}/.ogent/sessions/{session_id}/active.lock` for the process lifetime. A second resume attempt for the same active session fails fast.
+`--resume` acquires `{workspace_root}/.ogent/sessions/{session_id}/active.lock` for the process lifetime. A second resume attempt for the same active session fails fast. If a stale lock file exists from a dead process, `ogent` now removes it automatically and continues.
 
 ## Director Tools
 
