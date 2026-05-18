@@ -1,0 +1,17 @@
+{
+  "name": "ogent-frontend-app",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "vite build",
+    "preview": "vite preview --host 127.0.0.1"
+  },
+  "dependencies": {
+    "@sveltejs/vite-plugin-svelte": "^7.1.2",
+    "vite": "^8.0.13",
+    "svelte": "^5.55.7"
+  },
+  "devDependencies": {}
+}
