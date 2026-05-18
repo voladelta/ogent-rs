@@ -340,7 +340,10 @@ impl WorkerManager {
       .in_flight
       .iter()
       .map(|worker| {
-        let p = worker.progress_sink.lock().unwrap().trim().to_string();
+        let p = match worker.progress_sink.lock() {
+          Ok(progress) => progress.trim().to_string(),
+          Err(poisoned) => poisoned.into_inner().trim().to_string(),
+        };
         WorkerStatus {
           progress: if p.is_empty() {
             "Starting".to_string()

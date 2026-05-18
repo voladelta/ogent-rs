@@ -108,7 +108,6 @@ pub fn new_client(profile: &Profile) -> Result<Client> {
               enable_thinking: true,
             },
           })
-          .expect("serialize request")
         },
         600,
       )
@@ -131,7 +130,6 @@ pub fn new_client(profile: &Profile) -> Result<Client> {
               clear_thinking: false,
             },
           })
-          .expect("serialize request")
         },
         600,
       )
@@ -153,7 +151,6 @@ pub fn new_client(profile: &Profile) -> Result<Client> {
             thinking: DeepSeekThinking { kind: "enabled" },
             reasoning_effort: effort,
           })
-          .expect("serialize request")
         },
         600,
       )
@@ -164,7 +161,8 @@ pub fn new_client(profile: &Profile) -> Result<Client> {
 
 fn make_client<F>(url: &str, key_env: &str, build: F, timeout_secs: u64) -> Result<Client>
 where
-  F: Fn(&[Message], &[Tool]) -> serde_json::Value + Send + Sync + 'static,
+  F:
+    Fn(&[Message], &[Tool]) -> Result<serde_json::Value, serde_json::Error> + Send + Sync + 'static,
 {
   Ok(Client::new(url, env_key(key_env)?, build, timeout_secs)?)
 }

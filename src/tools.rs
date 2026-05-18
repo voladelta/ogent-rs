@@ -2,7 +2,6 @@ use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
-use std::fmt::Write;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -483,7 +482,9 @@ fn repo_map_walk(
   if depth == 0 {
     out.push_str(".\n");
   } else if let Some(name) = rel.file_name() {
-    writeln!(out, "{}{}", "  ".repeat(depth), name.to_string_lossy()).unwrap();
+    out.push_str(&"  ".repeat(depth));
+    out.push_str(&name.to_string_lossy());
+    out.push('\n');
   }
   if path.is_dir() && depth < max_depth {
     let mut entries: Vec<_> = fs::read_dir(path)?.flatten().collect();
@@ -552,11 +553,15 @@ async fn web_search(args: &str) -> Result<String> {
   let v = exa_post("https://api.exa.ai/search", body).await?;
   let mut out = String::new();
   for (i, r) in v["results"].as_array().into_iter().flatten().enumerate() {
-    writeln!(out, "{}. {}", i + 1, r["title"].as_str().unwrap_or("")).unwrap();
-    writeln!(out, "   {}", r["url"].as_str().unwrap_or("")).unwrap();
+    out.push_str(&format!(
+      "{}. {}\n",
+      i + 1,
+      r["title"].as_str().unwrap_or("")
+    ));
+    out.push_str(&format!("   {}\n", r["url"].as_str().unwrap_or("")));
     if let Some(highlights) = r["highlights"].as_array() {
       for h in highlights {
-        writeln!(out, "   > {}", h.as_str().unwrap_or("")).unwrap();
+        out.push_str(&format!("   > {}\n", h.as_str().unwrap_or("")));
       }
     }
     out.push('\n');
@@ -589,15 +594,15 @@ async fn web_read(args: &str) -> Result<String> {
   let v = exa_post("https://api.exa.ai/contents", body).await?;
   let mut out = String::new();
   for r in v["results"].as_array().into_iter().flatten() {
-    writeln!(out, "--- {} ---", r["title"].as_str().unwrap_or("")).unwrap();
-    writeln!(out, "{}", r["url"].as_str().unwrap_or("")).unwrap();
+    out.push_str(&format!("--- {} ---\n", r["title"].as_str().unwrap_or("")));
+    out.push_str(&format!("{}\n", r["url"].as_str().unwrap_or("")));
     out.push('\n');
     if mode == "text" {
       out.push_str(r["text"].as_str().unwrap_or(""));
       out.push_str("\n\n");
     } else if let Some(highlights) = r["highlights"].as_array() {
       for h in highlights {
-        writeln!(out, "> {}", h.as_str().unwrap_or("")).unwrap();
+        out.push_str(&format!("> {}\n", h.as_str().unwrap_or("")));
       }
       out.push('\n');
     }
@@ -712,7 +717,8 @@ fn state(agent: &mut Agent, args: &str) -> Result<String> {
       map.insert(args.path, content.clone());
       write_state_map(&scope_path, &map)?;
       if is_progress && let Some(ref sink) = agent.progress_sink {
-        *sink.lock().unwrap() = content;
+        let mut guard = sink.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        *guard = content;
       }
       Ok("ok".to_string())
     }
@@ -725,7 +731,8 @@ fn state(agent: &mut Agent, args: &str) -> Result<String> {
       let entry = map.entry(args.path).or_default();
       entry.push_str(&content);
       if is_progress && let Some(ref sink) = agent.progress_sink {
-        *sink.lock().unwrap() = entry.clone();
+        let mut guard = sink.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        *guard = entry.clone();
       }
       write_state_map(&scope_path, &map)?;
       Ok("ok".to_string())
@@ -793,7 +800,7 @@ mod tests {
     Client::new(
       "http://localhost",
       "dummy".into(),
-      |_, _| serde_json::Value::Null,
+      |_, _| Ok(serde_json::Value::Null),
       30,
     )
     .unwrap()

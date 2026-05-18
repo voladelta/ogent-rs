@@ -139,7 +139,9 @@ async fn main() -> Result<()> {
         && m.tool_call_id.is_empty())
     });
     if is_resume {
-      meta.session_id = old_session_id.clone().expect("loaded session id");
+      meta.session_id = old_session_id
+        .clone()
+        .context("internal error: loaded session id missing during resume")?;
       session_lock = Some(session::try_acquire_session_lock_in(
         &workspace,
         &meta.session_id,

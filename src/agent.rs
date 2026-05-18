@@ -1047,7 +1047,7 @@ mod dirty_state_machine_tests {
     Client::new(
       "http://localhost",
       "dummy".into(),
-      |_, _| serde_json::Value::Null,
+      |_, _| Ok(serde_json::Value::Null),
       30,
     )
     .unwrap()

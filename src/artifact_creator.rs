@@ -84,7 +84,11 @@ where
     }
   }
 
-  Err(last_error.expect("at least one validation attempt"))
+  if let Some(err) = last_error {
+    Err(err)
+  } else {
+    bail!("validation failed without attempts")
+  }
 }
 
 fn skill_user_prompt(name: &str, objective: &str, existing: Option<&str>) -> String {

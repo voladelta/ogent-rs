@@ -1,5 +1,4 @@
 use anyhow::{Result, bail};
-use std::fmt::Write;
 use std::fs;
 use std::path::PathBuf;
 
@@ -108,13 +107,11 @@ pub fn discover_skills_message() -> String {
       if !seen.insert(key.clone()) {
         continue;
       }
-      writeln!(
-        out,
-        "  <skill name=\"{}\" description=\"{}\" />",
-        xml_escape(&key),
-        xml_escape(&desc)
-      )
-      .unwrap();
+      out.push_str("  <skill name=\"");
+      out.push_str(&xml_escape(&key));
+      out.push_str("\" description=\"");
+      out.push_str(&xml_escape(&desc));
+      out.push_str("\" />\n");
     }
   }
   if seen.is_empty() {

@@ -7,7 +7,7 @@ use crate::types::{ChatResponse, Message, Tool};
 
 const MAX_RETRIES: usize = 5;
 
-type BuildReq = Arc<dyn Fn(&[Message], &[Tool]) -> Value + Send + Sync>;
+type BuildReq = Arc<dyn Fn(&[Message], &[Tool]) -> Result<Value, serde_json::Error> + Send + Sync>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ClientError {
@@ -19,6 +19,8 @@ pub enum ClientError {
   ApiError { status: u16, body: String },
   #[error("http request failed")]
   Http(#[source] reqwest::Error),
+  #[error("failed to build request body")]
+  BuildRequest(#[source] serde_json::Error),
   #[error("sse error")]
   Sse(#[from] crate::sse::SseError),
 }
@@ -49,7 +51,7 @@ impl Client {
     request_timeout_secs: u64,
   ) -> Result<Self, ClientError>
   where
-    F: Fn(&[Message], &[Tool]) -> Value + Send + Sync + 'static,
+    F: Fn(&[Message], &[Tool]) -> Result<Value, serde_json::Error> + Send + Sync + 'static,
   {
     Ok(Self {
       http: reqwest::Client::builder()
@@ -72,7 +74,7 @@ impl Client {
     cancel: Option<&tokio_util::sync::CancellationToken>,
     stream_tx: Option<tokio::sync::mpsc::Sender<crate::sse::StreamEvent>>,
   ) -> Result<ChatResponse, ClientError> {
-    let req_body = (self.build_req)(messages, tools);
+    let req_body = (self.build_req)(messages, tools).map_err(ClientError::BuildRequest)?;
     let mut last_err = None;
     for attempt in 0..=MAX_RETRIES {
       if attempt > 0 {
@@ -85,7 +87,14 @@ impl Client {
         Err(err) => last_err = Some(err),
       }
     }
-    Err(last_err.expect("at least one attempt"))
+    if let Some(err) = last_err {
+      Err(err)
+    } else {
+      Err(ClientError::ApiError {
+        status: 0,
+        body: "retry loop exhausted without an error".to_string(),
+      })
+    }
   }
 
   /// Non-streaming chat. Sends `stream: false` and parses a single JSON response.
@@ -94,7 +103,7 @@ impl Client {
     messages: &[Message],
     tools: &[Tool],
   ) -> Result<ChatResponse, ClientError> {
-    let mut req_body = (self.build_req)(messages, tools);
+    let mut req_body = (self.build_req)(messages, tools).map_err(ClientError::BuildRequest)?;
     if let Some(obj) = req_body.as_object_mut() {
       obj.insert("stream".into(), serde_json::Value::Bool(false));
     }
