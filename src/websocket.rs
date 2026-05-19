@@ -286,8 +286,15 @@ pub async fn serve(
     let config = config.clone();
     let active_sessions = active_sessions.clone();
     tokio::spawn(async move {
-      if let Err(err) =
-        handle_connection(stream, &profile_name, autocompact, temp, config, active_sessions).await
+      if let Err(err) = handle_connection(
+        stream,
+        &profile_name,
+        autocompact,
+        temp,
+        config,
+        active_sessions,
+      )
+      .await
       {
         eprintln!("[serve] connection {peer} failed: {err}");
       }

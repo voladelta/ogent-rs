@@ -547,9 +547,9 @@ fn get_architect_client() -> Result<&'static crate::client::Client> {
     let profile = config
       .get_profile("ds-flash")
       .ok_or_else(|| "architect profile 'ds-flash' not found".to_string())?;
-    let provider = config.provider_for(profile).ok_or_else(|| {
-      "missing provider config for architect profile 'ds-flash'".to_string()
-    })?;
+    let provider = config
+      .provider_for(profile)
+      .ok_or_else(|| "missing provider config for architect profile 'ds-flash'".to_string())?;
     crate::providers::new_client(profile, provider).map_err(|e| e.to_string())
   });
   match result {

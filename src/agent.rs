@@ -1,4 +1,3 @@
-use anyhow::Context;
 use crate::client::{Client, ClientError};
 use crate::session;
 use crate::sse::{SseError, StreamEvent};
@@ -7,6 +6,7 @@ use crate::tools::{ToolContext, execute_tool, is_read_only_tool};
 use crate::types::{ChatResponse, Message, MessageOrigin, Tool, ToolCall};
 use crate::workers::WorkerManager;
 use crate::workspace::Workspace;
+use anyhow::Context;
 use std::io::{self, Write};
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -628,7 +628,10 @@ impl Agent {
       }
       SteerEvent::Profile(name) => match self.config.get_profile(&name) {
         Some(p) => {
-          let provider = self.config.provider_for(p).context("missing provider config for profile")?;
+          let provider = self
+            .config
+            .provider_for(p)
+            .context("missing provider config for profile")?;
           self.meta.draft_input = None;
           self.client = crate::providers::new_client(p, provider)?;
           self.meta.profile = name.clone();

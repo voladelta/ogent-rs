@@ -22,10 +22,10 @@ pub fn collect_source_files(path: &Path) -> Vec<PathBuf> {
 
 fn collect_files_inner(path: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
   if path.is_file() {
-    if let Some(ext) = path.extension() {
-      if ext == "rs" || ext == "go" {
-        files.push(path.to_path_buf());
-      }
+    if let Some(ext) = path.extension()
+      && (ext == "rs" || ext == "go")
+    {
+      files.push(path.to_path_buf());
     }
   } else if path.is_dir() {
     for entry in fs::read_dir(path)? {
@@ -107,10 +107,16 @@ fn format_symbol(out: &mut String, sym: &Symbol, depth: usize) {
   let sig = sym.signature.trim();
   let sig_compact: String = sig.lines().map(|l| l.trim()).collect::<Vec<_>>().join(" ");
   if sig_compact.is_empty() {
-    out.push_str(&format!("{}{} {}@{}:{}\n", indent, sym.kind, sym.name, sym.line_start, sym.line_end));
+    out.push_str(&format!(
+      "{}{} {}@{}:{}\n",
+      indent, sym.kind, sym.name, sym.line_start, sym.line_end
+    ));
   } else {
     let rest = display_rest(sym.kind, &sig_compact);
-    out.push_str(&format!("{}{} @{}:{} {}\n", indent, sym.kind, sym.line_start, sym.line_end, rest));
+    out.push_str(&format!(
+      "{}{} @{}:{} {}\n",
+      indent, sym.kind, sym.line_start, sym.line_end, rest
+    ));
   }
   for child in &sym.children {
     format_symbol(out, child, depth + 1);
@@ -160,53 +166,165 @@ fn extract_rust_block(source: &str, node: Node) -> Vec<Symbol> {
 }
 
 fn rust_signature(source: &str, node: Node) -> String {
-  signature_text(source, node, &["block", "field_declaration_list", "ordered_field_declaration_list", "enum_variant_list", "declaration_list"])
+  signature_text(
+    source,
+    node,
+    &[
+      "block",
+      "field_declaration_list",
+      "ordered_field_declaration_list",
+      "enum_variant_list",
+      "declaration_list",
+    ],
+  )
 }
 
 fn rust_node_to_symbol(source: &str, node: Node) -> Option<Symbol> {
   match node.kind() {
     "function_item" | "function_signature_item" => {
-      let name = child_by_field(node, "name")?.utf8_text(source.as_bytes()).ok()?.to_string();
-      Some(Symbol { kind: "fn", name, line_start: byte_to_line(source, node.start_byte()), line_end: byte_to_line(source, node.end_byte()), signature: rust_signature(source, node), children: vec![] })
+      let name = child_by_field(node, "name")?
+        .utf8_text(source.as_bytes())
+        .ok()?
+        .to_string();
+      Some(Symbol {
+        kind: "fn",
+        name,
+        line_start: byte_to_line(source, node.start_byte()),
+        line_end: byte_to_line(source, node.end_byte()),
+        signature: rust_signature(source, node),
+        children: vec![],
+      })
     }
     "struct_item" => {
-      let name = child_by_field(node, "name")?.utf8_text(source.as_bytes()).ok()?.to_string();
-      Some(Symbol { kind: "struct", name, line_start: byte_to_line(source, node.start_byte()), line_end: byte_to_line(source, node.end_byte()), signature: rust_signature(source, node), children: extract_rust_block(source, node) })
+      let name = child_by_field(node, "name")?
+        .utf8_text(source.as_bytes())
+        .ok()?
+        .to_string();
+      Some(Symbol {
+        kind: "struct",
+        name,
+        line_start: byte_to_line(source, node.start_byte()),
+        line_end: byte_to_line(source, node.end_byte()),
+        signature: rust_signature(source, node),
+        children: extract_rust_block(source, node),
+      })
     }
     "enum_item" => {
-      let name = child_by_field(node, "name")?.utf8_text(source.as_bytes()).ok()?.to_string();
-      Some(Symbol { kind: "enum", name, line_start: byte_to_line(source, node.start_byte()), line_end: byte_to_line(source, node.end_byte()), signature: rust_signature(source, node), children: extract_rust_block(source, node) })
+      let name = child_by_field(node, "name")?
+        .utf8_text(source.as_bytes())
+        .ok()?
+        .to_string();
+      Some(Symbol {
+        kind: "enum",
+        name,
+        line_start: byte_to_line(source, node.start_byte()),
+        line_end: byte_to_line(source, node.end_byte()),
+        signature: rust_signature(source, node),
+        children: extract_rust_block(source, node),
+      })
     }
     "trait_item" => {
-      let name = child_by_field(node, "name")?.utf8_text(source.as_bytes()).ok()?.to_string();
-      Some(Symbol { kind: "trait", name, line_start: byte_to_line(source, node.start_byte()), line_end: byte_to_line(source, node.end_byte()), signature: rust_signature(source, node), children: extract_rust_block(source, node) })
+      let name = child_by_field(node, "name")?
+        .utf8_text(source.as_bytes())
+        .ok()?
+        .to_string();
+      Some(Symbol {
+        kind: "trait",
+        name,
+        line_start: byte_to_line(source, node.start_byte()),
+        line_end: byte_to_line(source, node.end_byte()),
+        signature: rust_signature(source, node),
+        children: extract_rust_block(source, node),
+      })
     }
     "impl_item" => {
       let type_node = child_by_field(node, "type")?;
       let type_name = type_node.utf8_text(source.as_bytes()).ok()?.to_string();
-      let trait_name = child_by_field(node, "trait").and_then(|n| Some(n.utf8_text(source.as_bytes()).ok()?.to_string()));
-      let name = if let Some(t) = trait_name { format!("{} for {}", t, type_name) } else { type_name };
-      Some(Symbol { kind: "impl", name, line_start: byte_to_line(source, node.start_byte()), line_end: byte_to_line(source, node.end_byte()), signature: rust_signature(source, node), children: extract_rust_block(source, node) })
+      let trait_name = child_by_field(node, "trait")
+        .and_then(|n| Some(n.utf8_text(source.as_bytes()).ok()?.to_string()));
+      let name = if let Some(t) = trait_name {
+        format!("{} for {}", t, type_name)
+      } else {
+        type_name
+      };
+      Some(Symbol {
+        kind: "impl",
+        name,
+        line_start: byte_to_line(source, node.start_byte()),
+        line_end: byte_to_line(source, node.end_byte()),
+        signature: rust_signature(source, node),
+        children: extract_rust_block(source, node),
+      })
     }
     "mod_item" => {
-      let name = child_by_field(node, "name")?.utf8_text(source.as_bytes()).ok()?.to_string();
-      Some(Symbol { kind: "mod", name, line_start: byte_to_line(source, node.start_byte()), line_end: byte_to_line(source, node.end_byte()), signature: rust_signature(source, node), children: extract_rust_block(source, node) })
+      let name = child_by_field(node, "name")?
+        .utf8_text(source.as_bytes())
+        .ok()?
+        .to_string();
+      Some(Symbol {
+        kind: "mod",
+        name,
+        line_start: byte_to_line(source, node.start_byte()),
+        line_end: byte_to_line(source, node.end_byte()),
+        signature: rust_signature(source, node),
+        children: extract_rust_block(source, node),
+      })
     }
     "type_item" => {
-      let name = child_by_field(node, "name")?.utf8_text(source.as_bytes()).ok()?.to_string();
-      Some(Symbol { kind: "type", name, line_start: byte_to_line(source, node.start_byte()), line_end: byte_to_line(source, node.end_byte()), signature: rust_signature(source, node), children: vec![] })
+      let name = child_by_field(node, "name")?
+        .utf8_text(source.as_bytes())
+        .ok()?
+        .to_string();
+      Some(Symbol {
+        kind: "type",
+        name,
+        line_start: byte_to_line(source, node.start_byte()),
+        line_end: byte_to_line(source, node.end_byte()),
+        signature: rust_signature(source, node),
+        children: vec![],
+      })
     }
     "const_item" => {
-      let name = child_by_field(node, "name")?.utf8_text(source.as_bytes()).ok()?.to_string();
-      Some(Symbol { kind: "const", name, line_start: byte_to_line(source, node.start_byte()), line_end: byte_to_line(source, node.end_byte()), signature: rust_signature(source, node), children: vec![] })
+      let name = child_by_field(node, "name")?
+        .utf8_text(source.as_bytes())
+        .ok()?
+        .to_string();
+      Some(Symbol {
+        kind: "const",
+        name,
+        line_start: byte_to_line(source, node.start_byte()),
+        line_end: byte_to_line(source, node.end_byte()),
+        signature: rust_signature(source, node),
+        children: vec![],
+      })
     }
     "static_item" => {
-      let name = child_by_field(node, "name")?.utf8_text(source.as_bytes()).ok()?.to_string();
-      Some(Symbol { kind: "static", name, line_start: byte_to_line(source, node.start_byte()), line_end: byte_to_line(source, node.end_byte()), signature: rust_signature(source, node), children: vec![] })
+      let name = child_by_field(node, "name")?
+        .utf8_text(source.as_bytes())
+        .ok()?
+        .to_string();
+      Some(Symbol {
+        kind: "static",
+        name,
+        line_start: byte_to_line(source, node.start_byte()),
+        line_end: byte_to_line(source, node.end_byte()),
+        signature: rust_signature(source, node),
+        children: vec![],
+      })
     }
     "macro_definition" => {
-      let name = child_by_field(node, "name")?.utf8_text(source.as_bytes()).ok()?.to_string();
-      Some(Symbol { kind: "macro", name, line_start: byte_to_line(source, node.start_byte()), line_end: byte_to_line(source, node.end_byte()), signature: rust_signature(source, node), children: vec![] })
+      let name = child_by_field(node, "name")?
+        .utf8_text(source.as_bytes())
+        .ok()?
+        .to_string();
+      Some(Symbol {
+        kind: "macro",
+        name,
+        line_start: byte_to_line(source, node.start_byte()),
+        line_end: byte_to_line(source, node.end_byte()),
+        signature: rust_signature(source, node),
+        children: vec![],
+      })
     }
     _ => None,
   }
@@ -267,64 +385,130 @@ fn go_signature(source: &str, node: Node) -> String {
 fn go_node_to_symbol(source: &str, node: Node) -> Option<Symbol> {
   match node.kind() {
     "package_clause" => {
-      let name = node.children(&mut node.walk()).find(|c| c.kind() == "package_identifier")?.utf8_text(source.as_bytes()).ok()?.to_string();
+      let name = node
+        .children(&mut node.walk())
+        .find(|c| c.kind() == "package_identifier")?
+        .utf8_text(source.as_bytes())
+        .ok()?
+        .to_string();
       let sig = go_signature(source, node);
-      Some(Symbol { kind: "package", name, line_start: byte_to_line(source, node.start_byte()), line_end: byte_to_line(source, node.end_byte()), signature: sig, children: vec![] })
+      Some(Symbol {
+        kind: "package",
+        name,
+        line_start: byte_to_line(source, node.start_byte()),
+        line_end: byte_to_line(source, node.end_byte()),
+        signature: sig,
+        children: vec![],
+      })
     }
     "function_declaration" => {
-      let name = child_by_field(node, "name")?.utf8_text(source.as_bytes()).ok()?.to_string();
+      let name = child_by_field(node, "name")?
+        .utf8_text(source.as_bytes())
+        .ok()?
+        .to_string();
       let sig = go_signature(source, node);
-      Some(Symbol { kind: "fn", name, line_start: byte_to_line(source, node.start_byte()), line_end: byte_to_line(source, node.end_byte()), signature: sig, children: vec![] })
+      Some(Symbol {
+        kind: "fn",
+        name,
+        line_start: byte_to_line(source, node.start_byte()),
+        line_end: byte_to_line(source, node.end_byte()),
+        signature: sig,
+        children: vec![],
+      })
     }
     "method_declaration" => {
-      let name = child_by_field(node, "name")?.utf8_text(source.as_bytes()).ok()?.to_string();
+      let name = child_by_field(node, "name")?
+        .utf8_text(source.as_bytes())
+        .ok()?
+        .to_string();
       let sig = go_signature(source, node);
-      Some(Symbol { kind: "fn", name, line_start: byte_to_line(source, node.start_byte()), line_end: byte_to_line(source, node.end_byte()), signature: sig, children: vec![] })
+      Some(Symbol {
+        kind: "fn",
+        name,
+        line_start: byte_to_line(source, node.start_byte()),
+        line_end: byte_to_line(source, node.end_byte()),
+        signature: sig,
+        children: vec![],
+      })
     }
     "type_declaration" => {
       // type_declaration may contain one or more type_spec
       let mut cursor = node.walk();
       let mut out = Vec::new();
       for child in node.children(&mut cursor) {
-        if child.kind() == "type_spec" {
-          if let Some(sym) = go_type_spec_to_symbol(source, child) {
-            out.push(sym);
-          }
+        if child.kind() == "type_spec"
+          && let Some(sym) = go_type_spec_to_symbol(source, child)
+        {
+          out.push(sym);
         }
       }
       // Return a pseudo-symbol with children if multiple, else unwrap
       if out.len() == 1 {
         return out.into_iter().next();
       }
-      if out.is_empty() { return None; }
+      if out.is_empty() {
+        return None;
+      }
       let line_start = byte_to_line(source, node.start_byte());
       let line_end = byte_to_line(source, node.end_byte());
-      Some(Symbol { kind: "type", name: "(group)".to_string(), line_start, line_end, signature: go_signature(source, node), children: out })
+      Some(Symbol {
+        kind: "type",
+        name: "(group)".to_string(),
+        line_start,
+        line_end,
+        signature: go_signature(source, node),
+        children: out,
+      })
     }
     "const_declaration" => {
       let mut out = Vec::new();
       go_collect_specs(source, node, "const_spec", "const", &mut out);
-      if out.len() == 1 { return out.into_iter().next(); }
-      if out.is_empty() { return None; }
+      if out.len() == 1 {
+        return out.into_iter().next();
+      }
+      if out.is_empty() {
+        return None;
+      }
       let line_start = byte_to_line(source, node.start_byte());
       let line_end = byte_to_line(source, node.end_byte());
-      Some(Symbol { kind: "const", name: "(group)".to_string(), line_start, line_end, signature: go_signature(source, node), children: out })
+      Some(Symbol {
+        kind: "const",
+        name: "(group)".to_string(),
+        line_start,
+        line_end,
+        signature: go_signature(source, node),
+        children: out,
+      })
     }
     "var_declaration" => {
       let mut out = Vec::new();
       go_collect_specs(source, node, "var_spec", "var", &mut out);
-      if out.len() == 1 { return out.into_iter().next(); }
-      if out.is_empty() { return None; }
+      if out.len() == 1 {
+        return out.into_iter().next();
+      }
+      if out.is_empty() {
+        return None;
+      }
       let line_start = byte_to_line(source, node.start_byte());
       let line_end = byte_to_line(source, node.end_byte());
-      Some(Symbol { kind: "var", name: "(group)".to_string(), line_start, line_end, signature: go_signature(source, node), children: out })
+      Some(Symbol {
+        kind: "var",
+        name: "(group)".to_string(),
+        line_start,
+        line_end,
+        signature: go_signature(source, node),
+        children: out,
+      })
     }
     _ => None,
   }
 }
 
 fn go_type_spec_to_symbol(source: &str, node: Node) -> Option<Symbol> {
-  let name = child_by_field(node, "name")?.utf8_text(source.as_bytes()).ok()?.to_string();
+  let name = child_by_field(node, "name")?
+    .utf8_text(source.as_bytes())
+    .ok()?
+    .to_string();
   let line_start = byte_to_line(source, node.start_byte());
   let line_end = byte_to_line(source, node.end_byte());
 
@@ -332,29 +516,56 @@ fn go_type_spec_to_symbol(source: &str, node: Node) -> Option<Symbol> {
   for child in node.children(&mut cursor) {
     match child.kind() {
       "struct_type" => {
-        return Some(Symbol { kind: "struct", name, line_start, line_end, signature: go_signature(source, node), children: extract_go_struct_fields(source, child) });
+        return Some(Symbol {
+          kind: "struct",
+          name,
+          line_start,
+          line_end,
+          signature: go_signature(source, node),
+          children: extract_go_struct_fields(source, child),
+        });
       }
       "interface_type" => {
-        return Some(Symbol { kind: "interface", name, line_start, line_end, signature: go_signature(source, node), children: extract_go_interface_methods(source, child) });
+        return Some(Symbol {
+          kind: "interface",
+          name,
+          line_start,
+          line_end,
+          signature: go_signature(source, node),
+          children: extract_go_interface_methods(source, child),
+        });
       }
       _ => {}
     }
   }
   // Type alias or other type
-  Some(Symbol { kind: "type", name, line_start, line_end, signature: go_signature(source, node), children: vec![] })
+  Some(Symbol {
+    kind: "type",
+    name,
+    line_start,
+    line_end,
+    signature: go_signature(source, node),
+    children: vec![],
+  })
 }
 
 fn extract_go_struct_fields(source: &str, node: Node) -> Vec<Symbol> {
   let mut out = Vec::new();
   let mut cursor = node.walk();
   for child in node.children(&mut cursor) {
-    if child.kind() == "field_declaration" || child.kind() == "field_declaration_list" {
-      if let Some(name) = child.child_by_field_name("name") {
-        if let Ok(name_str) = name.utf8_text(source.as_bytes()) {
-          let sig = go_signature(source, child);
-          out.push(Symbol { kind: "field", name: name_str.to_string(), line_start: byte_to_line(source, child.start_byte()), line_end: byte_to_line(source, child.end_byte()), signature: sig, children: vec![] });
-        }
-      }
+    if (child.kind() == "field_declaration" || child.kind() == "field_declaration_list")
+      && let Some(name) = child.child_by_field_name("name")
+      && let Ok(name_str) = name.utf8_text(source.as_bytes())
+    {
+      let sig = go_signature(source, child);
+      out.push(Symbol {
+        kind: "field",
+        name: name_str.to_string(),
+        line_start: byte_to_line(source, child.start_byte()),
+        line_end: byte_to_line(source, child.end_byte()),
+        signature: sig,
+        children: vec![],
+      });
     }
   }
   out
@@ -364,25 +575,47 @@ fn extract_go_interface_methods(source: &str, node: Node) -> Vec<Symbol> {
   let mut out = Vec::new();
   let mut cursor = node.walk();
   for child in node.children(&mut cursor) {
-    if child.kind() == "method_elem" || child.kind() == "method_spec" {
-      if let Some(name) = child.child_by_field_name("name") {
-        if let Ok(name_str) = name.utf8_text(source.as_bytes()) {
-          let sig = go_signature(source, child);
-          out.push(Symbol { kind: "fn", name: name_str.to_string(), line_start: byte_to_line(source, child.start_byte()), line_end: byte_to_line(source, child.end_byte()), signature: sig, children: vec![] });
-        }
-      }
+    if (child.kind() == "method_elem" || child.kind() == "method_spec")
+      && let Some(name) = child.child_by_field_name("name")
+      && let Ok(name_str) = name.utf8_text(source.as_bytes())
+    {
+      let sig = go_signature(source, child);
+      out.push(Symbol {
+        kind: "fn",
+        name: name_str.to_string(),
+        line_start: byte_to_line(source, child.start_byte()),
+        line_end: byte_to_line(source, child.end_byte()),
+        signature: sig,
+        children: vec![],
+      });
     }
   }
   out
 }
 
 fn go_const_var_spec_to_symbol(source: &str, node: Node, kind: &'static str) -> Option<Symbol> {
-  let name = child_by_field(node, "name")?.utf8_text(source.as_bytes()).ok()?.to_string();
+  let name = child_by_field(node, "name")?
+    .utf8_text(source.as_bytes())
+    .ok()?
+    .to_string();
   let sig = go_signature(source, node);
-  Some(Symbol { kind, name, line_start: byte_to_line(source, node.start_byte()), line_end: byte_to_line(source, node.end_byte()), signature: sig, children: vec![] })
+  Some(Symbol {
+    kind,
+    name,
+    line_start: byte_to_line(source, node.start_byte()),
+    line_end: byte_to_line(source, node.end_byte()),
+    signature: sig,
+    children: vec![],
+  })
 }
 
-fn go_collect_specs(source: &str, node: Node, spec_kind: &str, symbol_kind: &'static str, out: &mut Vec<Symbol>) {
+fn go_collect_specs(
+  source: &str,
+  node: Node,
+  spec_kind: &str,
+  symbol_kind: &'static str,
+  out: &mut Vec<Symbol>,
+) {
   let mut cursor = node.walk();
   for child in node.children(&mut cursor) {
     if child.kind() == spec_kind {

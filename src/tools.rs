@@ -591,7 +591,11 @@ struct CodeMapArgs {
 
 fn code_map(workspace: &Workspace, args: &str) -> Result<String> {
   let args: CodeMapArgs = parse_args(args)?;
-  let rel = if args.path.is_empty() { "." } else { &args.path };
+  let rel = if args.path.is_empty() {
+    "."
+  } else {
+    &args.path
+  };
   let path = workspace.readable_path(rel)?;
   crate::symbol_tree::format_path(&path)
 }
