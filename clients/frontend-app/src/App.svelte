@@ -29,10 +29,14 @@
   let panes = $state([]);
   let settingsOpen = $state(false);
   let groupPopoverOpen = $state(false);
+  let setupOpen = $state(false);
+  let setupGroupId = $state('group-main');
+  let collapsedGroupIds = $state([]);
   let groupDraft = $state({ name: '', color: prismPalette[3] });
   let setup = $state(loadSettings());
 
   let activeGroup = $derived(groups.find((group) => group.id === activeGroupId) ?? groups[0]);
+  let setupGroup = $derived(groups.find((group) => group.id === setupGroupId) ?? activeGroup);
   let activePanes = $derived(panes.filter((pane) => pane.groupId === activeGroupId));
 
   function defaultSettings() {
@@ -68,6 +72,30 @@
     return panes.filter((pane) => pane.groupId === groupId).length;
   }
 
+  function panesForGroup(groupId) {
+    return panes.filter((pane) => pane.groupId === groupId);
+  }
+
+  function groupCollapsed(groupId) {
+    return collapsedGroupIds.includes(groupId);
+  }
+
+  function toggleGroup(groupId) {
+    collapsedGroupIds = groupCollapsed(groupId)
+      ? collapsedGroupIds.filter((id) => id !== groupId)
+      : [...collapsedGroupIds, groupId];
+  }
+
+  function openSetup(groupId) {
+    activeGroupId = groupId;
+    setupGroupId = groupId;
+    setupOpen = true;
+  }
+
+  function closeSetup() {
+    setupOpen = false;
+  }
+
   function createGroup(close) {
     const name = groupDraft.name.trim();
     if (!name) return;
@@ -78,6 +106,7 @@
     };
     groups.push(group);
     activeGroupId = group.id;
+    setupGroupId = group.id;
     groupDraft = {
       name: '',
       color: prismPalette[groups.length % prismPalette.length]
@@ -130,9 +159,12 @@
 
     saveSettings();
 
+    const groupId = setupGroup?.id ?? activeGroupId;
+    activeGroupId = groupId;
+
     const pane = {
       id: createId('pane'),
-      groupId: activeGroupId,
+      groupId,
       title: setup.mode === 'start' ? 'New session' : `${setup.mode} session`,
       subtitle: 'Director stream',
       sessionTitle: '',
@@ -153,6 +185,7 @@
     };
 
     panes.push(pane);
+    setupOpen = false;
     connectPane(panes[panes.length - 1], event);
   }
 
@@ -311,25 +344,40 @@
 </svelte:head>
 
 <div class="app-shell">
-  <header class="group-bar">
-    <div class="group-label">Groups</div>
-    <nav class="groups" aria-label="Groups">
-      {#each groups as group}
-        <button
-          class:active={group.id === activeGroupId}
-          class="group-tab"
-          style={`--group-color: ${group.color}`}
-          type="button"
-          onclick={() => (activeGroupId = group.id)}
-        >
-          <span>{group.name}</span>
-          <span class="group-count">{paneCount(group.id)}</span>
-        </button>
-      {/each}
+  <aside class="sidebar" aria-label="Workspace navigation">
+    <header class="sidebar-head">
+      <h1>ogent workbench</h1>
+      <Popover bind:open={settingsOpen} placement="bottom-end">
+        {#snippet trigger({ open, toggle })}
+          <button class="icon-button settings-button" type="button" onclick={toggle} aria-label="Settings" aria-expanded={open}>⚙</button>
+        {/snippet}
+
+        {#snippet children({ close })}
+          <aside class="settings-popover" aria-label="Settings">
+            <div class="drawer-head">
+              <div>
+                <p class="eyebrow">Settings</p>
+                <h2>Defaults</h2>
+              </div>
+              <button type="button" onclick={close}>Close</button>
+            </div>
+            <p>Session setup defaults are stored locally in this browser.</p>
+            <dl>
+              <div><dt>Active group</dt><dd>{activeGroup?.name}</dd></div>
+              <div><dt>Default profile</dt><dd>{setup.profile}</dd></div>
+              <div><dt>WebSocket</dt><dd>{setup.wsUrl}</dd></div>
+            </dl>
+          </aside>
+        {/snippet}
+      </Popover>
+    </header>
+
+    <div class="sidebar-section-head">
+      <span class="group-label">Groups</span>
       <Popover bind:open={groupPopoverOpen}>
         {#snippet trigger({ open, toggle })}
           <button
-            class="group-tab add-group"
+            class="icon-button add-group"
             type="button"
             onclick={toggle}
             aria-label="Add group"
@@ -371,31 +419,67 @@
           </form>
         {/snippet}
       </Popover>
-    </nav>
-    <Popover bind:open={settingsOpen} placement="bottom-end">
-      {#snippet trigger({ open, toggle })}
-        <button class="settings-button" type="button" onclick={toggle} aria-expanded={open}>Settings</button>
-      {/snippet}
+    </div>
 
-      {#snippet children({ close })}
-        <aside class="settings-popover" aria-label="Settings">
-          <div class="drawer-head">
-            <div>
-              <p class="eyebrow">Settings</p>
-              <h2>Defaults</h2>
-            </div>
-            <button type="button" onclick={close}>Close</button>
+    <nav class="group-list" aria-label="Groups">
+      {#each groups as group}
+        <section
+          class:active={group.id === activeGroupId}
+          class="group-block"
+          style={`--group-color: ${group.color}`}
+        >
+          <div class="group-row">
+            <button
+              class="group-disclosure"
+              type="button"
+              onclick={() => toggleGroup(group.id)}
+              aria-label={`${groupCollapsed(group.id) ? 'Expand' : 'Collapse'} ${group.name}`}
+              aria-expanded={!groupCollapsed(group.id)}
+            >
+              {groupCollapsed(group.id) ? '›' : '⌄'}
+            </button>
+            <button
+              class="group-select"
+              type="button"
+              onclick={() => (activeGroupId = group.id)}
+            >
+              <span class="group-dot" aria-hidden="true"></span>
+              <span>{group.name}</span>
+            </button>
+            <span class="group-count">{paneCount(group.id)}</span>
+            <button
+              class="icon-button add-session"
+              type="button"
+              onclick={() => openSetup(group.id)}
+              aria-label={`Add session to ${group.name}`}
+            >
+              +
+            </button>
           </div>
-          <p>Session setup defaults are stored locally in this browser.</p>
-          <dl>
-            <div><dt>Active group</dt><dd>{activeGroup?.name}</dd></div>
-            <div><dt>Default profile</dt><dd>{setup.profile}</dd></div>
-            <div><dt>WebSocket</dt><dd>{setup.wsUrl}</dd></div>
-          </dl>
-        </aside>
-      {/snippet}
-    </Popover>
-  </header>
+          {#if !groupCollapsed(group.id)}
+            <div class="session-list">
+              {#each panesForGroup(group.id) as pane (pane.id)}
+                <button
+                  class:active={group.id === activeGroupId}
+                  class="session-nav-item"
+                  type="button"
+                  onclick={() => (activeGroupId = group.id)}
+                >
+                  <span class="session-icon" aria-hidden="true">›_</span>
+                  <span>{pane.title}</span>
+                  <span class="session-state session-state-{statusTone(pane.status)}" aria-label={pane.status}></span>
+                </button>
+              {:else}
+                <button class="empty-session" type="button" onclick={() => openSetup(group.id)}>
+                  Start a session
+                </button>
+              {/each}
+            </div>
+          {/if}
+        </section>
+      {/each}
+    </nav>
+  </aside>
 
   <main class:has-sessions={activePanes.length > 0} class="pane-rail" aria-label={`${activeGroup?.name || 'Active'} sessions`}>
     {#each activePanes as pane (pane.id)}
@@ -457,16 +541,28 @@
           <span>{pane.connection}</span>
         </footer>
       </section>
-    {/each}
-
-    <section class:primary-setup={activePanes.length === 0} class="setup-pane" aria-label="Setup new session">
-      <div class="setup-head">
-        <p class="eyebrow">Setup</p>
-        <h2>Add session</h2>
-        <p>Connect a new Director stream to this group.</p>
+    {:else}
+      <div class="empty-rail">
+        <p>No sessions in {activeGroup?.name}.</p>
+        <button class="primary" type="button" onclick={() => openSetup(activeGroup?.id)}>Add session</button>
       </div>
+    {/each}
+  </main>
 
-      <form class="setup-form" onsubmit={(event) => { event.preventDefault(); startSession(); }}>
+  {#if setupOpen}
+    <div class="modal-layer" role="presentation">
+      <button class="modal-scrim" type="button" onclick={closeSetup} aria-label="Close new session"></button>
+      <div class="setup-dialog" role="dialog" aria-modal="true" aria-labelledby="new-session-title">
+        <div class="setup-head">
+          <div>
+            <p class="eyebrow">Setup</p>
+            <h2 id="new-session-title">New session</h2>
+            <p>Connect a new Director stream to {setupGroup?.name}.</p>
+          </div>
+          <button class="icon-button" type="button" onclick={closeSetup} aria-label="Close new session">×</button>
+        </div>
+
+        <form class="setup-form" onsubmit={(event) => { event.preventDefault(); startSession(); }}>
         <label>
           WebSocket URL
           <input bind:value={setup.wsUrl} autocomplete="off" spellcheck="false" />
@@ -523,7 +619,7 @@
         </div>
         <button class="primary connect-button" type="submit">Connect</button>
       </form>
-    </section>
-  </main>
-
+      </div>
+    </div>
+  {/if}
 </div>
