@@ -31,7 +31,7 @@
   let groupPopoverOpen = $state(false);
   let setupOpen = $state(false);
   let setupGroupId = $state('group-main');
-  let collapsedGroupIds = $state([]);
+  let collapsedGroupIds = $state(['group-research', 'group-ship']);
   let groupDraft = $state({ name: '', color: prismPalette[3] });
   let setup = $state(loadSettings());
 
@@ -349,7 +349,9 @@
       <h1>ogent workbench</h1>
       <Popover bind:open={settingsOpen} placement="bottom-end">
         {#snippet trigger({ open, toggle })}
-          <button class="icon-button settings-button" type="button" onclick={toggle} aria-label="Settings" aria-expanded={open}>⚙</button>
+          <button class="icon-button settings-button" type="button" onclick={toggle} aria-label="Settings" aria-expanded={open}>
+            <i class="icon settings"></i>
+          </button>
         {/snippet}
 
         {#snippet children({ close })}
@@ -359,7 +361,9 @@
                 <p class="eyebrow">Settings</p>
                 <h2>Defaults</h2>
               </div>
-              <button type="button" onclick={close}>Close</button>
+              <button class="icon-button" type="button" onclick={close} aria-label="Close settings">
+                <i class="icon x"></i>
+              </button>
             </div>
             <p>Session setup defaults are stored locally in this browser.</p>
             <dl>
@@ -383,8 +387,8 @@
             aria-label="Add group"
             aria-expanded={open}
           >
-            +
-          </button>
+              <i class="icon plus"></i>
+            </button>
         {/snippet}
 
         {#snippet children({ close })}
@@ -436,7 +440,7 @@
               aria-label={`${groupCollapsed(group.id) ? 'Expand' : 'Collapse'} ${group.name}`}
               aria-expanded={!groupCollapsed(group.id)}
             >
-              {groupCollapsed(group.id) ? '›' : '⌄'}
+              <i class={`icon ${groupCollapsed(group.id) ? 'caret-right' : 'caret-down'}`}></i>
             </button>
             <button
               class="group-select"
@@ -453,7 +457,7 @@
               onclick={() => openSetup(group.id)}
               aria-label={`Add session to ${group.name}`}
             >
-              +
+            <i class="icon plus"></i>
             </button>
           </div>
           {#if !groupCollapsed(group.id)}
@@ -544,7 +548,10 @@
     {:else}
       <div class="empty-rail">
         <p>No sessions in {activeGroup?.name}.</p>
-        <button class="primary" type="button" onclick={() => openSetup(activeGroup?.id)}>Add session</button>
+        <button class="primary" type="button" onclick={() => openSetup(activeGroup?.id)}>
+          <i class="icon plus"></i>
+          Add session
+        </button>
       </div>
     {/each}
   </main>
