@@ -1,6 +1,8 @@
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
+const HEX: &[u8; 16] = b"0123456789abcdef";
+
 #[derive(Debug, Clone, Copy)]
 struct Anchor<'a> {
   line: usize,
@@ -8,38 +10,67 @@ struct Anchor<'a> {
 }
 
 pub fn render_hashlines(source: &str, start: Option<usize>, end: Option<usize>) -> String {
-  let lines = source_lines(source);
+  let lines = source_lines_ref(source);
   let slice_start = start
     .map(|s| if s > 0 { s - 1 } else { 0 })
     .unwrap_or(0)
     .min(lines.len());
   let slice_end = end.unwrap_or(lines.len()).min(lines.len());
-  lines[slice_start..slice_end]
-    .iter()
-    .enumerate()
-    .map(|(i, line)| {
-      let line_no = slice_start + i + 1;
-      let hash = line_hash(line);
-      format!("{line_no}:{hash}|{line}\n")
-    })
-    .collect()
+  let slice = &lines[slice_start..slice_end];
+  let estimated: usize = slice.iter().map(|l| l.len() + 12).sum();
+  let mut out = String::with_capacity(estimated);
+  let mut hbuf = [0u8; 4];
+  for (i, line) in slice.iter().enumerate() {
+    let line_no = slice_start + i + 1;
+    line_hash_into(line, &mut hbuf);
+    push_usize(&mut out, line_no);
+    out.push(':');
+    out.push_str(std::str::from_utf8(&hbuf).unwrap());
+    out.push('|');
+    out.push_str(line);
+    out.push('\n');
+  }
+  out
+}
+
+fn push_usize(out: &mut String, mut n: usize) {
+  if n == 0 {
+    out.push('0');
+    return;
+  }
+  let mut buf = [0u8; 20];
+  let mut pos = 20;
+  while n > 0 {
+    pos -= 1;
+    buf[pos] = b'0' + (n % 10) as u8;
+    n /= 10;
+  }
+  out.push_str(std::str::from_utf8(&buf[pos..]).unwrap());
+}
+
+fn source_lines_ref(source: &str) -> Vec<&str> {
+  let s = source.strip_suffix('\n').unwrap_or(source);
+  if s.is_empty() {
+    return Vec::new();
+  }
+  s.split('\n').collect()
 }
 
 pub fn source_lines(source: &str) -> Vec<String> {
-  let has_trailing = source.ends_with('\n');
-  let s = if has_trailing {
-    &source[..source.len() - 1]
-  } else {
-    source
-  };
+  let s = source.strip_suffix('\n').unwrap_or(source);
   if s.is_empty() {
     return Vec::new();
   }
   s.split('\n').map(String::from).collect()
 }
 
-fn line_hash(line: &str) -> String {
-  format!("{:04x}", fnv1a64(line.as_bytes()) >> 48)
+#[inline]
+fn line_hash_into(line: &str, buf: &mut [u8; 4]) {
+  let h = (fnv1a64(line.as_bytes()) >> 48) as u16;
+  buf[0] = HEX[((h >> 12) & 0xf) as usize];
+  buf[1] = HEX[((h >> 8) & 0xf) as usize];
+  buf[2] = HEX[((h >> 4) & 0xf) as usize];
+  buf[3] = HEX[(h & 0xf) as usize];
 }
 
 fn fnv1a64(bytes: &[u8]) -> u64 {
@@ -148,7 +179,9 @@ fn validate_anchor(lines: &[String], anchor: Anchor<'_>) -> Result<()> {
   if idx >= lines.len() {
     bail!("anchor line is outside file: {}", anchor.line);
   }
-  let current = line_hash(&lines[idx]);
+  let mut hbuf = [0u8; 4];
+  line_hash_into(&lines[idx], &mut hbuf);
+  let current = std::str::from_utf8(&hbuf).unwrap();
   if !current.eq_ignore_ascii_case(anchor.hash) {
     bail!(
       "anchor mismatch at line {}: expected {}, current {}\n{}:{}|{}",
