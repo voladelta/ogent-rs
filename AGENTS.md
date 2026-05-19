@@ -34,6 +34,7 @@ CLI
 - `src/workers.rs`: worker batch dispatch/waiting, role prompt resolution, in-process async worker execution.
 - `src/session.rs`: workspace-scoped session/meta/messages persistence plus Director/worker state file paths.
 - `src/prompts.rs`: Director system prompt, factory prompt, built-in worker prompts, skill discovery/injection.
+- `src/symbol_tree.rs`: tree-sitter based symbol extraction for `code_map` (Rust and Go).
 
 ## File Routing Map
 
@@ -49,6 +50,7 @@ CLI
 | Anchored editing | `src/hashline.rs` | `src/tools.rs`, `docs/reference.md` |
 | Workspace path validation | `src/workspace.rs` | `src/tools.rs`, `ARCHITECTURE.md` |
 | Skill artifact creation (`--create-skill`) | `src/artifact_creator.rs` | `prompts/SKILL_CREATOR_PROMPT.md` |
+| Symbol extraction / `code_map` | `src/symbol_tree.rs` | `docs/reference.md` |
 
 ## Runtime State
 
@@ -100,4 +102,6 @@ For tool/loop/worker behavior changes, run `cargo test`.
 colgrep "<intent>" -k 20
 colgrep -e "<exact text>" "<intent>"
 rg "<exact symbol>"
+code_map {"path": "src"}           # Rust/Go symbol map
+code_map {"path": "src/main.rs"}   # single-file symbol map
 ```

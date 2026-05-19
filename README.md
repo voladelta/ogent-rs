@@ -54,7 +54,7 @@ Each WebSocket Director owns an immutable workspace root from `repo`. Tools, wor
 
 ## Key Behavior
 
-- Director tools include: `repo_map`, restricted `bash` (`colgrep`/`rg` only), `load_skill`, `state`, `set_title`, `dispatch_workers`, `wait_workers`.
+- Director tools include: `repo_map`, `code_map`, restricted `bash` (`colgrep`/`rg` only), `load_skill`, `state`, `set_title`, `dispatch_workers`, `wait_workers`.
 - Worker tools include editing tools (`write_file`, `read_hash_anchors`, `edit_hash_anchors`) plus read/web/bash/state tools.
 - `dispatch_workers` starts a worker batch and returns worker IDs immediately.
 - `wait_workers` returns completed worker results as soon as any worker finishes, or reports still-running workers after a short wait.

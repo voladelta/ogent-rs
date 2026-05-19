@@ -83,6 +83,7 @@ Worker-only edits:
 Shared:
 
 - `repo_map`
+- `code_map`
 - `load_skill`
 - `state`
 

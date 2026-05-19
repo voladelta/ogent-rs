@@ -373,6 +373,7 @@ This only protects sessions inside one websocket server process. CLI `--resume` 
 ## Director Tools
 
 - `repo_map`
+- `code_map`
 - `bash` (allowlisted to `colgrep` and `rg`)
 - `load_skill`
 - `state`
@@ -389,6 +390,7 @@ This only protects sessions inside one websocket server process. CLI `--resume` 
 - `read_hash_anchors`
 - `edit_hash_anchors`
 - `repo_map`
+- `code_map`
 - `bash` (normal behavior)
 - `web_search`
 - `web_read`
@@ -415,6 +417,25 @@ Rules:
 - Rejects empty, multi-line/control-character, or over-80-character titles.
 - Stores the title in `{workspace_root}/.ogent/sessions/{session_id}/meta.json`.
 - In WebSocket mode, emits a `session` event with `status: "updated"` and the new `title`.
+
+## `code_map` Tool
+
+Input:
+
+```json
+{
+  "path": "src"
+}
+```
+
+Rules:
+
+- Available to both Director and Workers.
+- Accepts a file or directory path relative to the workspace root.
+- For a directory, maps all `.rs` and `.go` files inside.
+- For a single file, maps only that file.
+- Output shows symbols (structs, enums, traits, impls, functions, interfaces, types, modules) with line ranges and signatures.
+- Use before `read_file` to target exact line ranges.
 
 ## `state` Tool
 
