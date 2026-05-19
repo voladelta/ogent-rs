@@ -136,7 +136,7 @@ fn build_director_tools() -> Vec<Tool> {
     ),
     schema(
       "code_map",
-      "Display a symbol map of Rust source files, showing structs, enums, traits, impls, functions, and modules with line ranges. Use to understand the shape and contents of Rust source before deciding which files or line ranges to read. For a single file, pass its path; for a directory, pass the directory path to map all .rs files inside. Use before read_file to target exact line ranges.",
+      "Display a symbol map of source files (Rust and Go), showing structs, enums, traits, impls, functions, interfaces, types, and modules with line ranges. Use to understand the shape and contents of source files before deciding which files or line ranges to read. For a single file, pass its path; for a directory, pass the directory path to map all .rs and .go files inside. Use before read_file to target exact line ranges.",
       json!({"type":"object","properties":{"path":{"type":"string","description":"File or directory path relative to workspace root. Default: \".\""}},"additionalProperties":false}),
     ),
     schema(
@@ -201,7 +201,7 @@ fn build_worker_tools() -> Vec<Tool> {
     ),
     schema(
       "code_map",
-      "Display a symbol map of Rust source files, showing structs, enums, traits, impls, functions, and modules with line ranges. Use to understand the shape and contents of Rust source before deciding which files or line ranges to read. For a single file, pass its path; for a directory, pass the directory path to map all .rs files inside. Use before read_file to target exact line ranges.",
+      "Display a symbol map of source files (Rust and Go), showing structs, enums, traits, impls, functions, interfaces, types, and modules with line ranges. Use to understand the shape and contents of source files before deciding which files or line ranges to read. For a single file, pass its path; for a directory, pass the directory path to map all .rs and .go files inside. Use before read_file to target exact line ranges.",
       json!({"type":"object","properties":{"path":{"type":"string","description":"File or directory path relative to workspace root. Default: \".\""}},"additionalProperties":false}),
     ),
     schema(
