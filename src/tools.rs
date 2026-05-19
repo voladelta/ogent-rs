@@ -35,6 +35,7 @@ pub async fn execute_tool(mut ctx: ToolContext<'_>, name: &str, args: &str) -> R
       }
     }
     "repo_map" => repo_map(&ctx.workspace, args),
+    "code_map" => code_map(&ctx.workspace, args),
     "read_hash_anchors" => read_hash_anchors(&ctx.workspace, args),
     "edit_hash_anchors" => edit_hash_anchors(&ctx.workspace, args),
     "web_search" => web_search(args).await,
@@ -134,6 +135,11 @@ fn build_director_tools() -> Vec<Tool> {
       json!({"type":"object","properties":{"path":{"type":"string","description":"Directory path relative to workspace root. Default: \".\""},"levels":{"type":"integer","description":"Max depth to descend. Default: 3 if 0 or omitted."}},"additionalProperties":false}),
     ),
     schema(
+      "code_map",
+      "Display a symbol map of Rust source files, showing structs, enums, traits, impls, functions, and modules with line ranges. Use to understand the shape and contents of Rust source before deciding which files or line ranges to read. For a single file, pass its path; for a directory, pass the directory path to map all .rs files inside. Use before read_file to target exact line ranges.",
+      json!({"type":"object","properties":{"path":{"type":"string","description":"File or directory path relative to workspace root. Default: \".\""}},"additionalProperties":false}),
+    ),
+    schema(
       "load_skill",
       "Load a skill from .ogent/skills/ or ~/.ogent/skills/.",
       json!({"type":"object","properties":{"name":{"type":"string"}},"required":["name"],"additionalProperties":false}),
@@ -194,6 +200,11 @@ fn build_worker_tools() -> Vec<Tool> {
       json!({"type":"object","properties":{"path":{"type":"string","description":"Directory path relative to workspace root. Default: \".\""},"levels":{"type":"integer","description":"Max depth to descend. Default: 3 if 0 or omitted."}},"additionalProperties":false}),
     ),
     schema(
+      "code_map",
+      "Display a symbol map of Rust source files, showing structs, enums, traits, impls, functions, and modules with line ranges. Use to understand the shape and contents of Rust source before deciding which files or line ranges to read. For a single file, pass its path; for a directory, pass the directory path to map all .rs files inside. Use before read_file to target exact line ranges.",
+      json!({"type":"object","properties":{"path":{"type":"string","description":"File or directory path relative to workspace root. Default: \".\""}},"additionalProperties":false}),
+    ),
+    schema(
       "read_hash_anchors",
       "Read a file with each line prefixed as <line>:<hash>|content, where the 4-char hash is derived from line content. Use before edit_hash_anchors to generate stable anchors.",
       json!({"type":"object","properties":{"path":{"type":"string"},"start":{"type":"integer","description":"1-indexed start line (inclusive)"},"end":{"type":"integer","description":"1-indexed end line (inclusive)"}},"required":["path"],"additionalProperties":false}),
@@ -237,6 +248,7 @@ pub fn is_read_only_tool(name: &str) -> bool {
     "read_file"
       | "read_hash_anchors"
       | "repo_map"
+      | "code_map"
       | "web_search"
       | "web_read"
       | "web_code_context"
@@ -569,6 +581,19 @@ fn repo_map_walk(
     }
   }
   Ok(())
+}
+
+#[derive(Deserialize)]
+struct CodeMapArgs {
+  #[serde(default)]
+  path: String,
+}
+
+fn code_map(workspace: &Workspace, args: &str) -> Result<String> {
+  let args: CodeMapArgs = parse_args(args)?;
+  let rel = if args.path.is_empty() { "." } else { &args.path };
+  let path = workspace.readable_path(rel)?;
+  crate::symbol_tree::format_path(&path)
 }
 
 fn read_hash_anchors(workspace: &Workspace, args: &str) -> Result<String> {
@@ -963,6 +988,7 @@ mod tests {
     assert!(is_read_only_tool("read_file"));
     assert!(is_read_only_tool("read_hash_anchors"));
     assert!(is_read_only_tool("repo_map"));
+    assert!(is_read_only_tool("code_map"));
     assert!(is_read_only_tool("web_search"));
     assert!(is_read_only_tool("web_read"));
     assert!(is_read_only_tool("web_code_context"));
@@ -979,6 +1005,7 @@ mod tests {
     let tools = configured_director_tools();
     let names: Vec<_> = tools.iter().map(|t| t.function.name.as_str()).collect();
     assert!(names.contains(&"repo_map"));
+    assert!(names.contains(&"code_map"));
     assert!(names.contains(&"bash"));
     assert!(names.contains(&"state"));
     assert!(names.contains(&"set_title"));
@@ -1002,6 +1029,7 @@ mod tests {
     assert!(names.contains(&"read_file"));
     assert!(names.contains(&"write_file"));
     assert!(names.contains(&"read_hash_anchors"));
+    assert!(names.contains(&"code_map"));
     assert!(names.contains(&"edit_hash_anchors"));
     assert!(names.contains(&"state"));
     assert!(!names.contains(&"set_title"));

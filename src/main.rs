@@ -5,6 +5,7 @@ mod config;
 mod hashline;
 mod prompts;
 mod providers;
+mod symbol_tree;
 mod session;
 mod sse;
 mod steer;
