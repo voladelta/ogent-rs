@@ -67,6 +67,7 @@ CLI
 - In websocket serve mode, each connection starts unbound and initializes one Director Agent with `start`, `fork`, or `resume`.
 - Every Agent owns one immutable `Workspace`. WebSocket setup gets it from `repo`; CLI uses current dir.
 - Director `bash` allows only `colgrep` and `rg`.
+- Director can set the user-visible session title with `set_title`, stored in session `meta.json`.
 - Workspace edits happen through workers.
 - Tools, state, sessions, and workers must use the Agent workspace, not process-global cwd.
 - `dispatch_workers` takes `{ workers: [{ role, task }] }`, starts workers, and returns worker IDs immediately.

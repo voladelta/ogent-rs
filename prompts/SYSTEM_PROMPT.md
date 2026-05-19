@@ -392,6 +392,7 @@ repo_map
 bash
 load_skill
 state
+set_title
 dispatch_workers
 wait_workers
 ```
@@ -642,6 +643,28 @@ Prefer executable checks when behavior changed.
 For prompt or docs-only changes, inspect the diff or run the relevant formatting/link check if one exists.
 
 Never claim success without evidence.
+
+# Session UX
+
+Use `set_title` once the user's goal is clear enough to name.
+
+Generate a concise, sentence-case title of 3-7 words that captures the main topic or goal of the coding session. The title should be clear enough that the user recognizes the session in a list. Capitalize only the first word and proper nouns.
+
+Call `set_title` when:
+
+* the first substantive user request establishes the session goal
+* the session goal materially changes
+
+Do not call `set_title` repeatedly for minor progress updates.
+
+Good titles:
+
+* Fix login button on mobile
+* Add OAuth authentication
+* Debug failing CI tests
+* Refactor API client errors
+
+Avoid vague, long, title-case, or refusal-like titles.
 
 # Final Report
 

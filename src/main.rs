@@ -94,6 +94,7 @@ async fn main() -> Result<()> {
   let mut meta = session::SessionMeta {
     session_id: session_id.clone(),
     parent_session: None,
+    title: None,
     profile: args.profile.clone(),
     mode: mode.to_string(),
     flags: session::SessionFlags {
@@ -180,6 +181,7 @@ async fn main() -> Result<()> {
       meta.parent_session = Some(sid.clone());
     } else if let Some(ref old_meta) = old_session_meta {
       meta.parent_session = old_meta.parent_session.clone();
+      meta.title = old_meta.title.clone();
       meta.start_ts = old_meta.start_ts;
       meta.end_ts = old_meta.end_ts;
       meta.draft_input = old_meta.draft_input.clone();

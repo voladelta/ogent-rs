@@ -41,6 +41,13 @@ pub async fn execute_tool(mut ctx: ToolContext<'_>, name: &str, args: &str) -> R
     "web_read" => web_read(args).await,
     "web_code_context" => web_code_context(args).await,
     "load_skill" => load_skill(args),
+    "set_title" => {
+      let agent = ctx
+        .agent
+        .as_deref_mut()
+        .context("set_title requires an active agent")?;
+      set_title(agent, args)
+    }
     "state" => {
       let agent = ctx
         .agent
@@ -121,6 +128,11 @@ fn build_director_tools() -> Vec<Tool> {
       "state",
       "Read/write/list scoped runtime state in states.json. list accepts an empty path. read requires path. write/append require path and content.",
       state_schema_parameters(),
+    ),
+    schema(
+      "set_title",
+      "Set the user-visible session title in session metadata. Use once the coding session goal is clear, and again only if the goal materially changes.",
+      json!({"type":"object","properties":{"title":{"type":"string","description":"Concise sentence-case session title, normally 3-7 words."}},"required":["title"],"additionalProperties":false}),
     ),
     schema(
       "dispatch_workers",
@@ -206,6 +218,32 @@ pub fn is_read_only_tool(name: &str) -> bool {
       | "web_code_context"
       | "load_skill"
   )
+}
+
+#[derive(Deserialize)]
+struct SetTitleArgs {
+  title: String,
+}
+
+fn set_title(agent: &mut Agent, args: &str) -> Result<String> {
+  if agent.meta.flags.worker {
+    bail!("set_title is only available to the Director");
+  }
+  let args: SetTitleArgs = parse_args(args)?;
+  let title = args.title.trim();
+  require_nonempty(title, "title")?;
+  if title.chars().any(char::is_control) {
+    bail!("title must be a single line without control characters");
+  }
+  if title.chars().count() > 80 {
+    bail!("title must be 80 characters or fewer");
+  }
+  agent.meta.title = Some(title.to_string());
+  if !agent.meta.flags.temp {
+    crate::session::write_meta_in(&agent.workspace, &agent.meta)?;
+  }
+  agent.emit_session();
+  Ok("ok".to_string())
 }
 
 pub fn parse_args<T: serde::de::DeserializeOwned>(args: &str) -> Result<T> {
@@ -827,6 +865,7 @@ mod tests {
     let meta = crate::session::SessionMeta {
       session_id: format!("tools-test-session-{id}"),
       parent_session: None,
+      title: None,
       profile: "test".into(),
       mode: if worker_scope.is_some() {
         "worker".into()
@@ -870,6 +909,7 @@ mod tests {
     assert!(!is_read_only_tool("edit_hash_anchors"));
     assert!(!is_read_only_tool("bash"));
     assert!(!is_read_only_tool("state"));
+    assert!(!is_read_only_tool("set_title"));
   }
 
   #[test]
@@ -879,6 +919,7 @@ mod tests {
     assert!(names.contains(&"repo_map"));
     assert!(names.contains(&"bash"));
     assert!(names.contains(&"state"));
+    assert!(names.contains(&"set_title"));
     assert!(names.contains(&"dispatch_workers"));
     assert!(names.contains(&"wait_workers"));
     assert!(names.contains(&"load_skill"));
@@ -899,6 +940,7 @@ mod tests {
     assert!(names.contains(&"read_hash_anchors"));
     assert!(names.contains(&"edit_hash_anchors"));
     assert!(names.contains(&"state"));
+    assert!(!names.contains(&"set_title"));
     assert!(!names.contains(&"dispatch_workers"));
     assert!(!names.contains(&"wait_workers"));
   }
@@ -987,6 +1029,39 @@ mod tests {
       "worker-test-1",
     );
     assert!(worker_path.exists());
+  }
+
+  #[test]
+  fn set_title_updates_session_meta() {
+    let id = TEST_COUNTER.fetch_add(1, Ordering::SeqCst);
+    let root = std::env::temp_dir().join(format!("ogent-set-title-test-{id}"));
+    std::fs::create_dir_all(&root).unwrap();
+    let mut agent = dummy_agent(None);
+    agent.workspace = crate::workspace::Workspace::from_root(root.clone());
+    agent.meta.flags.temp = false;
+
+    set_title(&mut agent, r#"{"title":"Fix websocket session title"}"#).unwrap();
+
+    assert_eq!(
+      agent.meta.title.as_deref(),
+      Some("Fix websocket session title")
+    );
+    let persisted = crate::session::read_meta_in(&agent.workspace, &agent.meta.session_id).unwrap();
+    assert_eq!(
+      persisted.title.as_deref(),
+      Some("Fix websocket session title")
+    );
+    let _ = std::fs::remove_dir_all(root);
+  }
+
+  #[test]
+  fn set_title_rejects_invalid_titles() {
+    let mut agent = dummy_agent(None);
+    let err = set_title(&mut agent, r#"{"title":" "}"#).unwrap_err();
+    assert!(err.to_string().contains("title is required"));
+
+    let err = set_title(&mut agent, "{\"title\":\"Bad\\ntitle\"}").unwrap_err();
+    assert!(err.to_string().contains("single line"));
   }
 
   #[tokio::test]

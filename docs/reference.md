@@ -134,6 +134,22 @@ Setup success:
 
 `mode` is one of `start`, `fork`, or `resume`.
 
+The optional `title` field is present when the session has a user-visible title. A later `session` event with `status: "updated"` may update this metadata after the Director calls `set_title`.
+
+Session metadata update:
+
+```json
+{
+  "type": "session",
+  "status": "updated",
+  "session_id": "<session_id>",
+  "mode": "start",
+  "profile": "ds-flash",
+  "title": "Fix login button",
+  "repo": "/canonical/path/to/repo"
+}
+```
+
 Status update:
 
 ```json
@@ -331,6 +347,7 @@ This only protects sessions inside one websocket server process. CLI `--resume` 
 - `bash` (allowlisted to `colgrep` and `rg`)
 - `load_skill`
 - `state`
+- `set_title`
 - `dispatch_workers`
 - `wait_workers`
 
@@ -348,7 +365,25 @@ This only protects sessions inside one websocket server process. CLI `--resume` 
 - `load_skill`
 - `state`
 
-Workers do **not** get `dispatch_workers` or `wait_workers`.
+Workers do **not** get `set_title`, `dispatch_workers`, or `wait_workers`.
+
+## `set_title` Tool
+
+Input:
+
+```json
+{
+  "title": "Fix login button on mobile"
+}
+```
+
+Rules:
+
+- Director-only.
+- Trims surrounding whitespace.
+- Rejects empty, multi-line/control-character, or over-80-character titles.
+- Stores the title in `{workspace_root}/.ogent/sessions/{session_id}/meta.json`.
+- In WebSocket mode, emits a `session` event with `status: "updated"` and the new `title`.
 
 ## `state` Tool
 

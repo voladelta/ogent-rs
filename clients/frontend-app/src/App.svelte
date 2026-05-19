@@ -106,6 +106,19 @@
     });
   }
 
+  function cleanTitle(value) {
+    return typeof value === 'string' ? value.trim() : '';
+  }
+
+  function fallbackPaneTitle(pane) {
+    return pane.sessionId ? `Session ${pane.sessionId.slice(0, 8)}` : 'Session';
+  }
+
+  function sessionSubtitle(pane) {
+    const session = pane.sessionId ? pane.sessionId.slice(0, 12) : 'pending';
+    return `${pane.mode} · ${session}`;
+  }
+
   function startSession() {
     let event;
     try {
@@ -122,6 +135,7 @@
       groupId: activeGroupId,
       title: setup.mode === 'start' ? 'New session' : `${setup.mode} session`,
       subtitle: 'Director stream',
+      sessionTitle: '',
       wsUrl: setup.wsUrl.trim(),
       sessionId: setup.mode === 'start' ? '' : setup.sessionId.trim(),
       mode: setup.mode,
@@ -187,12 +201,21 @@
     }
 
     if (event.type === 'session') {
+      const previousTitle = pane.title;
       pane.sessionId = event.session_id || pane.sessionId;
       pane.mode = event.mode || pane.mode;
       pane.profile = event.profile || pane.profile;
-      pane.title = pane.sessionId ? `Session ${pane.sessionId.slice(0, 8)}` : 'Session';
+      pane.sessionTitle = cleanTitle(event.title) || pane.sessionTitle;
+      pane.title = pane.sessionTitle || fallbackPaneTitle(pane);
+      pane.subtitle = sessionSubtitle(pane);
       pane.status = 'Idle';
-      appendActivity(pane, createActivity('system', 'server', 'Session bound', `mode: ${pane.mode}\nrepo: ${event.repo}\nsession: ${pane.sessionId}`, { collapsed: true }));
+      if (event.status === 'updated') {
+        if (pane.title !== previousTitle) {
+          appendActivity(pane, createActivity('system', 'server', 'Session title updated', pane.title, { collapsed: true }));
+        }
+      } else {
+        appendActivity(pane, createActivity('system', 'server', 'Session bound', `mode: ${pane.mode}\nrepo: ${event.repo}\nsession: ${pane.sessionId}`, { collapsed: true }));
+      }
       return;
     }
 

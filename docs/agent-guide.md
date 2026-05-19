@@ -71,6 +71,7 @@ Director-only:
 
 - `dispatch_workers`
 - `wait_workers`
+- `set_title`
 - restricted `bash` (`colgrep` / `rg`)
 
 Worker-only edits:

@@ -30,6 +30,7 @@ Open the URL printed by Vite, usually `http://127.0.0.1:5173`.
 - Main rail: horizontally scrolling Director transcript panes.
 - Setup pane: creates, resumes, or forks sessions.
 - Transcript panes: final assistant content is shown fully; reasoning and tool events are collapsed rows.
+- Session panes use server-provided titles from `session` metadata updates when available.
 - Assistant content: rendered as sanitized Markdown through md4x WASM, without syntax highlighting.
 - Pane footer: model profile and token count.
 

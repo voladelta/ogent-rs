@@ -458,6 +458,7 @@ async fn run_worker_agent_inner(args: WorkerRunArgs) -> Result<String> {
   let meta = crate::session::SessionMeta {
     session_id: args.parent_session_id.clone(),
     parent_session: None,
+    title: None,
     profile: profile_name.clone(),
     mode: "worker".to_string(),
     flags: crate::session::SessionFlags {

@@ -18,6 +18,7 @@
     connectionLabel: document.querySelector("#connection-label"),
     agentState: document.querySelector("#agent-state"),
     tokenCount: document.querySelector("#token-count"),
+    currentTitle: document.querySelector("#current-title"),
     currentSession: document.querySelector("#current-session"),
     currentMode: document.querySelector("#current-mode"),
     currentProfile: document.querySelector("#current-profile"),
@@ -308,10 +309,23 @@
 
   function handleSession(event) {
     setInitialized(true);
+    const previousTitle = elements.currentTitle.textContent;
+    const title = typeof event.title === "string" ? event.title.trim() : "";
+    if (event.status === "updated") {
+      if (title) elements.currentTitle.textContent = title;
+    } else {
+      elements.currentTitle.textContent = title || "none";
+    }
     elements.currentSession.textContent = event.session_id || "unknown";
     elements.currentMode.textContent = event.mode || "unknown";
     elements.currentProfile.textContent = event.profile || "unknown";
     if (event.session_id) elements.sessionId.value = event.session_id;
+    if (event.status === "updated") {
+      if (title && title !== previousTitle) {
+        appendEvent("server", "session", "Title updated: " + title, "event-status");
+      }
+      return;
+    }
     appendEvent(
       "server",
       "session",

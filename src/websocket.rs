@@ -65,6 +65,8 @@ enum OutboundEvent {
     profile: String,
     mode: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     repo: Option<String>,
   },
   Status {
@@ -247,6 +249,17 @@ impl AgentOutputSink for WsMessageSink {
       reasoning_content: message.reasoning_content.clone(),
       tool_calls: message.tool_calls.clone(),
       tool_call_id: message.tool_call_id.clone(),
+    });
+  }
+
+  fn session(&self, workspace: &crate::workspace::Workspace, meta: &session::SessionMeta) {
+    let _ = self.tx.send(OutboundEvent::Session {
+      status: "updated".to_string(),
+      session_id: meta.session_id.clone(),
+      profile: meta.profile.clone(),
+      mode: meta.mode.clone(),
+      title: meta.title.clone(),
+      repo: Some(workspace.root().to_string_lossy().to_string()),
     });
   }
 }
@@ -577,6 +590,7 @@ fn build_start_setup(
   let meta = session::SessionMeta {
     session_id: String::new(),
     parent_session: None,
+    title: None,
     profile: profile_name.clone(),
     mode: "serve".to_string(),
     flags: session::SessionFlags {
@@ -641,6 +655,7 @@ fn build_fork_or_resume_setup(
   let mut meta = session::SessionMeta {
     session_id: session_id.clone(),
     parent_session: None,
+    title: None,
     profile: profile_name.clone(),
     mode: "serve".to_string(),
     flags: session::SessionFlags {
@@ -659,6 +674,7 @@ fn build_fork_or_resume_setup(
     meta.parent_session = Some(session_id.clone());
   } else if let Some(ref old) = old_meta {
     meta.parent_session = old.parent_session.clone();
+    meta.title = old.title.clone();
     meta.start_ts = old.start_ts;
     meta.end_ts = old.end_ts;
     meta.draft_input = old.draft_input.clone();
@@ -745,6 +761,7 @@ fn launch_agent(
     session_id: session_id.clone(),
     profile: cfg.profile_name.clone(),
     mode: cfg.mode.clone(),
+    title: agent.meta.title.clone(),
     repo: cfg.repo.clone(),
   });
   *agent_join = Some(tokio::spawn(async move {
@@ -785,5 +802,20 @@ mod tests {
     )
     .unwrap_err();
     assert!(err.to_string().contains("temp is only valid for start"));
+  }
+
+  #[test]
+  fn session_event_serializes_title_when_present() {
+    let event = OutboundEvent::Session {
+      status: "updated".to_string(),
+      session_id: "abc".to_string(),
+      profile: "test".to_string(),
+      mode: "serve".to_string(),
+      title: Some("Fix websocket title".to_string()),
+      repo: Some("/tmp/repo".to_string()),
+    };
+    let json = serde_json::to_value(event).unwrap();
+    assert_eq!(json["type"], "session");
+    assert_eq!(json["title"], "Fix websocket title");
   }
 }

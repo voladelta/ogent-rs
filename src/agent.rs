@@ -33,6 +33,7 @@ pub(crate) enum CompactPending {
 
 pub trait AgentOutputSink: Send + Sync {
   fn message(&self, source: &str, message: &Message);
+  fn session(&self, _workspace: &Workspace, _meta: &session::SessionMeta) {}
 }
 
 enum SteerState {
@@ -477,6 +478,12 @@ impl Agent {
     }
   }
 
+  pub(crate) fn emit_session(&self) {
+    if let Some(sink) = &self.output_sink {
+      sink.session(&self.workspace, &self.meta);
+    }
+  }
+
   pub fn persist_if_dirty(&mut self) -> anyhow::Result<()> {
     if self.dirty && !self.meta.flags.temp {
       if let (Some(parent_session_id), Some(worker_id)) = (
@@ -565,6 +572,7 @@ impl Agent {
         let old_id = self.meta.session_id.clone();
         self.meta.session_id = session::generate_session_id();
         self.meta.parent_session = Some(old_id);
+        self.meta.title = None;
         self.meta.usage = session::SessionUsage { total_tokens: 0 };
         self.meta.draft_input = None;
         self.meta.start_ts = None;
@@ -1058,6 +1066,7 @@ mod dirty_state_machine_tests {
     session::SessionMeta {
       session_id: format!("test-session-{id}"),
       parent_session: None,
+      title: None,
       profile: "test".into(),
       mode: "steer".into(),
       flags: session::SessionFlags {

@@ -15,6 +15,8 @@ pub struct SessionMeta {
   pub session_id: String,
   #[serde(skip_serializing_if = "Option::is_none")]
   pub parent_session: Option<String>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub title: Option<String>,
   pub profile: String,
   pub mode: String,
   pub flags: SessionFlags,
@@ -336,6 +338,7 @@ mod tests {
     let meta = SessionMeta {
       session_id: "abc".into(),
       parent_session: None,
+      title: Some("Fix login button".into()),
       profile: "ds-pro".into(),
       mode: "steer".into(),
       flags: SessionFlags {
@@ -353,6 +356,8 @@ mod tests {
     let json = serde_json::to_string_pretty(&meta).unwrap();
     assert!(json.contains("\"draft_input\""));
     assert!(json.contains("\"unsent draft\""));
+    assert!(json.contains("\"title\""));
+    assert!(json.contains("\"Fix login button\""));
     assert!(json.contains("\"start_ts\""));
     assert!(json.contains("1234567890"));
     assert!(json.contains("\"end_ts\""));
@@ -364,6 +369,7 @@ mod tests {
     let meta = SessionMeta {
       session_id: "abc".into(),
       parent_session: None,
+      title: None,
       profile: "ds-pro".into(),
       mode: "steer".into(),
       flags: SessionFlags {
@@ -379,6 +385,7 @@ mod tests {
       end_ts: None,
     };
     let json = serde_json::to_string_pretty(&meta).unwrap();
+    assert!(!json.contains("\"title\""));
     assert!(!json.contains("\"draft_input\""));
     assert!(!json.contains("\"start_ts\""));
     assert!(!json.contains("\"end_ts\""));
