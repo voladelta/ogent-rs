@@ -73,6 +73,8 @@ main.rs
 - `dispatch_workers` starts workers and returns worker IDs immediately.
 - `wait_workers` long-polls for completed worker results and reports still-running workers after a short wait.
 - Running worker reports include `progress`, read from worker state key `progress/current`; missing or empty progress is reported as `Starting`.
+- `inspect_worker` lets the Director read a worker's persisted `states.json`.
+- `cancel_workers` lets the Director abort in-flight workers by ID.
 - Worker state/transcript are scoped under parent session + worker ID.
 - `--resume` enforces single active process ownership with `{workspace_root}/.ogent/sessions/{session_id}/active.lock`.
 - Websocket `resume` uses an in-process active-session registry (not lock files) to prevent duplicate active sessions inside the serve process.

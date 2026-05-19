@@ -350,6 +350,8 @@ This only protects sessions inside one websocket server process. CLI `--resume` 
 - `set_title`
 - `dispatch_workers`
 - `wait_workers`
+- `inspect_worker`
+- `cancel_workers`
 
 ## Worker Tools
 
@@ -503,6 +505,52 @@ Output shape:
       "progress": "Reading subscription schemas"
     }
   ]
+}
+```
+
+## `inspect_worker` Tool
+
+Input:
+
+```json
+{
+  "id": "worker-1"
+}
+```
+
+Behavior:
+
+- Director-only.
+- Reads the worker's persisted `states.json` from disk.
+- Returns the raw JSON state map.
+- Use to check `progress/current`, partial results, or errors before deciding to cancel or wait.
+- Works for running, completed, failed, or cancelled workers.
+
+## `cancel_workers` Tool
+
+Input:
+
+```json
+{
+  "ids": ["worker-1", "worker-2"]
+}
+```
+
+Behavior:
+
+- Director-only.
+- Aborts in-flight workers immediately.
+- Returns cancelled and not-found ids.
+- Prefer waiting for workers that have already modified files, to avoid leaving partial or inconsistent changes.
+- Consider canceling workers that are stuck, off-track, or have not yet produced durable changes.
+- Aborted workers stop at their next await point; partial transcript remains in `messages.jsonl`.
+
+Output shape:
+
+```json
+{
+  "cancelled": ["worker-1"],
+  "not_found": ["worker-2"]
 }
 ```
 

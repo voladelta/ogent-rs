@@ -9,12 +9,12 @@ use tokio::sync::{Mutex, Notify};
 
 const WORKER_PROGRESS_PROMPT_SUFFIX: &str = r#"## Progress Reporting
 
-When work may take more than one tool call or one reasoning step, write concise current progress before each meaningful phase using the `state` tool:
+When your task requires more than one tool call, write concise current progress before each tool call using the `state` tool:
 - `action`: `write`
 - `path`: `progress/current`
 - `content`: short factual status
 
-Update this value when the phase changes. Keep it brief and factual. Skip this for trivial one-shot answers.
+Update this value when the phase changes. Keep it brief and factual. Examples: "reading parser", "defining trait", "refactoring call sites", "running tests". Skip this for trivial one-shot answers.
 
 ## Result Reporting
 
@@ -122,12 +122,12 @@ struct Inner {
   in_flight: Vec<InFlightWorker>,
 }
 
-struct InFlightWorker {
+pub(crate) struct InFlightWorker {
   batch_id: String,
   index: usize,
   role: String,
   worker_id: String,
-  done: tokio::task::JoinHandle<WorkerRunResult>,
+  pub(crate) done: tokio::task::JoinHandle<WorkerRunResult>,
   progress_sink: Arc<std::sync::Mutex<String>>,
 }
 
@@ -358,6 +358,22 @@ impl WorkerManager {
         }
       })
       .collect()
+  }
+
+  pub async fn cancel(&self, worker_ids: Vec<String>) -> (Vec<String>, Vec<String>) {
+    let mut inner = self.inner.lock().await;
+    let mut cancelled = Vec::new();
+    let mut not_found = Vec::new();
+    for id in worker_ids {
+      if let Some(pos) = inner.in_flight.iter().position(|w| w.worker_id == id) {
+        let worker = inner.in_flight.remove(pos);
+        worker.done.abort();
+        cancelled.push(id);
+      } else {
+        not_found.push(id);
+      }
+    }
+    (cancelled, not_found)
   }
 }
 
@@ -855,5 +871,32 @@ Some trailing text"#;
   fn cleanup_session_dir(parent_session_id: &str) {
     let path = PathBuf::from(".ogent/sessions").join(parent_session_id);
     let _ = std::fs::remove_dir_all(path);
+  }
+
+  #[tokio::test]
+  async fn cancel_workers_cancels_in_flight_worker() {
+    let manager = WorkerManager::new(None, crate::workspace::Workspace::from_current_dir());
+    let done = tokio::spawn(async { std::future::pending::<WorkerRunResult>().await });
+    manager.inner.lock().await.in_flight.push(InFlightWorker {
+      batch_id: "batch-1".to_string(),
+      index: 0,
+      role: "researcher".to_string(),
+      worker_id: "worker-cancel-1".to_string(),
+      done,
+      progress_sink: Arc::new(std::sync::Mutex::new("Starting".to_string())),
+    });
+
+    let (cancelled, not_found) = manager.cancel(vec!["worker-cancel-1".to_string()]).await;
+    assert_eq!(cancelled, vec!["worker-cancel-1"]);
+    assert!(not_found.is_empty());
+    assert!(manager.inner.lock().await.in_flight.is_empty());
+  }
+
+  #[tokio::test]
+  async fn cancel_workers_reports_not_found_for_missing_ids() {
+    let manager = WorkerManager::new(None, crate::workspace::Workspace::from_current_dir());
+    let (cancelled, not_found) = manager.cancel(vec!["worker-nonexistent".to_string()]).await;
+    assert!(cancelled.is_empty());
+    assert_eq!(not_found, vec!["worker-nonexistent"]);
   }
 }

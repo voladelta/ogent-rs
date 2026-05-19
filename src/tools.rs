@@ -69,6 +69,20 @@ pub async fn execute_tool(mut ctx: ToolContext<'_>, name: &str, args: &str) -> R
         .context("wait_workers requires an active agent")?;
       wait_workers(agent, args).await
     }
+    "inspect_worker" => {
+      let agent = ctx
+        .agent
+        .as_deref_mut()
+        .context("inspect_worker requires an active agent")?;
+      inspect_worker(agent, args)
+    }
+    "cancel_workers" => {
+      let agent = ctx
+        .agent
+        .as_deref_mut()
+        .context("cancel_workers requires an active agent")?;
+      cancel_workers(agent, args).await
+    }
     _ => bail!("unknown tool: {name}"),
   }
 }
@@ -143,6 +157,16 @@ fn build_director_tools() -> Vec<Tool> {
       "wait_workers",
       "Wait for worker results. Returns immediately if any worker has completed; otherwise waits about 15 seconds before reporting still-running workers. Use after dispatch_workers and repeat until all needed worker results are returned.",
       json!({"type":"object","properties":{},"additionalProperties":false}),
+    ),
+    schema(
+      "inspect_worker",
+      "Read a worker's persisted states.json by worker id. Use to check progress/current, partial results, or errors before deciding to cancel or wait.",
+      json!({"type":"object","properties":{"id":{"type":"string"}},"required":["id"],"additionalProperties":false}),
+    ),
+    schema(
+      "cancel_workers",
+      "Cancel running workers by their worker_ids. Aborts in-flight tasks immediately. Returns cancelled and not_found ids. Prefer waiting for workers that have already modified files, to avoid leaving partial or inconsistent changes. Consider canceling workers that are stuck, off-track, or have not yet produced durable changes.",
+      json!({"type":"object","properties":{"ids":{"type":"array","items":{"type":"string"}}},"required":["ids"],"additionalProperties":false}),
     ),
   ]
 }
@@ -839,6 +863,43 @@ async fn wait_workers(agent: &mut Agent, args: &str) -> Result<String> {
   agent.worker_manager.wait().await
 }
 
+#[derive(Deserialize)]
+struct InspectWorkerArgs {
+  id: String,
+}
+
+fn inspect_worker(agent: &mut Agent, args: &str) -> Result<String> {
+  if agent.meta.flags.worker {
+    bail!("worker mode cannot inspect workers");
+  }
+  let args: InspectWorkerArgs = parse_args(args)?;
+  require_nonempty(&args.id, "id")?;
+  let path =
+    crate::session::worker_state_path_in(&agent.workspace, &agent.meta.session_id, &args.id);
+  if !path.exists() {
+    bail!("worker {} has no state file", args.id);
+  }
+  let content = fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
+  Ok(content)
+}
+
+#[derive(Deserialize)]
+struct CancelWorkersArgs {
+  ids: Vec<String>,
+}
+
+async fn cancel_workers(agent: &mut Agent, args: &str) -> Result<String> {
+  if agent.meta.flags.worker {
+    bail!("worker mode cannot cancel workers");
+  }
+  let args: CancelWorkersArgs = parse_args(args)?;
+  let (cancelled, not_found) = agent.worker_manager.cancel(args.ids).await;
+  Ok(serde_json::to_string(&json!({
+    "cancelled": cancelled,
+    "not_found": not_found,
+  }))?)
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -922,6 +983,8 @@ mod tests {
     assert!(names.contains(&"set_title"));
     assert!(names.contains(&"dispatch_workers"));
     assert!(names.contains(&"wait_workers"));
+    assert!(names.contains(&"inspect_worker"));
+    assert!(names.contains(&"cancel_workers"));
     assert!(names.contains(&"load_skill"));
     assert!(!names.contains(&"read_file"));
     assert!(!names.contains(&"web_search"));
@@ -1099,5 +1162,35 @@ mod tests {
     let mut agent = dummy_agent(None);
     let out = wait_workers(&mut agent, "{}").await.unwrap();
     assert!(out.contains("No workers are running"));
+  }
+
+  #[test]
+  fn inspect_worker_reads_worker_state_file() {
+    let mut agent = dummy_agent(None);
+    let root = std::env::temp_dir().join(format!(
+      "ogent-inspect-test-{}",
+      TEST_COUNTER.fetch_add(1, Ordering::SeqCst)
+    ));
+    std::fs::create_dir_all(&root).unwrap();
+    agent.workspace = crate::workspace::Workspace::from_root(root.clone());
+    agent.meta.flags.temp = false;
+
+    let worker_id = "worker-inspect-1";
+    let state_path =
+      crate::session::worker_state_path_in(&agent.workspace, &agent.meta.session_id, worker_id);
+    std::fs::create_dir_all(state_path.parent().unwrap()).unwrap();
+    std::fs::write(&state_path, r#"{"progress/current":"indexing files"}"#).unwrap();
+
+    let out = inspect_worker(&mut agent, &format!(r#"{{"id":"{worker_id}"}}"#)).unwrap();
+    assert!(out.contains("indexing files"));
+
+    let _ = std::fs::remove_dir_all(root);
+  }
+
+  #[test]
+  fn inspect_worker_rejects_missing_state_file() {
+    let mut agent = dummy_agent(None);
+    let err = inspect_worker(&mut agent, r#"{"id":"worker-missing"}"#).unwrap_err();
+    assert!(err.to_string().contains("has no state file"));
   }
 }

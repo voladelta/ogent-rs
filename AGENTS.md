@@ -72,7 +72,9 @@ CLI
 - Tools, state, sessions, and workers must use the Agent workspace, not process-global cwd.
 - `dispatch_workers` takes `{ workers: [{ role, task }] }`, starts workers, and returns worker IDs immediately.
 - `wait_workers` waits briefly, returns completed worker results as soon as any worker finishes, and reports still-running workers otherwise.
-- Running worker statuses include `progress`, read from each worker's `progress/current` state key. Workers are prompted to update that key during non-trivial work; missing or empty progress is reported as `Starting`.
+- Running worker statuses include `progress`, read from each worker's `progress/current` state key. Workers are prompted to update that key before each tool call when the task spans multiple steps; missing or empty progress is reported as `Starting`.
+- `inspect_worker` lets the Director read a worker's persisted `states.json` to check progress or partial results.
+- `cancel_workers` lets the Director abort in-flight workers by ID. Prefer waiting for workers that have already modified files.
 - A run ends when the Director sends a final assistant message (no tool calls).
 - Workers do not dispatch workers.
 - `load_skill` tool and startup skill injection stay enabled.

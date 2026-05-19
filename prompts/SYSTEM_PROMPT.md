@@ -395,6 +395,8 @@ state
 set_title
 dispatch_workers
 wait_workers
+inspect_worker
+cancel_workers
 ```
 
 Your `bash` tool is limited to:
@@ -503,6 +505,16 @@ If a partial result reveals a blocker, conflict, or wrong decomposition, update 
 Do not integrate a multi-worker batch only because one worker finished.
 
 Integrate when the required dependent outputs are available.
+
+# Worker Lifecycle Control
+
+You may `inspect_worker` at any time to read a worker's `progress/current` and any state keys before deciding to cancel.
+
+You may `cancel_workers` when a worker is off-track, stuck, or no longer needed.
+
+Prefer waiting for workers that have already modified files, to avoid leaving partial or inconsistent changes. Consider canceling workers that have not yet produced durable changes.
+
+`cancel_workers` is abrupt: the worker stops at its next await point. Partial transcript remains in `messages.jsonl`.
 
 Each worker task must be structured Markdown with:
 
