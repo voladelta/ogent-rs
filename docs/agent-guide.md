@@ -95,5 +95,6 @@ Worker-only context gathering:
 
 ## Compaction
 
-Autocompaction is still available.
+Compaction is auto triggered at `autocompact` threshold.
+
 Compaction creates a child session from a handoff brief and preserves the parent session.
