@@ -1,8 +1,8 @@
 mod agent;
 mod artifact_creator;
 mod client;
+mod config;
 mod hashline;
-mod profiles;
 mod prompts;
 mod providers;
 mod session;
@@ -28,10 +28,10 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 #[derive(Parser, Debug)]
 struct Args {
-  #[arg(long, default_value = "ds-flash")]
-  profile: String,
-  #[arg(long, default_value_t = 80)]
-  autocompact: i32,
+  #[arg(long)]
+  profile: Option<String>,
+  #[arg(long)]
+  autocompact: Option<i32>,
   #[arg(long)]
   resume: Option<Option<String>>,
   #[arg(long)]
@@ -53,6 +53,9 @@ async fn main() -> Result<()> {
     std::process::exit(2);
   }
   let workspace = crate::workspace::Workspace::from_current_dir();
+  let config = config::load_or_exit(workspace.root());
+  let profile_name = args.profile.as_deref().unwrap_or(&config.default_profile);
+  let autocompact = args.autocompact.unwrap_or(config.autocompact);
   if args.resume.is_some() && args.fork.is_some() {
     bail!("use either resume or fork, not both");
   }
@@ -65,15 +68,19 @@ async fn main() -> Result<()> {
     bail!("--serve does not accept a prompt; send messages over the websocket connection");
   }
   if let Some(addr) = args.serve.as_deref() {
-    return websocket::serve(addr, &args.profile, args.autocompact, args.temp).await;
+    return websocket::serve(addr, profile_name, autocompact, args.temp, config.clone()).await;
   }
   let creator_mode = args.create_skill.is_some();
   if creator_mode {
     ensure_creator_mode_flags(&args)?;
   }
-  let profile = profiles::get_profile(&args.profile)
-    .with_context(|| format!("unknown profile: {}", args.profile))?;
-  let client = providers::new_client(profile)?;
+  let profile = config
+    .get_profile(profile_name)
+    .with_context(|| format!("unknown profile: {}", profile_name))?;
+  let provider = config
+    .provider_for(profile)
+    .context("missing provider config for profile")?;
+  let client = providers::new_client(profile, provider)?;
   if let Some(name) = args.create_skill.as_deref() {
     let objective = args.prompt.join(" ");
     let result = artifact_creator::create_skill(&client, name, &objective).await?;
@@ -84,8 +91,8 @@ async fn main() -> Result<()> {
     );
     return Ok(());
   }
-  let compact = if args.autocompact >= 0 {
-    CompactState::new(f64::from(args.autocompact) / 100.0, profile.context_limit)
+  let compact = if autocompact >= 0 {
+    CompactState::new(f64::from(autocompact) / 100.0, profile.context_limit)
   } else {
     CompactState::disabled()
   };
@@ -95,12 +102,12 @@ async fn main() -> Result<()> {
     session_id: session_id.clone(),
     parent_session: None,
     title: None,
-    profile: args.profile.clone(),
+    profile: profile_name.to_string(),
     mode: mode.to_string(),
     flags: session::SessionFlags {
       steer: false,
       worker: false,
-      autocompact: args.autocompact,
+      autocompact,
       resume: args.resume.is_some(),
       temp: args.temp,
     },
@@ -210,6 +217,7 @@ async fn main() -> Result<()> {
     meta,
     None,
     None,
+    config.clone(),
   );
   agent.set_output_sink(Some(agent::cli_output_sink()));
   if is_loaded_session || !prompt.is_empty() {

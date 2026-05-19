@@ -6,10 +6,17 @@ The main agent is the Director. It frames the task, inspects the repo, manages s
 
 ## Quick Start
 
+1. Copy `config.yaml.sample` to your repo's `.ogent/config.yaml` or to `~/.ogent/config.yaml`.
+2. Set the required API keys:
+
 ```bash
 export DEEPSEEK_API_KEY="sk-..."
 export EXA_API_KEY="..."
+```
 
+3. Run:
+
+```bash
 cargo run -- "Fix the failing tests without overcomplicating"
 ```
 

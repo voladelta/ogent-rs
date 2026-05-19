@@ -461,9 +461,14 @@ pub async fn run_worker_agent(args: WorkerRunArgs) -> WorkerRunResult {
 
 async fn run_worker_agent_inner(args: WorkerRunArgs) -> Result<String> {
   let profile_name = args.profile_name.clone();
-  let profile = crate::profiles::get_profile(&profile_name)
+  let config = crate::config::Config::default();
+  let profile = config
+    .get_profile(&profile_name)
     .with_context(|| format!("unknown profile: {profile_name}"))?;
-  let client = crate::providers::new_client(profile)?;
+  let provider = config
+    .provider_for(profile)
+    .context("missing provider config for profile")?;
+  let client = crate::providers::new_client(profile, provider)?;
   let workspace = crate::workspace::Workspace::from_root(args.workspace_root);
   let messages = build_worker_messages(
     &args.system_prompt,
@@ -498,6 +503,7 @@ async fn run_worker_agent_inner(args: WorkerRunArgs) -> Result<String> {
     meta,
     Some(args.parent_session_id),
     Some(args.worker_id),
+    crate::config::Config::default(),
   );
   agent.dirty = true;
   agent.progress_sink = Some(args.progress_sink);
@@ -537,9 +543,14 @@ static ARCHITECT_CLIENT: OnceLock<Result<crate::client::Client, String>> = OnceL
 
 fn get_architect_client() -> Result<&'static crate::client::Client> {
   let result = ARCHITECT_CLIENT.get_or_init(|| {
-    let profile = crate::profiles::get_profile("ds-flash")
+    let config = crate::config::Config::default();
+    let profile = config
+      .get_profile("ds-flash")
       .ok_or_else(|| "architect profile 'ds-flash' not found".to_string())?;
-    crate::providers::new_client(profile).map_err(|e| e.to_string())
+    let provider = config.provider_for(profile).ok_or_else(|| {
+      "missing provider config for architect profile 'ds-flash'".to_string()
+    })?;
+    crate::providers::new_client(profile, provider).map_err(|e| e.to_string())
   });
   match result {
     Ok(client) => Ok(client),

@@ -3,12 +3,8 @@ use serde::Serialize;
 use std::env;
 
 use crate::client::Client;
-use crate::profiles::Profile;
+use crate::config::{Profile, ProviderConfig};
 use crate::types::{Message, Tool, ToolCall};
-
-const DEEPSEEK_URL: &str = "https://api.deepseek.com/chat/completions";
-const KIMI_URL: &str = "https://inference.baseten.co/v1/chat/completions";
-const Z_URL: &str = "https://api.z.ai/api/coding/paas/v4/chat/completions";
 
 #[derive(Serialize)]
 struct DeepSeekRequest<'a> {
@@ -88,17 +84,19 @@ impl<'a> From<&'a Message> for ProviderMessage<'a> {
   }
 }
 
-pub fn new_client(profile: &Profile) -> Result<Client> {
-  match profile.backend {
+pub fn new_client(profile: &Profile, provider: &ProviderConfig) -> Result<Client> {
+  let url = provider.base_url.as_str();
+  let key_env = provider.key_env.as_str();
+  match profile.backend.as_str() {
     "kimi" => {
-      let model = profile.model;
+      let model = profile.model.clone();
       make_client(
-        KIMI_URL,
-        "BASETEN_API_KEY",
+        url,
+        key_env,
         move |messages, tools| {
           let provider_messages: Vec<_> = messages.iter().map(ProviderMessage::from).collect();
           serde_json::to_value(KimiRequest {
-            model,
+            model: &model,
             messages: provider_messages,
             tools,
             tool_choice: if tools.is_empty() { None } else { Some("auto") },
@@ -113,14 +111,14 @@ pub fn new_client(profile: &Profile) -> Result<Client> {
       )
     }
     "z" => {
-      let model = profile.model;
+      let model = profile.model.clone();
       make_client(
-        Z_URL,
-        "Z_API_KEY",
+        url,
+        key_env,
         move |messages, tools| {
           let provider_messages: Vec<_> = messages.iter().map(ProviderMessage::from).collect();
           serde_json::to_value(ZRequest {
-            model,
+            model: &model,
             messages: provider_messages,
             tools,
             stream: true,
@@ -135,21 +133,21 @@ pub fn new_client(profile: &Profile) -> Result<Client> {
       )
     }
     "deepseek" => {
-      let model = profile.model;
-      let effort = profile.effort;
+      let model = profile.model.clone();
+      let effort = profile.effort.clone();
       make_client(
-        DEEPSEEK_URL,
-        "DEEPSEEK_API_KEY",
+        url,
+        key_env,
         move |messages, tools| {
           let provider_messages: Vec<_> = messages.iter().map(ProviderMessage::from).collect();
           serde_json::to_value(DeepSeekRequest {
-            model,
+            model: &model,
             messages: provider_messages,
             tools,
             stream: true,
             max_tokens: 393_216,
             thinking: DeepSeekThinking { kind: "enabled" },
-            reasoning_effort: effort,
+            reasoning_effort: &effort,
           })
         },
         600,

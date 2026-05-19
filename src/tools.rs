@@ -954,6 +954,7 @@ mod tests {
       meta,
       worker_parent_session_id,
       worker_id,
+      crate::config::Config::default(),
     )
   }
 

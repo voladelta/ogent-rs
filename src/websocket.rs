@@ -1,5 +1,5 @@
 use crate::agent::{Agent, AgentOutputSink, CompactState};
-use crate::profiles;
+use crate::config;
 use crate::prompts;
 use crate::providers;
 use crate::session;
@@ -264,8 +264,15 @@ impl AgentOutputSink for WsMessageSink {
   }
 }
 
-pub async fn serve(addr: &str, profile_name: &str, autocompact: i32, temp: bool) -> Result<()> {
-  profiles::get_profile(profile_name)
+pub async fn serve(
+  addr: &str,
+  profile_name: &str,
+  autocompact: i32,
+  temp: bool,
+  config: config::Config,
+) -> Result<()> {
+  config
+    .get_profile(profile_name)
     .with_context(|| format!("unknown profile: {profile_name}"))?;
 
   let listener = TcpListener::bind(addr)
@@ -276,10 +283,11 @@ pub async fn serve(addr: &str, profile_name: &str, autocompact: i32, temp: bool)
   loop {
     let (stream, peer) = listener.accept().await?;
     let profile_name = profile_name.to_string();
+    let config = config.clone();
     let active_sessions = active_sessions.clone();
     tokio::spawn(async move {
       if let Err(err) =
-        handle_connection(stream, &profile_name, autocompact, temp, active_sessions).await
+        handle_connection(stream, &profile_name, autocompact, temp, config, active_sessions).await
       {
         eprintln!("[serve] connection {peer} failed: {err}");
       }
@@ -292,6 +300,7 @@ async fn handle_connection(
   default_profile_name: &str,
   default_autocompact: i32,
   default_temp: bool,
+  config: config::Config,
   active_sessions: Arc<Mutex<HashSet<String>>>,
 ) -> Result<()> {
   let ws: WebSocketStream<TcpStream> = accept_async(stream).await.context("websocket handshake")?;
@@ -378,6 +387,7 @@ async fn handle_connection(
                 default_profile_name,
                 default_autocompact,
                 default_temp,
+                &config,
               ) {
                 Ok(cfg) => {
                   let repo = cfg.repo.clone().unwrap_or_default();
@@ -392,6 +402,7 @@ async fn handle_connection(
                     &mut agent_join,
                     run_cfg,
                     &mut session_key_for_cleanup,
+                    &config,
                   ) {
                     if let Some(session_key) = session_key_for_cleanup.take() {
                       unregister_session(active_sessions.clone(), &session_key).await;
@@ -417,6 +428,7 @@ async fn handle_connection(
               autocompact,
               default_profile_name,
               default_autocompact,
+              &config,
             ) {
               Ok(cfg) => {
                 let repo = cfg.repo.clone().unwrap_or_default();
@@ -431,6 +443,7 @@ async fn handle_connection(
                   &mut agent_join,
                   run_cfg,
                   &mut session_key_for_cleanup,
+                  &config,
                 ) {
                   if let Some(session_key) = session_key_for_cleanup.take() {
                     unregister_session(active_sessions.clone(), &session_key).await;
@@ -455,6 +468,7 @@ async fn handle_connection(
               autocompact,
               default_profile_name,
               default_autocompact,
+              &config,
             ) {
               Ok(cfg) => {
                 let key = scoped_session_key(cfg.repo.as_deref().unwrap_or(""), &cfg.session_id);
@@ -472,6 +486,7 @@ async fn handle_connection(
                   &mut agent_join,
                   cfg,
                   &mut session_key_for_cleanup,
+                  &config,
                 ) {
                   if let Some(session_key) = session_key_for_cleanup.take() {
                     unregister_session(active_sessions.clone(), &session_key).await;
@@ -564,6 +579,7 @@ fn resolved_profile_name(requested: Option<String>, fallback: &str) -> String {
   requested.unwrap_or_else(|| fallback.to_string())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_start_setup(
   repo: String,
   temp: Option<bool>,
@@ -572,11 +588,13 @@ fn build_start_setup(
   default_profile_name: &str,
   default_autocompact: i32,
   default_temp: bool,
+  config: &config::Config,
 ) -> Result<SetupConfig> {
   let repo = canonicalize_repo(&repo)?;
   let workspace = crate::workspace::Workspace::from_root(PathBuf::from(&repo));
   let profile_name = resolved_profile_name(profile, default_profile_name);
-  let profile_cfg = profiles::get_profile(&profile_name)
+  let profile_cfg = config
+    .get_profile(&profile_name)
     .with_context(|| format!("unknown profile: {profile_name}"))?;
   let autocompact = autocompact.unwrap_or(default_autocompact);
   let temp = temp.unwrap_or(default_temp);
@@ -628,6 +646,7 @@ fn build_fork_or_resume_setup(
   autocompact: Option<i32>,
   default_profile_name: &str,
   default_autocompact: i32,
+  config: &config::Config,
 ) -> Result<SetupConfig> {
   if temp.is_some() {
     anyhow::bail!("temp is only valid for start");
@@ -635,7 +654,8 @@ fn build_fork_or_resume_setup(
   let repo = canonicalize_repo(&repo)?;
   let workspace = crate::workspace::Workspace::from_root(PathBuf::from(&repo));
   let profile_name = resolved_profile_name(profile, default_profile_name);
-  let profile_cfg = profiles::get_profile(&profile_name)
+  let profile_cfg = config
+    .get_profile(&profile_name)
     .with_context(|| format!("unknown profile: {profile_name}"))?;
   let autocompact = autocompact.unwrap_or(default_autocompact);
   let compact = if autocompact >= 0 {
@@ -729,13 +749,17 @@ fn launch_agent(
   agent_join: &mut Option<tokio::task::JoinHandle<Result<()>>>,
   mut cfg: SetupConfig,
   session_key_for_cleanup: &mut Option<String>,
+  config: &config::Config,
 ) -> Result<()> {
   let session_id = cfg.session_id.clone();
   cfg.meta.session_id = session_id.clone();
-  let client = providers::new_client(
-    profiles::get_profile(&cfg.profile_name)
-      .with_context(|| format!("unknown profile: {}", cfg.profile_name))?,
-  )?;
+  let profile = config
+    .get_profile(&cfg.profile_name)
+    .with_context(|| format!("unknown profile: {}", cfg.profile_name))?;
+  let provider = config
+    .provider_for(profile)
+    .context("missing provider config for profile")?;
+  let client = providers::new_client(profile, provider)?;
   let (in_tx, in_rx) = mpsc::unbounded_channel::<SteerEvent>();
   let steer = WsSteerHandle::new(
     in_rx,
@@ -753,6 +777,7 @@ fn launch_agent(
     cfg.meta,
     None,
     None,
+    config.clone(),
   );
   agent.set_output_sink(Some(Arc::new(WsMessageSink { tx: out_tx.clone() })));
   agent.dirty = true;
@@ -799,6 +824,7 @@ mod tests {
       None,
       "ds-flash",
       80,
+      &crate::config::Config::default(),
     )
     .unwrap_err();
     assert!(err.to_string().contains("temp is only valid for start"));

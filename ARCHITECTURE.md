@@ -6,6 +6,7 @@
 
 ```text
 main.rs
+  -> config.rs
   -> agent.rs
     -> steer.rs
     -> workspace.rs
@@ -20,6 +21,9 @@ main.rs
 
 - `src/main.rs`
   - CLI parsing, mode wiring, resume/fork, websocket server mode, skill creation mode.
+- `src/config.rs`
+  - `config.yaml` loader with repo-level (`{workspace}/.ogent/config.yaml`) then home (`~/.ogent/config.yaml`) fallback.
+  - Holds `profiles`, `providers`, `default_profile`, and `autocompact`.
 - `src/agent.rs`
   - Turn loop, stream handling, tool-call execution, compaction.
   - Transport-neutral steer loop over `SteerChannel`.

@@ -1,3 +1,4 @@
+use anyhow::Context;
 use crate::client::{Client, ClientError};
 use crate::session;
 use crate::sse::{SseError, StreamEvent};
@@ -413,6 +414,7 @@ pub struct Agent {
   pub dirty: bool,
   pub progress_sink: Option<Arc<Mutex<String>>>,
   pub output_sink: Option<Arc<dyn AgentOutputSink>>,
+  pub config: crate::config::Config,
 
   pub pending_compact: CompactPending,
 }
@@ -435,6 +437,7 @@ impl Agent {
     meta: session::SessionMeta,
     worker_parent_session_id: Option<String>,
     worker_id: Option<String>,
+    config: crate::config::Config,
   ) -> Self {
     Self {
       workspace: workspace.clone(),
@@ -450,6 +453,7 @@ impl Agent {
       dirty: false,
       progress_sink: None,
       output_sink: None,
+      config,
 
       pending_compact: CompactPending::None,
     }
@@ -622,13 +626,14 @@ impl Agent {
           };
         }
       }
-      SteerEvent::Profile(name) => match crate::profiles::get_profile(&name) {
+      SteerEvent::Profile(name) => match self.config.get_profile(&name) {
         Some(p) => {
+          let provider = self.config.provider_for(p).context("missing provider config for profile")?;
           self.meta.draft_input = None;
-          self.client = crate::providers::new_client(p)?;
+          self.client = crate::providers::new_client(p, provider)?;
           self.meta.profile = name.clone();
           self.compact.context_limit = p.context_limit;
-          steer.set_profile(name, p.model.to_string());
+          steer.set_profile(name, p.model.clone());
           steer.log_push(format!("[control] profile → {}", self.meta.profile));
         }
         None => {
@@ -1093,6 +1098,7 @@ mod dirty_state_machine_tests {
       dummy_meta(),
       None,
       None,
+      crate::config::Config::default(),
     )
   }
 

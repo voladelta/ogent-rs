@@ -3,7 +3,7 @@
 
   let {
     open = $bindable(false),
-    group,
+    workspace,
     setup = $bindable(),
     onsubmit
   } = $props();
@@ -25,7 +25,7 @@
         <div>
           <p class="eyebrow">Setup</p>
           <h2 id="new-session-title">New session</h2>
-          <p>Connect a new Director stream to {group?.name}.</p>
+          <p>Connect a new Director stream to {workspace?.name}.</p>
         </div>
         <button class="icon-button" type="button" onclick={close} aria-label="Close new session">×</button>
       </div>

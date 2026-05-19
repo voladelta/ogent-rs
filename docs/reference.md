@@ -4,8 +4,8 @@
 
 | Flag | Meaning |
 | --- | --- |
-| `--profile <name>` | Model/profile selection |
-| `--autocompact <percent>` | Auto-compaction threshold (`-1` disables) |
+| `--profile <name>` | Model/profile selection (overrides `config.yaml`) |
+| `--autocompact <percent>` | Auto-compaction threshold (`-1` disables; overrides `config.yaml`) |
 | `--resume[=<session_id>]` | Resume existing session |
 | `--fork[=<session_id>]` | Fork existing session into a child session |
 | `--temp` | Ephemeral mode (no session persistence) |
@@ -15,9 +15,38 @@
 `--create-skill` cannot be combined with `--resume`, `--fork`, or `--serve`.
 `--serve` cannot be combined with `--resume`, `--fork`, or an initial prompt.
 
+## Config (`config.yaml`)
+
+`ogent` reads `config.yaml` from either the repo-level `.ogent/config.yaml` or `~/.ogent/config.yaml`, preferring the repo copy. If neither exists, it exits with an error telling you to create one.
+
+A minimal config looks like:
+
+```yaml
+default_profile: ds-flash
+autocompact: 80
+
+profiles:
+  ds-flash:
+    backend: deepseek
+    model: deepseek-v4-flash
+    effort: high
+    context_limit: 1000000
+
+providers:
+  deepseek:
+    base_url: https://api.deepseek.com/chat/completions
+    key_env: DEEPSEEK_API_KEY
+```
+
+- `default_profile` and `autocompact` are used when the corresponding CLI flag is omitted.
+- `profiles` maps a profile name to `backend`, `model`, `effort`, and `context_limit`.
+- `providers` maps a backend name to `base_url` and `key_env`.
+
+See `config.yaml.sample` in the repo for a full example.
+
 ## Required Environment
 
-- `DEEPSEEK_API_KEY` must be set for provider access.
+- The API key variable configured in `config.yaml` (`key_env`) must be set for provider access.
 - `EXA_API_KEY` must be set at startup. If missing/empty, `ogent` exits immediately with an error.
 
 ## WebSocket Protocol (`--serve`)

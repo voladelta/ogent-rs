@@ -19,24 +19,24 @@
   ];
   const storageKey = 'ogent.frontend-app.settings';
 
-  let groups = $state([
-    { id: 'group-main', name: 'Main', color: prismPalette[0] },
-    { id: 'group-research', name: 'Research', color: prismPalette[2] },
-    { id: 'group-ship', name: 'Ship', color: prismPalette[5] }
+  let workspaces = $state([
+    { id: 'workspace-main', name: 'Main', color: prismPalette[0] },
+    { id: 'workspace-research', name: 'Research', color: prismPalette[2] },
+    { id: 'workspace-ship', name: 'Ship', color: prismPalette[5] }
   ]);
-  let activeGroupId = $state('group-main');
+  let activeWorkspaceId = $state('workspace-main');
   let panes = $state([]);
   let settingsOpen = $state(false);
-  let groupPopoverOpen = $state(false);
+  let workspacePopoverOpen = $state(false);
   let setupOpen = $state(false);
-  let setupGroupId = $state('group-main');
-  let collapsedGroupIds = $state(['group-research', 'group-ship']);
-  let groupDraft = $state({ name: '', color: prismPalette[3] });
+  let setupWorkspaceId = $state('workspace-main');
+  let collapsedWorkspaceIds = $state(['workspace-research', 'workspace-ship']);
+  let workspaceDraft = $state({ name: '', color: prismPalette[3] });
   let setup = $state(loadSettings());
 
-  let activeGroup = $derived(groups.find((group) => group.id === activeGroupId) ?? groups[0]);
-  let setupGroup = $derived(groups.find((group) => group.id === setupGroupId) ?? activeGroup);
-  let activePanes = $derived(panes.filter((pane) => pane.groupId === activeGroupId));
+  let activeWorkspace = $derived(workspaces.find((workspace) => workspace.id === activeWorkspaceId) ?? workspaces[0]);
+  let setupWorkspace = $derived(workspaces.find((workspace) => workspace.id === setupWorkspaceId) ?? activeWorkspace);
+  let activePanes = $derived(panes.filter((pane) => pane.workspaceId === activeWorkspaceId));
 
   function defaultSettings() {
     return {
@@ -67,44 +67,44 @@
     return `${prefix}-${Math.random().toString(36).slice(2, 9)}`;
   }
 
-  function paneCount(groupId) {
-    return panes.filter((pane) => pane.groupId === groupId).length;
+  function paneCount(workspaceId) {
+    return panes.filter((pane) => pane.workspaceId === workspaceId).length;
   }
 
-  function panesForGroup(groupId) {
-    return panes.filter((pane) => pane.groupId === groupId);
+  function panesForWorkspace(workspaceId) {
+    return panes.filter((pane) => pane.workspaceId === workspaceId);
   }
 
-  function groupCollapsed(groupId) {
-    return collapsedGroupIds.includes(groupId);
+  function workspaceCollapsed(workspaceId) {
+    return collapsedWorkspaceIds.includes(workspaceId);
   }
 
-  function toggleGroup(groupId) {
-    collapsedGroupIds = groupCollapsed(groupId)
-      ? collapsedGroupIds.filter((id) => id !== groupId)
-      : [...collapsedGroupIds, groupId];
+  function toggleWorkspace(workspaceId) {
+    collapsedWorkspaceIds = workspaceCollapsed(workspaceId)
+      ? collapsedWorkspaceIds.filter((id) => id !== workspaceId)
+      : [...collapsedWorkspaceIds, workspaceId];
   }
 
-  function openSetup(groupId) {
-    activeGroupId = groupId;
-    setupGroupId = groupId;
+  function openSetup(workspaceId) {
+    activeWorkspaceId = workspaceId;
+    setupWorkspaceId = workspaceId;
     setupOpen = true;
   }
 
-  function createGroup(close) {
-    const name = groupDraft.name.trim();
+  function createWorkspace(close) {
+    const name = workspaceDraft.name.trim();
     if (!name) return;
-    const group = {
-      id: createId('group'),
+    const workspace = {
+      id: createId('workspace'),
       name,
-      color: groupDraft.color
+      color: workspaceDraft.color
     };
-    groups.push(group);
-    activeGroupId = group.id;
-    setupGroupId = group.id;
-    groupDraft = {
+    workspaces.push(workspace);
+    activeWorkspaceId = workspace.id;
+    setupWorkspaceId = workspace.id;
+    workspaceDraft = {
       name: '',
-      color: prismPalette[groups.length % prismPalette.length]
+      color: prismPalette[workspaces.length % prismPalette.length]
     };
     close();
   }
@@ -154,12 +154,12 @@
 
     saveSettings();
 
-    const groupId = setupGroup?.id ?? activeGroupId;
-    activeGroupId = groupId;
+    const workspaceId = setupWorkspace?.id ?? activeWorkspaceId;
+    activeWorkspaceId = workspaceId;
 
     const pane = {
       id: createId('pane'),
-      groupId,
+      workspaceId,
       title: setup.mode === 'start' ? 'New session' : `${setup.mode} session`,
       subtitle: 'Director stream',
       sessionTitle: '',
@@ -358,7 +358,7 @@
             </div>
             <p>Session setup defaults are stored locally in this browser.</p>
             <dl>
-              <div><dt>Active group</dt><dd>{activeGroup?.name}</dd></div>
+              <div><dt>Active workspace</dt><dd>{activeWorkspace?.name}</dd></div>
               <div><dt>Default profile</dt><dd>{setup.profile}</dd></div>
               <div><dt>WebSocket</dt><dd>{setup.wsUrl}</dd></div>
             </dl>
@@ -368,14 +368,14 @@
     </header>
 
     <div class="sidebar-section-head">
-      <span class="group-label">Groups</span>
-      <Popover bind:open={groupPopoverOpen}>
+      <span class="workspace-label">Workspaces</span>
+      <Popover bind:open={workspacePopoverOpen}>
         {#snippet trigger({ open, toggle })}
           <button
-            class="icon-button add-group"
+            class="icon-button add-workspace"
             type="button"
             onclick={toggle}
-            aria-label="Add group"
+            aria-label="Add workspace"
             aria-expanded={open}
           >
               <i class="icon plus"></i>
@@ -383,89 +383,89 @@
         {/snippet}
 
         {#snippet children({ close })}
-          <form class="group-popover" onsubmit={(event) => { event.preventDefault(); createGroup(close); }}>
+          <form class="workspace-popover" onsubmit={(event) => { event.preventDefault(); createWorkspace(close); }}>
             <div>
-              <p class="eyebrow">New group</p>
-              <h2>Create group</h2>
+              <p class="eyebrow">New workspace</p>
+              <h2>Create workspace</h2>
             </div>
             <label>
-              Group name
-              <input bind:value={groupDraft.name} placeholder="e.g. Launch work" />
+              Workspace name
+              <input bind:value={workspaceDraft.name} placeholder="e.g. Launch work" />
             </label>
             <div class="palette-field">
               <span>Color</span>
               <div class="palette-grid" aria-label="Prism palette">
                 {#each prismPalette as color}
                   <button
-                    class:selected={groupDraft.color === color}
+                    class:selected={workspaceDraft.color === color}
                     type="button"
                     class="palette-swatch"
                     style={`--swatch: ${color}`}
                     aria-label={`Use ${color}`}
-                    onclick={() => (groupDraft.color = color)}
+                    onclick={() => (workspaceDraft.color = color)}
                   ></button>
                 {/each}
               </div>
             </div>
             <div class="popover-actions">
               <button type="button" onclick={close}>Cancel</button>
-              <button class="primary" type="submit" disabled={!groupDraft.name.trim()}>Create</button>
+              <button class="primary" type="submit" disabled={!workspaceDraft.name.trim()}>Create</button>
             </div>
           </form>
         {/snippet}
       </Popover>
     </div>
 
-    <nav class="group-list" aria-label="Groups">
-      {#each groups as group}
+    <nav class="workspace-list" aria-label="Workspaces">
+      {#each workspaces as workspace}
         <section
-          class:active={group.id === activeGroupId}
-          class="group-block"
-          style={`--group-color: ${group.color}`}
+          class:active={workspace.id === activeWorkspaceId}
+          class="workspace-block"
+          style={`--workspace-color: ${workspace.color}`}
         >
-          <div class="group-row">
+          <div class="workspace-row">
             <button
-              class="group-disclosure"
+              class="workspace-disclosure"
               type="button"
-              onclick={() => toggleGroup(group.id)}
-              aria-label={`${groupCollapsed(group.id) ? 'Expand' : 'Collapse'} ${group.name}`}
-              aria-expanded={!groupCollapsed(group.id)}
+              onclick={() => toggleWorkspace(workspace.id)}
+              aria-label={`${workspaceCollapsed(workspace.id) ? 'Expand' : 'Collapse'} ${workspace.name}`}
+              aria-expanded={!workspaceCollapsed(workspace.id)}
             >
-              <i class={`icon ${groupCollapsed(group.id) ? 'caret-right' : 'caret-down'}`}></i>
+              <i class={`icon ${workspaceCollapsed(workspace.id) ? 'caret-right' : 'caret-down'}`}></i>
             </button>
             <button
-              class="group-select"
+              class="workspace-select"
               type="button"
-              onclick={() => (activeGroupId = group.id)}
+              onclick={() => (activeWorkspaceId = workspace.id)}
             >
-              <span class="group-dot" aria-hidden="true"></span>
-              <span>{group.name}</span>
+              <span class="workspace-dot" aria-hidden="true"></span>
+              <span>{workspace.name}</span>
             </button>
-            <span class="group-count">{paneCount(group.id)}</span>
+            <span class="workspace-count">{paneCount(workspace.id)}</span>
             <button
               class="icon-button add-session"
               type="button"
-              onclick={() => openSetup(group.id)}
-              aria-label={`Add session to ${group.name}`}
+              onclick={() => openSetup(workspace.id)}
+              aria-label={`Add session to ${workspace.name}`}
             >
             <i class="icon plus"></i>
             </button>
           </div>
-          {#if !groupCollapsed(group.id)}
+          {#if !workspaceCollapsed(workspace.id)}
             <div class="session-list">
-              {#each panesForGroup(group.id) as pane (pane.id)}
+              {#each panesForWorkspace(workspace.id) as pane (pane.id)}
                 <button
-                  class:active={group.id === activeGroupId}
+                  class:active={workspace.id === activeWorkspaceId}
                   class="session-nav-item"
                   type="button"
-                  onclick={() => (activeGroupId = group.id)}
+                  onclick={() => (activeWorkspaceId = workspace.id)}
                 >
                   <span class="session-icon" aria-hidden="true">›_</span>
                   <span>{pane.title}</span>
                   <span class="session-state session-state-{statusTone(pane.status)}" aria-label={pane.status}></span>
                 </button>
               {:else}
-                <button class="empty-session" type="button" onclick={() => openSetup(group.id)}>
+                <button class="empty-session" type="button" onclick={() => openSetup(workspace.id)}>
                   Start a session
                 </button>
               {/each}
@@ -476,7 +476,7 @@
     </nav>
   </aside>
 
-  <main class:has-sessions={activePanes.length > 0} class="pane-rail" aria-label={`${activeGroup?.name || 'Active'} sessions`}>
+  <main class:has-sessions={activePanes.length > 0} class="pane-rail" aria-label={`${activeWorkspace?.name || 'Active'} sessions`}>
     {#each activePanes as pane (pane.id)}
       <section class="session-pane" aria-label={pane.title}>
         <div class="pane-head">
@@ -538,8 +538,8 @@
       </section>
     {:else}
       <div class="empty-rail">
-        <p>No sessions in {activeGroup?.name}.</p>
-        <button class="primary" type="button" onclick={() => openSetup(activeGroup?.id)}>
+        <p>No sessions in {activeWorkspace?.name}.</p>
+        <button class="primary" type="button" onclick={() => openSetup(activeWorkspace?.id)}>
           <i class="icon plus"></i>
           Add session
         </button>
@@ -547,5 +547,5 @@
     {/each}
   </main>
 
-  <SetupDialog bind:open={setupOpen} group={setupGroup} bind:setup onsubmit={startSession} />
+  <SetupDialog bind:open={setupOpen} workspace={setupWorkspace} bind:setup onsubmit={startSession} />
 </div>

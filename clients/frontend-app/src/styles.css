@@ -235,7 +235,7 @@ dd,
   white-space: nowrap;
 }
 
-.group-label,
+.workspace-label,
 .eyebrow {
   color: var(--quiet);
   font-size: var(--text-2xs);
@@ -267,7 +267,7 @@ dd,
   line-height: 1;
 }
 
-.group-list {
+.workspace-list {
   display: grid;
   align-content: start;
   gap: var(--space-1);
@@ -277,7 +277,7 @@ dd,
   padding: 0 var(--space-2) var(--space-2-5);
 }
 
-.group-block {
+.workspace-block {
   display: grid;
   min-width: 0;
   border: 1px solid var(--line);
@@ -287,16 +287,16 @@ dd,
   overflow: hidden;
 }
 
-.group-block.active {
+.workspace-block.active {
   border-color: color-mix(
     in srgb,
-    var(--group-color, var(--teal)) 30%,
+    var(--workspace-color, var(--teal)) 30%,
     var(--line)
   );
   background: hsl(0 0% 100% / 92%);
 }
 
-.group-row {
+.workspace-row {
   display: flex;
   align-items: center;
   gap: var(--space-1);
@@ -304,7 +304,7 @@ dd,
   padding: var(--space-1-5) var(--space-1-5);
 }
 
-.group-disclosure {
+.workspace-disclosure {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -319,7 +319,7 @@ dd,
   font-size: var(--text-base);
 }
 
-.group-select {
+.workspace-select {
   display: flex;
   align-items: center;
   gap: var(--space-1-5);
@@ -335,7 +335,7 @@ dd,
   font-size: var(--text-sm);
 }
 
-.group-select span:last-child {
+.workspace-select span:last-child {
   flex: 1;
   min-width: 0;
   overflow: hidden;
@@ -343,16 +343,16 @@ dd,
   white-space: nowrap;
 }
 
-.group-dot {
+.workspace-dot {
   width: 10px;
   height: 10px;
   border-radius: var(--radius-full);
-  background: var(--group-color, var(--teal));
+  background: var(--workspace-color, var(--teal));
   box-shadow: 0 0 0 2px
-    color-mix(in srgb, var(--group-color, var(--teal)) 14%, transparent);
+    color-mix(in srgb, var(--workspace-color, var(--teal)) 14%, transparent);
 }
 
-.group-count {
+.workspace-count {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -367,16 +367,16 @@ dd,
   font-variant-numeric: tabular-nums;
 }
 
-.group-block.active .group-count {
+.workspace-block.active .workspace-count {
   color: var(--ink);
   background: color-mix(
     in srgb,
-    var(--group-color, var(--teal)) 12%,
+    var(--workspace-color, var(--teal)) 12%,
     hsl(0 0% 100%)
   );
 }
 
-.add-group {
+.add-workspace {
   font-size: var(--text-lg);
 }
 
@@ -416,8 +416,8 @@ dd,
 @media (hover: hover) and (pointer: fine) {
   .session-nav-item:hover:not(:disabled),
   .empty-session:hover:not(:disabled),
-  .group-select:hover:not(:disabled),
-  .group-disclosure:hover:not(:disabled) {
+  .workspace-select:hover:not(:disabled),
+  .workspace-disclosure:hover:not(:disabled) {
     background: hsl(220 12% 94% / 60%);
     box-shadow: none;
   }
@@ -479,7 +479,7 @@ dd,
   transform-origin: top left;
 }
 
-.group-popover,
+.workspace-popover,
 .settings-popover {
   display: grid;
   gap: var(--space-2-5);
@@ -1156,7 +1156,7 @@ pre {
     padding: var(--space-2) var(--space-2-5) var(--space-1-5);
   }
 
-  .group-list {
+  .workspace-list {
     padding-inline: var(--space-1-5);
   }
 
