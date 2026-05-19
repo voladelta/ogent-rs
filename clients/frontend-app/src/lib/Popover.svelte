@@ -27,7 +27,8 @@
     });
     Object.assign(panelEl.style, {
       left: `${x}px`,
-      top: `${y}px`
+      top: `${y}px`,
+      visibility: 'visible'
     });
   }
 
@@ -62,7 +63,7 @@
 </span>
 
 {#if open}
-  <div class="popover-panel" bind:this={panelEl} role="dialog">
+  <div class="popover-panel" bind:this={panelEl} role="dialog" style="visibility: hidden;">
     {@render children({ close })}
   </div>
 {/if}
