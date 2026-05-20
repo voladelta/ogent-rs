@@ -1,6 +1,6 @@
 # ogent
 
-`ogent` is a Director-first coding agent.
+`ogent` is a Director-first coding agent with a direct one-off worker mode.
 
 The main agent is the Director. It frames the task, inspects the repo, manages state, dispatches workers, integrates results, and reports the outcome. Workspace edits are done by workers.
 
@@ -25,6 +25,9 @@ cargo run -- "Fix the failing tests without overcomplicating"
 ```bash
 # Director run
 ogent "Implement feature X"
+
+# Direct one-off worker run
+ogent --run reviewer --profile kimi "Review the staged diff"
 
 # WebSocket server mode
 ogent --serve 127.0.0.1:9876
@@ -56,6 +59,7 @@ Each WebSocket Director owns an immutable workspace root from `repo`. Tools, wor
 
 - Director tools include: `repo_map`, `code_map`, restricted `bash` (`colgrep`/`rg` only), `load_skill`, `state`, `set_title`, `dispatch_workers`, `wait_workers`.
 - Worker tools include editing tools (`write_file`, `read_hash_anchors`, `edit_hash_anchors`) plus read/web/bash/state tools.
+- `--run <role>` starts one worker-mode agent directly with the worker prompt and worker tools. It bypasses the Director and uses temporary session mode.
 - `dispatch_workers` starts a worker batch and returns worker IDs immediately.
 - `wait_workers` returns completed worker results as soon as any worker finishes, or reports still-running workers after a short wait.
 - Running worker statuses include `progress`. Workers are prompted to write `progress/current` in their state; until they do, progress is `Starting`.

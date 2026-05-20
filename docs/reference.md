@@ -6,6 +6,7 @@
 | --- | --- |
 | `--profile <name>` | Model/profile selection (overrides `config.yaml`) |
 | `--autocompact <percent>` | Auto-compaction threshold (`-1` disables; overrides `config.yaml`) |
+| `--run <role>` | Run one worker-mode agent directly for a one-off task |
 | `--resume[=<session_id>]` | Resume existing session |
 | `--fork[=<session_id>]` | Fork existing session into a child session |
 | `--temp` | Ephemeral mode (no session persistence) |
@@ -14,6 +15,28 @@
 
 `--create-skill` cannot be combined with `--resume`, `--fork`, or `--serve`.
 `--serve` cannot be combined with `--resume`, `--fork`, or an initial prompt.
+`--run` cannot be combined with `--resume`, `--fork`, `--serve`, or `--create-skill`.
+
+## Direct Worker Run (`--run`)
+
+`--run <role>` starts a single worker-mode agent directly and bypasses the Director.
+
+```bash
+ogent --run reviewer --profile kimi "Review the staged diff"
+ogent --run implementer "Fix the failing parser test"
+ogent --run researcher "Explain how websocket resume works here"
+```
+
+The role is resolved the same way as Director-spawned worker roles. Built-in roles use their bundled worker prompts; unknown roles use the contractor factory prompt path.
+
+Direct worker runs:
+
+- use the selected worker prompt as the system prompt
+- use worker tools only
+- do not expose Director-only orchestration tools such as `dispatch_workers`, `wait_workers`, `inspect_worker`, `cancel_workers`, or `set_title`
+- use the configured default profile unless `--profile` is passed
+- use the configured autocompact default unless `--autocompact` is passed
+- force temporary mode, so no resumable session is persisted
 
 ## Config (`config.yaml`)
 

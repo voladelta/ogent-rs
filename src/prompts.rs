@@ -20,6 +20,7 @@ pub const WORKER_PROMPT_SYSTEM_ARCHITECT: &str =
   include_str!("../prompts/workers/system_architect.md");
 pub const WORKER_PROMPT_SUMMARIZER: &str = include_str!("../prompts/workers/summarizer.md");
 pub const WORKER_PROMPT_REVIEWER: &str = include_str!("../prompts/workers/reviewer.md");
+pub const WORKER_PROMPT_QA_WRITER: &str = include_str!("../prompts/workers/qa_writer.md");
 
 pub fn get_builtin_worker_prompt(name: &str) -> Option<&'static str> {
   match name {
@@ -34,6 +35,7 @@ pub fn get_builtin_worker_prompt(name: &str) -> Option<&'static str> {
     "system_architect" => Some(WORKER_PROMPT_SYSTEM_ARCHITECT),
     "summarizer" => Some(WORKER_PROMPT_SUMMARIZER),
     "reviewer" => Some(WORKER_PROMPT_REVIEWER),
+    "qa_writer" => Some(WORKER_PROMPT_QA_WRITER),
     _ => None,
   }
 }
@@ -256,5 +258,12 @@ mod tests {
     push_internal_user_message(&mut messages, String::new());
 
     assert_eq!(messages.len(), 2);
+  }
+
+  #[test]
+  fn qa_writer_is_builtin_worker_prompt() {
+    let prompt = get_builtin_worker_prompt("qa_writer").unwrap();
+    assert!(prompt.contains("You are QA Writer."));
+    assert!(prompt.contains("Accepted Answer"));
   }
 }

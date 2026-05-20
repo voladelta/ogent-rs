@@ -43,6 +43,8 @@ struct Args {
   create_skill: Option<String>,
   #[arg(long, value_name = "ADDR")]
   serve: Option<String>,
+  #[arg(long, value_name = "ROLE")]
+  run: Option<String>,
   prompt: Vec<String>,
 }
 
@@ -55,10 +57,16 @@ async fn main() -> Result<()> {
   }
   let workspace = crate::workspace::Workspace::from_current_dir();
   let config = config::load_or_exit(workspace.root());
-  let profile_name = args.profile.as_deref().unwrap_or(&config.default_profile);
+  let profile_name = args
+    .profile
+    .clone()
+    .unwrap_or_else(|| config.default_profile.clone());
   let autocompact = args.autocompact.unwrap_or(config.autocompact);
   if args.resume.is_some() && args.fork.is_some() {
     bail!("use either resume or fork, not both");
+  }
+  if args.run.is_some() {
+    ensure_run_mode_flags(&args)?;
   }
   if args.serve.is_some()
     && (args.resume.is_some() || args.fork.is_some() || args.create_skill.is_some())
@@ -69,19 +77,33 @@ async fn main() -> Result<()> {
     bail!("--serve does not accept a prompt; send messages over the websocket connection");
   }
   if let Some(addr) = args.serve.as_deref() {
-    return websocket::serve(addr, profile_name, autocompact, args.temp, config.clone()).await;
+    return websocket::serve(addr, &profile_name, autocompact, args.temp, config.clone()).await;
   }
   let creator_mode = args.create_skill.is_some();
   if creator_mode {
     ensure_creator_mode_flags(&args)?;
   }
   let profile = config
-    .get_profile(profile_name)
+    .get_profile(&profile_name)
     .with_context(|| format!("unknown profile: {}", profile_name))?;
   let provider = config
     .provider_for(profile)
     .context("missing provider config for profile")?;
+  let context_limit = profile.context_limit;
   let client = providers::new_client(profile, provider)?;
+  if let Some(role) = args.run.as_deref() {
+    return run_worker_cli(
+      workspace,
+      client,
+      config,
+      &profile_name,
+      context_limit,
+      autocompact,
+      role,
+      &args.prompt.join(" "),
+    )
+    .await;
+  }
   if let Some(name) = args.create_skill.as_deref() {
     let objective = args.prompt.join(" ");
     let result = artifact_creator::create_skill(&client, name, &objective).await?;
@@ -256,6 +278,78 @@ fn ensure_creator_mode_flags(args: &Args) -> Result<()> {
   Ok(())
 }
 
+fn ensure_run_mode_flags(args: &Args) -> Result<()> {
+  if args.resume.is_some()
+    || args.fork.is_some()
+    || args.serve.is_some()
+    || args.create_skill.is_some()
+  {
+    bail!("--run cannot be combined with --resume, --fork, --serve, or --create-skill");
+  }
+  if args.prompt.join(" ").trim().is_empty() {
+    bail!("--run requires a task prompt");
+  }
+  Ok(())
+}
+
+async fn run_worker_cli(
+  workspace: crate::workspace::Workspace,
+  client: crate::client::Client,
+  config: crate::config::Config,
+  profile_name: &str,
+  context_limit: usize,
+  autocompact: i32,
+  role: &str,
+  task: &str,
+) -> Result<()> {
+  let (system_prompt, task_prompt) = workers::resolve_worker_prompts(role, task, "").await?;
+  let session_id = session::generate_session_id();
+  let messages = workers::build_worker_messages(&system_prompt, &task_prompt, &session_id);
+  let compact = if autocompact >= 0 {
+    CompactState::new(f64::from(autocompact) / 100.0, context_limit)
+  } else {
+    CompactState::disabled()
+  };
+  let meta = session::SessionMeta {
+    session_id: session_id.clone(),
+    parent_session: None,
+    title: None,
+    profile: profile_name.to_string(),
+    mode: "worker".to_string(),
+    flags: session::SessionFlags {
+      steer: false,
+      worker: true,
+      autocompact,
+      resume: false,
+      temp: true,
+    },
+    usage: session::SessionUsage { total_tokens: 0 },
+    draft_input: None,
+    start_ts: Some(session::timestamp_ms()),
+    end_ts: None,
+  };
+  let mut agent = Agent::new(
+    workspace,
+    client,
+    messages,
+    tools::configured_worker_tools(),
+    compact,
+    meta,
+    None,
+    Some("worker".to_string()),
+    config,
+  );
+  agent.set_output_sink(Some(agent::cli_output_sink()));
+  agent.dirty = true;
+  let loop_result = agent.run_loop().await;
+  if let Err(e) = loop_result {
+    agent.persist_if_dirty()?;
+    return Err(e.into());
+  }
+  agent.persist_if_dirty()?;
+  Ok(())
+}
+
 fn artifact_action_verb(action: ArtifactAction) -> &'static str {
   match action {
     ArtifactAction::Created => "created",
@@ -265,8 +359,68 @@ fn artifact_action_verb(action: ArtifactAction) -> &'static str {
 
 fn parse_args() -> Args {
   let mut raw: Vec<String> = env::args().collect();
+  parse_args_from(&mut raw)
+}
+
+fn parse_args_from(raw: &mut [String]) -> Args {
   if raw.len() > 1 && (raw[1] == "resume" || raw[1] == "fork") {
     raw[1] = format!("--{}", raw[1]);
   }
-  Args::parse_from(raw)
+  Args::parse_from(raw.iter())
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  fn parse_test_args(raw: &[&str]) -> Args {
+    let mut raw = raw.iter().map(|arg| arg.to_string()).collect::<Vec<_>>();
+    parse_args_from(&mut raw)
+  }
+
+  #[test]
+  fn parses_run_role_and_task() {
+    let args = parse_test_args(&["ogent", "--run", "implementer", "fix the parser"]);
+    assert_eq!(args.run.as_deref(), Some("implementer"));
+    assert_eq!(args.prompt, vec!["fix the parser"]);
+    assert!(ensure_run_mode_flags(&args).is_ok());
+  }
+
+  #[test]
+  fn parses_run_with_profile_override() {
+    let args = parse_test_args(&[
+      "ogent",
+      "--run",
+      "reviewer",
+      "--profile",
+      "kimi",
+      "review it",
+    ]);
+    assert_eq!(args.run.as_deref(), Some("reviewer"));
+    assert_eq!(args.profile.as_deref(), Some("kimi"));
+    assert_eq!(args.prompt, vec!["review it"]);
+    assert!(ensure_run_mode_flags(&args).is_ok());
+  }
+
+  #[test]
+  fn run_rejects_incompatible_modes() {
+    let args = parse_test_args(&["ogent", "--run", "implementer", "--resume", "fix it"]);
+    assert!(ensure_run_mode_flags(&args).is_err());
+
+    let args = parse_test_args(&[
+      "ogent",
+      "--run",
+      "implementer",
+      "--create-skill",
+      "x",
+      "fix it",
+    ]);
+    assert!(ensure_run_mode_flags(&args).is_err());
+  }
+
+  #[test]
+  fn run_requires_task_prompt() {
+    let args = parse_test_args(&["ogent", "--run", "implementer"]);
+    assert!(ensure_run_mode_flags(&args).is_err());
+  }
 }

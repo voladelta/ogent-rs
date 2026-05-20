@@ -518,7 +518,7 @@ async fn run_worker_agent_inner(args: WorkerRunArgs) -> Result<String> {
   Ok(agent.last_assistant_message().unwrap_or_default())
 }
 
-fn build_worker_messages(
+pub(crate) fn build_worker_messages(
   system_prompt: &str,
   prompt: &str,
   session_id: &str,

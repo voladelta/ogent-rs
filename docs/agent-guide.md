@@ -2,7 +2,7 @@
 
 ## Director-First Runtime
 
-`ogent` is always a Director in the main process.
+`ogent` runs as a Director by default. `--run <role>` is the exception: it starts one worker-mode agent directly for a temporary one-off task.
 
 The Director:
 
@@ -16,6 +16,19 @@ The Director:
 - exits on terminal state
 
 The Director does not directly edit workspace files.
+
+## Direct Worker Run
+
+`ogent --run <role> "task"` bypasses the Director and starts a single worker-mode `Agent`.
+
+Direct worker runs:
+
+- resolve `<role>` through the normal worker prompt resolver
+- use the worker toolset only
+- do not expose Director worker-management tools
+- use the configured default profile unless `--profile` is passed
+- use the configured autocompact default
+- force temporary mode, so no resumable session is persisted
 
 ## Worker Runtime
 
@@ -53,6 +66,7 @@ Dispatch workers in one batch only when their scopes are independent. Independen
   - `system_architect`
   - `summarizer`
   - `reviewer`
+  - `qa_writer`
 
 Unknown role or `factory` role uses contractor-factory generation.
 All worker system prompts include the shared progress-reporting nudge, including factory-generated roles.

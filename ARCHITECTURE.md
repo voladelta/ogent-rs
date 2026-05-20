@@ -2,7 +2,7 @@
 
 ## Runtime Shape
 
-`ogent` is built around a Director/worker split.
+`ogent` is built around a Director/worker split. Normal CLI and WebSocket runs start a Director; `--run <role>` starts one worker-mode agent directly for a temporary one-off task.
 
 ```text
 main.rs
@@ -20,7 +20,7 @@ main.rs
 ## Module Ownership
 
 - `src/main.rs`
-  - CLI parsing, mode wiring, resume/fork, websocket server mode, skill creation mode.
+  - CLI parsing, mode wiring, direct worker run mode, resume/fork, websocket server mode, skill creation mode.
 - `src/config.rs`
   - `config.yaml` loader with repo-level (`{workspace}/.ogent/config.yaml`) then home (`~/.ogent/config.yaml`) fallback.
   - Holds `profiles`, `providers`, `default_profile`, and `autocompact`.
@@ -69,7 +69,8 @@ main.rs
 
 ## Invariants
 
-- Main agent is Director and does not receive direct file-edit tools.
+- Main agent is Director and does not receive direct file-edit tools, except direct worker mode (`--run <role>`) which intentionally starts a worker-mode agent instead.
+- Direct worker mode uses worker prompts and worker tools only. Director-only orchestration tools are not exposed.
 - In `--serve` mode, each websocket connection starts unbound and can initialize exactly one Director Agent via setup (`start`/`fork`/`resume`).
 - Each Agent has one immutable workspace root. WebSocket setup derives it from `repo`; CLI runs use the process current directory.
 - Tool execution, bash current directory, state paths, session files, and spawned workers are workspace-scoped. Do not use global `std::env::set_current_dir` for per-connection behavior.
