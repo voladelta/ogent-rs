@@ -92,16 +92,16 @@ async fn main() -> Result<()> {
   let context_limit = profile.context_limit;
   let client = providers::new_client(profile, provider)?;
   if let Some(role) = args.run.as_deref() {
-    return run_worker_cli(
+    return run_worker_cli(WorkerCliRun {
       workspace,
       client,
       config,
-      &profile_name,
+      profile_name: &profile_name,
       context_limit,
       autocompact,
       role,
-      &args.prompt.join(" "),
-    )
+      task: &args.prompt.join(" "),
+    })
     .await;
   }
   if let Some(name) = args.create_skill.as_deref() {
@@ -292,21 +292,24 @@ fn ensure_run_mode_flags(args: &Args) -> Result<()> {
   Ok(())
 }
 
-async fn run_worker_cli(
+struct WorkerCliRun<'a> {
   workspace: crate::workspace::Workspace,
   client: crate::client::Client,
   config: crate::config::Config,
-  profile_name: &str,
+  profile_name: &'a str,
   context_limit: usize,
   autocompact: i32,
-  role: &str,
-  task: &str,
-) -> Result<()> {
-  let (system_prompt, task_prompt) = workers::resolve_worker_prompts(role, task, "").await?;
+  role: &'a str,
+  task: &'a str,
+}
+
+async fn run_worker_cli(run: WorkerCliRun<'_>) -> Result<()> {
+  let (system_prompt, task_prompt) =
+    workers::resolve_worker_prompts(run.role, run.task, "").await?;
   let session_id = session::generate_session_id();
   let messages = workers::build_worker_messages(&system_prompt, &task_prompt, &session_id);
-  let compact = if autocompact >= 0 {
-    CompactState::new(f64::from(autocompact) / 100.0, context_limit)
+  let compact = if run.autocompact >= 0 {
+    CompactState::new(f64::from(run.autocompact) / 100.0, run.context_limit)
   } else {
     CompactState::disabled()
   };
@@ -314,12 +317,12 @@ async fn run_worker_cli(
     session_id: session_id.clone(),
     parent_session: None,
     title: None,
-    profile: profile_name.to_string(),
+    profile: run.profile_name.to_string(),
     mode: "worker".to_string(),
     flags: session::SessionFlags {
       steer: false,
       worker: true,
-      autocompact,
+      autocompact: run.autocompact,
       resume: false,
       temp: true,
     },
@@ -329,15 +332,15 @@ async fn run_worker_cli(
     end_ts: None,
   };
   let mut agent = Agent::new(
-    workspace,
-    client,
+    run.workspace,
+    run.client,
     messages,
     tools::configured_worker_tools(),
     compact,
     meta,
     None,
     Some("worker".to_string()),
-    config,
+    run.config,
   );
   agent.set_output_sink(Some(agent::cli_output_sink()));
   agent.dirty = true;
