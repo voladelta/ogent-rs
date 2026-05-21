@@ -15,7 +15,7 @@ pub fn render_hashlines(source: &str, start: Option<usize>, end: Option<usize>) 
     .map(|s| if s > 0 { s - 1 } else { 0 })
     .unwrap_or(0)
     .min(lines.len());
-  let slice_end = end.unwrap_or(lines.len()).min(lines.len());
+  let slice_end = end.unwrap_or(lines.len()).min(lines.len()).max(slice_start);
   let slice = &lines[slice_start..slice_end];
   let estimated: usize = slice.iter().map(|l| l.len() + 12).sum();
   let mut out = String::with_capacity(estimated);
@@ -239,6 +239,11 @@ mod tests {
   #[test]
   fn hashline_matches_go_fnv_prefix() {
     assert_eq!(render_hashlines("hello\n", None, None), "1:a430|hello\n");
+  }
+
+  #[test]
+  fn hashline_empty_when_start_exceeds_end() {
+    assert_eq!(render_hashlines("hello\n", Some(60), Some(15)), "");
   }
 
   #[test]
