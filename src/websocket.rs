@@ -321,7 +321,7 @@ async fn handle_connection(
         "{\"type\":\"error\",\"code\":\"serialization_failed\",\"message\":\"serialization failed\"}"
           .to_string()
       });
-      if ws_tx.send(WsMessage::Text(payload)).await.is_err() {
+      if ws_tx.send(WsMessage::Text(payload.into())).await.is_err() {
         return;
       }
     }
