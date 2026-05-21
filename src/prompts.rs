@@ -4,7 +4,6 @@ use std::path::PathBuf;
 
 use crate::types::{Message, MessageOrigin};
 
-pub const CONTRACTOR_FACTORY: &str = include_str!("../workers/contractor_factory.md");
 pub const WORKER_PROMPT_OGENT: &str = include_str!("../workers/ogent.md");
 pub const WORKER_PROMPT_IMPLEMENTER: &str = include_str!("../workers/implementer.md");
 pub const WORKER_PROMPT_VERIFIER: &str = include_str!("../workers/verifier.md");

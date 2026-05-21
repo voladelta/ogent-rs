@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, bail};
+use anyhow::Result;
 
 const WORKER_PROGRESS_PROMPT_SUFFIX: &str = r#"## Integrity and Failure Reporting
 
@@ -63,41 +63,11 @@ pub async fn resolve_worker_prompts(
   context: &str,
 ) -> Result<(String, String)> {
   let requested_role = normalize_role(role);
-  if let Some(builtin) = crate::prompts::get_builtin_worker_prompt(requested_role) {
-    let context_section = format!("## Context\n\n{}", context.trim());
-    let system_prompt = compose_worker_system_prompt(builtin, Some(&context_section));
-    return Ok((system_prompt, task.trim().to_string()));
-  }
-
-  let client = get_architect_client()?;
-  let user_content = format!(
-    "## Desired Role\n\n{requested_role}\n\n## Hiring Request\n\n{}\n\n## Context\n\n{}",
-    task.trim(),
-    context.trim()
-  );
-  let messages = vec![
-    crate::types::Message {
-      role: "system".into(),
-      content: crate::prompts::CONTRACTOR_FACTORY.to_string(),
-      origin: crate::types::MessageOrigin::Internal,
-      ..Default::default()
-    },
-    crate::types::Message {
-      role: "user".into(),
-      content: user_content,
-      origin: crate::types::MessageOrigin::Human,
-      ..Default::default()
-    },
-  ];
-  let resp = client
-    .chat_json(&messages, &[])
-    .await
-    .context("architect LLM call failed")?;
-  let (system_prompt, task_prompt) = parse_architect_output(&resp.content)?;
-  Ok((
-    compose_worker_system_prompt(&system_prompt, None),
-    task_prompt,
-  ))
+  let builtin = crate::prompts::get_builtin_worker_prompt(requested_role)
+    .ok_or_else(|| anyhow::anyhow!("unknown worker role: {requested_role}"))?;
+  let context_section = format!("## Context\n\n{}", context.trim());
+  let system_prompt = compose_worker_system_prompt(builtin, Some(&context_section));
+  Ok((system_prompt, task.trim().to_string()))
 }
 
 fn compose_worker_system_prompt(base_prompt: &str, extra_section: Option<&str>) -> String {
@@ -114,28 +84,6 @@ fn compose_worker_system_prompt(base_prompt: &str, extra_section: Option<&str>) 
 fn normalize_role(role: &str) -> &str {
   let role = role.trim();
   if role.is_empty() { "ogent" } else { role }
-}
-
-fn parse_architect_output(text: &str) -> Result<(String, String)> {
-  let sys =
-    extract_tag(text, "system_prompt").context("architect output missing <system_prompt> block")?;
-  let task =
-    extract_tag(text, "task_prompt").context("architect output missing <task_prompt> block")?;
-  if sys.is_empty() {
-    bail!("architect produced empty system_prompt");
-  }
-  if task.is_empty() {
-    bail!("architect produced empty task_prompt");
-  }
-  Ok((sys, task))
-}
-
-fn extract_tag(text: &str, tag: &str) -> Option<String> {
-  let start_tag = format!("<{tag}>");
-  let end_tag = format!("</{tag}>");
-  let start = text.find(&start_tag)? + start_tag.len();
-  let end = text[start..].find(&end_tag)? + start;
-  Some(text[start..end].trim().to_string())
 }
 
 pub(crate) fn build_worker_messages(
@@ -159,26 +107,6 @@ pub(crate) fn build_worker_messages(
   ];
   crate::prompts::enrich_initial_messages(&mut messages);
   messages
-}
-
-static ARCHITECT_CLIENT: std::sync::OnceLock<Result<crate::client::Client, String>> =
-  std::sync::OnceLock::new();
-
-fn get_architect_client() -> Result<&'static crate::client::Client> {
-  let result = ARCHITECT_CLIENT.get_or_init(|| {
-    let config = crate::config::Config::default();
-    let profile = config
-      .get_profile("ds-flash")
-      .ok_or_else(|| "architect profile 'ds-flash' not found".to_string())?;
-    let provider = config
-      .provider_for(profile)
-      .ok_or_else(|| "missing provider config for architect profile 'ds-flash'".to_string())?;
-    crate::providers::new_client(profile, provider).map_err(|e| e.to_string())
-  });
-  match result {
-    Ok(client) => Ok(client),
-    Err(e) => bail!("architect client init: {e}"),
-  }
 }
 
 #[cfg(test)]
@@ -219,5 +147,15 @@ mod tests {
     assert!(sys.contains("## Context"));
     assert!(sys.contains("src/lib.rs"));
     assert_eq!(task, "review src/lib.rs");
+  }
+
+  #[tokio::test]
+  async fn resolve_worker_prompts_errors_on_unknown_role() {
+    let err = resolve_worker_prompts("unknown_role_xyz", "do something", "")
+      .await
+      .unwrap_err();
+    let msg = format!("{err}");
+    assert!(msg.contains("unknown worker role"), "error was: {msg}");
+    assert!(msg.contains("unknown_role_xyz"), "error was: {msg}");
   }
 }
