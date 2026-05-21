@@ -27,8 +27,8 @@ struct Args {
   profile: Option<String>,
   #[arg(long)]
   autocompact: Option<i32>,
-  #[arg(long, value_name = "ROLE")]
-  run: Option<String>,
+  #[arg(long)]
+  role: Option<String>,
   prompt: Vec<String>,
 }
 
@@ -63,7 +63,7 @@ async fn main() -> Result<()> {
     .context("missing provider config for profile")?;
   let context_limit = profile.context_limit;
   let client = providers::new_client(profile, provider)?;
-  let role = args.run.as_deref().unwrap_or("ogent");
+  let role = args.role.as_deref().unwrap_or("ogent");
   run_worker_cli(WorkerCliRun {
     workspace,
     client,
@@ -163,7 +163,7 @@ mod tests {
   #[test]
   fn parses_run_role_and_task() {
     let args = parse_test_args(&["ogent", "--run", "implementer", "fix the parser"]);
-    assert_eq!(args.run.as_deref(), Some("implementer"));
+    assert_eq!(args.role.as_deref(), Some("implementer"));
     assert_eq!(args.prompt, vec!["fix the parser"]);
     assert!(ensure_run_mode_flags(&args).is_ok());
   }
@@ -172,13 +172,13 @@ mod tests {
   fn parses_run_with_profile_override() {
     let args = parse_test_args(&[
       "ogent",
-      "--run",
+      "--role",
       "reviewer",
       "--profile",
       "kimi",
       "review it",
     ]);
-    assert_eq!(args.run.as_deref(), Some("reviewer"));
+    assert_eq!(args.role.as_deref(), Some("reviewer"));
     assert_eq!(args.profile.as_deref(), Some("kimi"));
     assert_eq!(args.prompt, vec!["review it"]);
     assert!(ensure_run_mode_flags(&args).is_ok());
@@ -187,14 +187,14 @@ mod tests {
   #[test]
   fn defaults_to_ogent_without_explicit_role() {
     let args = parse_test_args(&["ogent", "fix it"]);
-    assert_eq!(args.run, None);
+    assert_eq!(args.role, None);
     assert_eq!(args.prompt, vec!["fix it"]);
     assert!(ensure_run_mode_flags(&args).is_ok());
   }
 
   #[test]
   fn run_requires_task_prompt() {
-    let args = parse_test_args(&["ogent", "--run", "implementer"]);
+    let args = parse_test_args(&["ogent", "--role", "implementer"]);
     assert!(ensure_run_mode_flags(&args).is_err());
   }
 }
