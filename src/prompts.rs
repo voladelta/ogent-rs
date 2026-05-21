@@ -249,6 +249,6 @@ mod tests {
   fn ogent_is_builtin_worker_prompt() {
     let prompt = get_builtin_worker_prompt("ogent").unwrap();
     assert!(prompt.contains("Core Contract"));
-    assert!(prompt.contains("Final Reporting"));
+    assert!(prompt.contains("Reasoning Depth"));
   }
 }

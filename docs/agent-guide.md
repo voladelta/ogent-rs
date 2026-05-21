@@ -36,7 +36,7 @@ Direct worker runs:
   - `qa_writer`
 
 Unknown role or `factory` role uses contractor-factory generation.
-All worker system prompts include the shared progress-reporting nudge, including factory-generated roles.
+All worker system prompts append the shared integrity, progress, and result-reporting instructions; role files should describe role goals, constraints, and evidence focus rather than duplicating the final format.
 
 ## State and Exit
 
