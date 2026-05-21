@@ -2,11 +2,9 @@ use crate::types::Message;
 use crate::workspace::Workspace;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::fs::{self, OpenOptions};
-use std::io::ErrorKind;
+use std::fs;
 use std::io::Write;
-use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -95,22 +93,25 @@ pub fn write_meta_in(workspace: &Workspace, meta: &SessionMeta) -> Result<()> {
   Ok(())
 }
 
+#[cfg(test)]
 pub struct SessionLock {
   path: PathBuf,
 }
 
+#[cfg(test)]
 impl Drop for SessionLock {
   fn drop(&mut self) {
     let _ = fs::remove_file(&self.path);
   }
 }
 
+#[cfg(test)]
 pub fn try_acquire_session_lock_in(workspace: &Workspace, session_id: &str) -> Result<SessionLock> {
   let dir = session_dir_in(workspace, session_id);
   fs::create_dir_all(&dir)?;
   let lock_path = dir.join("active.lock");
   for _ in 0..2 {
-    match OpenOptions::new()
+    match std::fs::OpenOptions::new()
       .write(true)
       .create_new(true)
       .open(&lock_path)
@@ -122,7 +123,7 @@ pub fn try_acquire_session_lock_in(workspace: &Workspace, session_id: &str) -> R
           path: lock_path.clone(),
         });
       }
-      Err(err) if err.kind() == ErrorKind::AlreadyExists => {
+      Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
         if maybe_remove_stale_session_lock(&lock_path)? {
           continue;
         }
@@ -134,7 +135,8 @@ pub fn try_acquire_session_lock_in(workspace: &Workspace, session_id: &str) -> R
   anyhow::bail!("session {session_id} is already active")
 }
 
-fn maybe_remove_stale_session_lock(lock_path: &Path) -> Result<bool> {
+#[cfg(test)]
+fn maybe_remove_stale_session_lock(lock_path: &std::path::Path) -> Result<bool> {
   let Ok(data) = fs::read_to_string(lock_path) else {
     return Ok(false);
   };
@@ -154,34 +156,29 @@ fn maybe_remove_stale_session_lock(lock_path: &Path) -> Result<bool> {
   }
   match fs::remove_file(lock_path) {
     Ok(()) => Ok(true),
-    Err(err) if err.kind() == ErrorKind::NotFound => Ok(true),
+    Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(true),
     Err(err) => Err(err).with_context(|| "failed to remove stale lock"),
   }
 }
 
 #[cfg(unix)]
+#[cfg(test)]
 fn process_is_alive(pid: u32) -> bool {
   matches!(
-    Command::new("kill")
+    std::process::Command::new("kill")
       .arg("-0")
       .arg(pid.to_string())
-      .stdout(Stdio::null())
-      .stderr(Stdio::null())
+      .stdout(std::process::Stdio::null())
+      .stderr(std::process::Stdio::null())
       .status(),
     Ok(status) if status.success()
   )
 }
 
 #[cfg(not(unix))]
+#[cfg(test)]
 fn process_is_alive(_pid: u32) -> bool {
   false
-}
-
-pub fn read_meta_in(workspace: &Workspace, session_id: &str) -> Result<SessionMeta> {
-  let path = session_dir_in(workspace, session_id).join("meta.json");
-  let data =
-    fs::read_to_string(&path).with_context(|| format!("no meta.json in session {session_id}"))?;
-  serde_json::from_str(&data).context("invalid meta.json")
 }
 
 pub fn persist_session_in(
@@ -219,110 +216,10 @@ fn persist_messages(messages: &[Message], path: &PathBuf) -> Result<()> {
   Ok(())
 }
 
-pub fn append_journal(session_id: &str, summary: &str) -> Result<()> {
-  if summary.trim().is_empty() {
-    return Ok(());
-  }
-  fs::create_dir_all(".ogent")?;
-  let ts = timestamp();
-  let mut file = OpenOptions::new()
-    .create(true)
-    .append(true)
-    .open(".ogent/journal.md")?;
-  writeln!(file, "## Session {ts}")?;
-  writeln!(file)?;
-  writeln!(file, "- Timestamp: {ts}")?;
-  writeln!(file, "- Session: {session_id}")?;
-  writeln!(file)?;
-  writeln!(file, "{}", summary.trim())?;
-  writeln!(file)?;
-  writeln!(file, "---")?;
-  writeln!(file)?;
-  Ok(())
-}
-
-pub fn find_latest_session(dir: &str) -> Option<String> {
-  find_latest_session_dir(dir).or_else(|| find_latest_file(dir, "jsonl", is_non_worker_jsonl))
-}
-
-fn is_non_worker_jsonl(name: &str) -> bool {
-  !name.contains("-worker-")
-}
-
-fn find_latest_session_dir(dir: &str) -> Option<String> {
-  let mut entries: Vec<_> = fs::read_dir(dir)
-    .ok()?
-    .flatten()
-    .filter(|e| e.path().is_dir())
-    .filter(|e| e.path().join("meta.json").exists())
-    .collect();
-  entries.sort_by_key(|e| e.metadata().and_then(|m| m.modified()).ok());
-  entries
-    .last()
-    .and_then(|e| e.path().file_name()?.to_str().map(String::from))
-}
-
-fn find_latest_file(dir: &str, ext: &str, name_filter: fn(&str) -> bool) -> Option<String> {
-  let mut entries: Vec<_> = fs::read_dir(dir)
-    .ok()?
-    .flatten()
-    .filter(|e| {
-      let path = e.path();
-      path.extension().is_some_and(|e| e == ext)
-        && path
-          .file_name()
-          .and_then(|n| n.to_str())
-          .is_some_and(name_filter)
-    })
-    .collect();
-  entries.sort_by_key(|e| e.metadata().and_then(|m| m.modified()).ok());
-  entries.last().map(|e| e.path().display().to_string())
-}
-
-pub fn load_session_in(workspace: &Workspace, path_or_id: &str) -> Result<Vec<Message>> {
-  for candidate in session_candidates_in(workspace, path_or_id) {
-    if candidate.exists() {
-      return load_jsonl_file(&candidate);
-    }
-  }
-  anyhow::bail!("session not found: {path_or_id}")
-}
-
-fn session_candidates_in(workspace: &Workspace, path_or_id: &str) -> Vec<PathBuf> {
-  let mut candidates = vec![session_dir_in(workspace, path_or_id).join("messages.jsonl")];
-  let trimmed = path_or_id
-    .strip_suffix("/messages.jsonl")
-    .unwrap_or(path_or_id)
-    .strip_suffix(".jsonl")
-    .unwrap_or(path_or_id);
-  if let Some(id) = trimmed
-    .strip_prefix(".ogent/sessions/")
-    .map(|id| id.strip_suffix('/').unwrap_or(id))
-  {
-    candidates.push(session_dir_in(workspace, id).join("messages.jsonl"));
-  }
-  candidates.push(PathBuf::from(path_or_id));
-  candidates.push(PathBuf::from(format!("{path_or_id}.jsonl")));
-  candidates
-}
-
-fn load_jsonl_file(path: &std::path::Path) -> Result<Vec<Message>> {
-  let data = fs::read_to_string(path)?;
-  data
-    .lines()
-    .filter(|l| !l.trim().is_empty())
-    .map(|line| serde_json::from_str(line).context("parse error in session file"))
-    .collect()
-}
-
 fn elapsed_since_epoch() -> std::time::Duration {
   SystemTime::now()
     .duration_since(UNIX_EPOCH)
     .unwrap_or_default()
-}
-
-pub fn timestamp() -> String {
-  elapsed_since_epoch().as_secs().to_string()
 }
 
 pub fn timestamp_ms() -> u64 {

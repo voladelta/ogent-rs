@@ -1,6 +1,6 @@
 # ogent Agent Guide
 
-`ogent` runs as a Director. The main agent plans, dispatches workers, tracks state, synthesizes evidence, integrates results, and reports the outcome.
+`ogent` currently runs as a single worker-mode coding agent from the CLI. Codex or another outer caller is expected to prepare the task, launch one `ogent` worker, inspect its transcript/result, verify, and relaunch when needed.
 
 ## Operating Rules
 
@@ -18,72 +18,70 @@ Main flow:
 CLI
   -> src/main.rs
   -> src/agent.rs
-  -> src/steer.rs
-  -> src/websocket.rs (serve mode)
   -> src/workspace.rs
   -> src/client.rs + src/providers.rs + src/sse.rs
   -> src/tools.rs + src/workers.rs + src/session.rs
 ```
 
-- `src/main.rs`: CLI wiring, direct worker run mode, resume/fork, websocket serve mode, skill creation.
-- `src/agent.rs`: turn loop, streaming handling, tool dispatch integration, compaction, transport-neutral steer logic, Agent-owned `Workspace`.
-- `src/steer.rs`: transport-neutral steer events/state and the `SteerChannel` interface used by websocket control.
-- `src/websocket.rs`: websocket server, lazy `start`/`fork`/`resume` setup, per-connection Director runtime.
+- `src/main.rs`: CLI parsing and worker runtime launch. `--run <role>` selects a role; omitted role defaults to `ogent`.
+- `src/agent.rs`: worker turn loop, tool-call execution, compaction reminders, Agent-owned `Workspace`.
 - `src/workspace.rs`: explicit workspace root and path resolution.
-- `src/tools.rs`: Director/worker tool schemas and execution (`state`, `dispatch_workers`, `wait_workers`, read/write/web/bash/hashline).
-- `src/workers.rs`: worker batch dispatch/waiting, role prompt resolution, in-process async worker execution.
-- `src/session.rs`: workspace-scoped session/meta/messages persistence plus Director/worker state file paths.
-- `src/prompts.rs`: Director system prompt, factory prompt, built-in worker prompts, skill discovery/injection.
+- `src/client.rs`, `src/providers.rs`, `src/sse.rs`: provider request construction, HTTP client, and SSE response parsing.
+- `src/tools.rs`: worker tool schemas and execution (`read_file`, `write_file`, `bash`, `repo_map`, `code_map`, web tools, `state`, hashline editing).
+- `src/workers.rs`: worker role prompt resolution, contractor-factory role generation, shared worker progress/result prompt injection.
+- `src/session.rs`: workspace-scoped session meta/messages/state paths and persistence.
+- `src/prompts.rs`: factory prompt, built-in worker prompts, skill discovery/injection.
 - `src/symbol_tree.rs`: tree-sitter based symbol extraction for `code_map` (Rust and Go).
+
+Removed legacy surfaces:
+
+- No Director runtime.
+- No websocket server.
+- No nested worker dispatch/wait/cancel tools.
+- No `--resume`, `--fork`, `--serve`, or `--create-skill` CLI flow.
 
 ## File Routing Map
 
 | Request area | Start here | Also check |
 | --- | --- | --- |
-| CLI flags, resume/fork/temp/create-skill | `src/main.rs` | `docs/reference.md`, `README.md` |
-| Direct one-off worker run (`--run`) | `src/main.rs` | `src/workers.rs`, `src/tools.rs`, `docs/reference.md` |
-| Director loop/exit rules/compaction | `src/agent.rs` | `src/steer.rs`, `docs/agent-guide.md`, `ARCHITECTURE.md` |
-| Websocket serve mode/protocol | `src/websocket.rs` | `src/main.rs`, `src/workspace.rs`, `docs/reference.md` |
+| CLI flags and worker launch | `src/main.rs` | `docs/reference.md`, `README.md` |
+| Worker loop / exit / compaction reminders | `src/agent.rs` | `docs/agent-guide.md`, `ARCHITECTURE.md` |
 | Tool schema/behavior | `src/tools.rs` | `src/workers.rs`, `docs/reference.md` |
-| Worker dispatch/wait/spawn/prompt resolution | `src/workers.rs` | `prompts/workers/*.md`, `docs/agent-guide.md` |
-| Session/state pathing | `src/session.rs` | `src/workspace.rs`, `src/main.rs`, `src/tools.rs`, `docs/reference.md` |
-| Prompt loading and built-ins | `src/prompts.rs` | `prompts/*`, `docs/agent-guide.md` |
+| Role prompt resolution | `src/workers.rs` | `workers/*.md`, `workers/contractor_factory.md` |
+| Session/state pathing | `src/session.rs` | `src/workspace.rs`, `src/tools.rs` |
+| Prompt loading and built-ins | `src/prompts.rs` | `workers/*.md`, `docs/agent-guide.md` |
 | Anchored editing | `src/hashline.rs` | `src/tools.rs`, `docs/reference.md` |
 | Workspace path validation | `src/workspace.rs` | `src/tools.rs`, `ARCHITECTURE.md` |
-| Skill artifact creation (`--create-skill`) | `src/artifact_creator.rs` | `prompts/SKILL_CREATOR_PROMPT.md` |
 | Symbol extraction / `code_map` | `src/symbol_tree.rs` | `docs/reference.md` |
 
 ## Runtime State
 
-- Director transcript/meta:
-  - `{workspace_root}/.ogent/sessions/{session_id}/messages.jsonl`
-  - `{workspace_root}/.ogent/sessions/{session_id}/meta.json`
-- Director state map:
-  - `{workspace_root}/.ogent/sessions/{session_id}/states.json`
-- Worker transcript/state:
-  - `{workspace_root}/.ogent/sessions/{parent_session_id}/workers/{worker_id}/messages.jsonl`
-  - `{workspace_root}/.ogent/sessions/{parent_session_id}/workers/{worker_id}/states.json`
+Current worker run layout:
+
+```txt
+{workspace_root}/.ogent/
+  sessions/
+    {session_id}/
+      meta.json
+      messages.jsonl
+      states.json
+```
+
+- `messages.jsonl` is the inspectable transcript.
+- `states.json` is worker-owned runtime state.
+- Workers are prompted to write `progress/current` when a task spans multiple tool calls.
 
 ## Key Invariants
 
-- Main agent is Director (no direct file-edit tools in Director toolset).
-- `--run <role>` starts a single temporary worker-mode Agent directly, using worker prompts and worker tools without Director worker-management tools.
-- In websocket serve mode, each connection starts unbound and initializes one Director Agent with `start`, `fork`, or `resume`.
-- Every Agent owns one immutable `Workspace`. WebSocket setup gets it from `repo`; CLI uses current dir.
-- Director `bash` allows only `colgrep` and `rg`.
-- Director can set the user-visible session title with `set_title`, stored in session `meta.json`.
-- Workspace edits happen through workers.
-- Tools, state, sessions, and workers must use the Agent workspace, not process-global cwd.
-- `dispatch_workers` takes `{ workers: [{ role, task }] }`, starts workers, and returns worker IDs immediately.
-- `wait_workers` waits briefly, returns completed worker results as soon as any worker finishes, and reports still-running workers otherwise.
-- Running worker statuses include `progress`, read from each worker's `progress/current` state key. Workers are prompted to update that key before each tool call when the task spans multiple steps; missing or empty progress is reported as `Starting`.
-- `inspect_worker` lets the Director read a worker's persisted `states.json` to check progress or partial results.
-- `cancel_workers` lets the Director abort in-flight workers by ID. Prefer waiting for workers that have already modified files.
-- A run ends when the Director sends a final assistant message (no tool calls).
+- CLI launches exactly one worker-mode agent.
+- Worker-mode runs use worker prompts and worker tools only.
+- Every Agent owns one immutable `Workspace`; CLI uses the process current directory.
+- Tool execution, bash current directory, state paths, and session files must use the Agent workspace, not process-global mutable cwd.
+- Worker file edits happen through worker tools (`write_file`, `edit_hash_anchors`).
 - Workers do not dispatch workers.
+- A run ends when the worker sends a final assistant message with no tool calls.
 - `load_skill` tool and startup skill injection stay enabled.
-- `--resume` acquires a workspace-scoped per-session lock file; concurrent resume on the same session is rejected.
-- WebSocket `resume` uses an in-process active-session registry scoped by repo and session id.
+- The final worker answer must use the enforced Markdown result sections from `src/workers.rs`.
 
 ## Verification
 

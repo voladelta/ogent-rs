@@ -1,8 +1,6 @@
 # ogent
 
-`ogent` is a Director-first coding agent with a direct one-off worker mode.
-
-The main agent is the Director. It frames the task, inspects the repo, manages state, dispatches workers, integrates results, and reports the outcome. Workspace edits are done by workers.
+`ogent` is currently a single worker-runtime coding agent.
 
 ## Quick Start
 
@@ -24,48 +22,19 @@ cargo run -- "Fix the failing tests without overcomplicating"
 ## CLI
 
 ```bash
-# Director run
-ogent "Implement feature X"
-
-# Direct one-off worker run
+# Worker run with explicit role
 ogent --run reviewer --profile kimi "Review the staged diff"
 
-# WebSocket server mode
-ogent --serve 127.0.0.1:9876
-
+# Worker run with default role (ogent)
+ogent "Implement feature X"
 ```
-
-## WebSocket Mode
-
-`--serve` starts a localhost-friendly WebSocket server. Each connection starts unbound and creates exactly one Director after a setup message:
-
-```json
-{"type":"start","repo":"/path/to/repo","profile":"ds-flash","autocompact":80}
-{"type":"fork","repo":"/path/to/repo","session":"<session_id>","profile":"ds-flash"}
-{"type":"resume","repo":"/path/to/repo","session":"<session_id>","profile":"ds-flash"}
-```
-
-After setup, send normal control messages:
-
-```json
-{"type":"message","content":"Fix the failing tests"}
-{"type":"cancel"}
-{"type":"compact","focus":"handoff for next step"}
-{"type":"exit"}
-```
-
-Each WebSocket Director owns an immutable workspace root from `repo`. Tools, workers, state, and session files are scoped to that workspace, so one server process can host connections for different repos.
 
 ## Key Behavior
 
-- Director tools include: `repo_map`, `code_map`, restricted `bash` (`colgrep`/`rg` only), `load_skill`, `state`, `set_title`, `dispatch_workers`, `wait_workers`.
+- Prompted runs execute in worker mode.
+- `--run <role>` selects the worker role explicitly; without it, role defaults to `ogent`.
 - Worker tools include editing tools (`write_file`, `read_hash_anchors`, `edit_hash_anchors`) plus read/web/bash/state tools.
-- `--run <role>` starts one worker-mode agent directly with the worker prompt and worker tools. It bypasses the Director and uses temporary session mode.
-- `dispatch_workers` starts a worker batch and returns worker IDs immediately.
-- `wait_workers` returns completed worker results as soon as any worker finishes, or reports still-running workers after a short wait.
-- Running worker statuses include `progress`. Workers are prompted to write `progress/current` in their state; until they do, progress is `Starting`.
-- A run ends when the Director sends a final assistant message (no tool calls).
-- WebSocket `resume` rejects duplicate active sessions inside the same serve process.
+- Director, websocket, nested-worker, and skill-creator CLI entrypoints have been removed from the active runtime.
 
 ## Runtime Layout
 
@@ -76,18 +45,6 @@ Each WebSocket Director owns an immutable workspace root from `repo`. Tools, wor
       meta.json
       messages.jsonl
       states.json
-      workers/
-        {worker_id}/
-          messages.jsonl
-          states.json
-```
-
-## Skill Creator
-
-`--create-skill` is available:
-
-```bash
-ogent --create-skill repo-audit "Review repositories for correctness and maintainability."
 ```
 
 ## Development

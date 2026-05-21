@@ -4,26 +4,24 @@ use std::path::PathBuf;
 
 use crate::types::{Message, MessageOrigin};
 
-pub const SYSTEM_PROMPT: &str = include_str!("../prompts/SYSTEM_PROMPT.md");
-pub const CONTRACTOR_FACTORY: &str = include_str!("../prompts/CONTRACTOR_FACTORY.md");
-pub const WORKER_PROMPT_IMPLEMENTER: &str = include_str!("../prompts/workers/implementer.md");
-pub const WORKER_PROMPT_VERIFIER: &str = include_str!("../prompts/workers/verifier.md");
-pub const WORKER_PROMPT_DEBUGGER: &str = include_str!("../prompts/workers/debugger.md");
-pub const WORKER_PROMPT_RESEARCHER: &str = include_str!("../prompts/workers/researcher.md");
-pub const WORKER_PROMPT_WRITER: &str = include_str!("../prompts/workers/writer.md");
-pub const WORKER_PROMPT_CRITIC: &str = include_str!("../prompts/workers/critic.md");
-pub const WORKER_PROMPT_VISUAL_DESIGNER: &str =
-  include_str!("../prompts/workers/visual_designer.md");
-pub const WORKER_PROMPT_DATABASE_ARCHITECT: &str =
-  include_str!("../prompts/workers/database_architect.md");
-pub const WORKER_PROMPT_SYSTEM_ARCHITECT: &str =
-  include_str!("../prompts/workers/system_architect.md");
-pub const WORKER_PROMPT_SUMMARIZER: &str = include_str!("../prompts/workers/summarizer.md");
-pub const WORKER_PROMPT_REVIEWER: &str = include_str!("../prompts/workers/reviewer.md");
-pub const WORKER_PROMPT_QA_WRITER: &str = include_str!("../prompts/workers/qa_writer.md");
+pub const CONTRACTOR_FACTORY: &str = include_str!("../workers/contractor_factory.md");
+pub const WORKER_PROMPT_OGENT: &str = include_str!("../workers/ogent.md");
+pub const WORKER_PROMPT_IMPLEMENTER: &str = include_str!("../workers/implementer.md");
+pub const WORKER_PROMPT_VERIFIER: &str = include_str!("../workers/verifier.md");
+pub const WORKER_PROMPT_DEBUGGER: &str = include_str!("../workers/debugger.md");
+pub const WORKER_PROMPT_RESEARCHER: &str = include_str!("../workers/researcher.md");
+pub const WORKER_PROMPT_WRITER: &str = include_str!("../workers/writer.md");
+pub const WORKER_PROMPT_CRITIC: &str = include_str!("../workers/critic.md");
+pub const WORKER_PROMPT_VISUAL_DESIGNER: &str = include_str!("../workers/visual_designer.md");
+pub const WORKER_PROMPT_DATABASE_ARCHITECT: &str = include_str!("../workers/database_architect.md");
+pub const WORKER_PROMPT_SYSTEM_ARCHITECT: &str = include_str!("../workers/system_architect.md");
+pub const WORKER_PROMPT_SUMMARIZER: &str = include_str!("../workers/summarizer.md");
+pub const WORKER_PROMPT_REVIEWER: &str = include_str!("../workers/reviewer.md");
+pub const WORKER_PROMPT_QA_WRITER: &str = include_str!("../workers/qa_writer.md");
 
 pub fn get_builtin_worker_prompt(name: &str) -> Option<&'static str> {
   match name {
+    "ogent" => Some(WORKER_PROMPT_OGENT),
     "implementer" => Some(WORKER_PROMPT_IMPLEMENTER),
     "verifier" => Some(WORKER_PROMPT_VERIFIER),
     "debugger" => Some(WORKER_PROMPT_DEBUGGER),
@@ -46,26 +44,6 @@ pub fn skill_roots() -> Vec<PathBuf> {
     dirs.push(PathBuf::from(home).join(".ogent/skills"));
   }
   dirs
-}
-
-fn system_prompt_paths() -> Vec<PathBuf> {
-  let mut paths = vec![PathBuf::from(".ogent/SYSTEM_PROMPT.md")];
-  if let Some(home) = std::env::var_os("HOME") {
-    paths.push(PathBuf::from(home).join(".ogent/SYSTEM_PROMPT.md"));
-  }
-  paths
-}
-
-fn load_system_prompt() -> String {
-  for path in system_prompt_paths() {
-    if let Ok(content) = fs::read_to_string(path) {
-      let trimmed = content.trim();
-      if !trimmed.is_empty() {
-        return trimmed.to_string();
-      }
-    }
-  }
-  SYSTEM_PROMPT.trim().to_string()
 }
 
 pub fn load_skill_content(skill_name: &str) -> Result<(String, String, String)> {
@@ -178,10 +156,11 @@ fn xml_escape(s: &str) -> String {
   out
 }
 
+#[cfg(test)]
 pub fn build_messages(prompt: &str) -> Vec<Message> {
   let mut messages = vec![Message {
     role: "system".into(),
-    content: load_system_prompt(),
+    content: WORKER_PROMPT_OGENT.to_string(),
     origin: MessageOrigin::Internal,
     ..Default::default()
   }];
@@ -268,8 +247,9 @@ mod tests {
   }
 
   #[test]
-  fn system_prompt_lists_qa_writer_role() {
-    assert!(SYSTEM_PROMPT.contains("qa_writer"));
-    assert!(SYSTEM_PROMPT.contains("answer programming and technical questions directly"));
+  fn ogent_is_builtin_worker_prompt() {
+    let prompt = get_builtin_worker_prompt("ogent").unwrap();
+    assert!(prompt.contains("Core Contract"));
+    assert!(prompt.contains("Final Reporting"));
   }
 }

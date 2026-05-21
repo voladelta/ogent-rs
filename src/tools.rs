@@ -23,17 +23,7 @@ pub async fn execute_tool(mut ctx: ToolContext<'_>, name: &str, args: &str) -> R
   match name {
     "read_file" => read_file(&ctx.workspace, args),
     "write_file" => write_file(&ctx.workspace, args),
-    "bash" => {
-      let director_mode = ctx
-        .agent
-        .as_ref()
-        .is_some_and(|agent| !agent.meta.flags.worker);
-      if director_mode {
-        director_bash(&ctx.workspace, args).await
-      } else {
-        bash(&ctx.workspace, args).await
-      }
-    }
+    "bash" => bash(&ctx.workspace, args).await,
     "repo_map" => repo_map(&ctx.workspace, args),
     "code_map" => code_map(&ctx.workspace, args),
     "read_hash_anchors" => read_hash_anchors(&ctx.workspace, args),
@@ -42,13 +32,6 @@ pub async fn execute_tool(mut ctx: ToolContext<'_>, name: &str, args: &str) -> R
     "web_read" => web_read(args).await,
     "web_code_context" => web_code_context(args).await,
     "load_skill" => load_skill(args),
-    "set_title" => {
-      let agent = ctx
-        .agent
-        .as_deref_mut()
-        .context("set_title requires an active agent")?;
-      set_title(agent, args)
-    }
     "state" => {
       let agent = ctx
         .agent
@@ -56,44 +39,11 @@ pub async fn execute_tool(mut ctx: ToolContext<'_>, name: &str, args: &str) -> R
         .context("state requires an active agent")?;
       state(agent, args)
     }
-    "dispatch_workers" => {
-      let agent = ctx
-        .agent
-        .as_deref_mut()
-        .context("dispatch_workers requires an active agent")?;
-      dispatch_workers(agent, args).await
-    }
-    "wait_workers" => {
-      let agent = ctx
-        .agent
-        .as_deref_mut()
-        .context("wait_workers requires an active agent")?;
-      wait_workers(agent, args).await
-    }
-    "inspect_worker" => {
-      let agent = ctx
-        .agent
-        .as_deref_mut()
-        .context("inspect_worker requires an active agent")?;
-      inspect_worker(agent, args)
-    }
-    "cancel_workers" => {
-      let agent = ctx
-        .agent
-        .as_deref_mut()
-        .context("cancel_workers requires an active agent")?;
-      cancel_workers(agent, args).await
-    }
     _ => bail!("unknown tool: {name}"),
   }
 }
 
-static DIRECTOR_TOOLS: OnceLock<Vec<Tool>> = OnceLock::new();
 static WORKER_TOOLS: OnceLock<Vec<Tool>> = OnceLock::new();
-
-pub fn configured_director_tools() -> Vec<Tool> {
-  DIRECTOR_TOOLS.get_or_init(build_director_tools).clone()
-}
 
 pub fn configured_worker_tools() -> Vec<Tool> {
   WORKER_TOOLS.get_or_init(build_worker_tools).clone()
@@ -120,61 +70,6 @@ fn state_schema_parameters() -> Value {
     ],
     "additionalProperties": false
   })
-}
-
-fn build_director_tools() -> Vec<Tool> {
-  vec![
-    schema(
-      "bash",
-      "Execute one plain search command in the workspace root and return stdout/stderr. Director mode only allows `colgrep` or `rg`; it is not for reading files or shell scripting. Do not use cat/find/ls/head/pipes/redirection/fallbacks. Default timeout is 120s if omitted or 0; max is 600s.",
-      json!({"type":"object","properties":{"command":{"type":"string"},"timeout_seconds":{"type":"integer","description":"Max seconds. Default: 120 if 0 or omitted. Max: 600."}},"required":["command"],"additionalProperties":false}),
-    ),
-    schema(
-      "repo_map",
-      "Display a tree map of the repository directory structure. path defaults to the workspace root; levels defaults to 3.",
-      json!({"type":"object","properties":{"path":{"type":"string","description":"Directory path relative to workspace root. Default: \".\""},"levels":{"type":"integer","description":"Max depth to descend. Default: 3 if 0 or omitted."}},"additionalProperties":false}),
-    ),
-    schema(
-      "code_map",
-      "Display a symbol map of source files (Rust and Go), showing structs, enums, traits, impls, functions, interfaces, types, and modules with line ranges. Use to understand source shape for routing and scoped delegation. Director mode cannot read files directly; dispatch a worker when exact file contents or line-level evidence are required. For a single file, pass its path; for a directory, pass the directory path to map all .rs and .go files inside.",
-      json!({"type":"object","properties":{"path":{"type":"string","description":"File or directory path relative to workspace root. Default: \".\""}},"additionalProperties":false}),
-    ),
-    schema(
-      "load_skill",
-      "Load a skill from .ogent/skills/ or ~/.ogent/skills/.",
-      json!({"type":"object","properties":{"name":{"type":"string"}},"required":["name"],"additionalProperties":false}),
-    ),
-    schema(
-      "state",
-      "Read/write/list scoped runtime state in states.json. list accepts an empty path. read requires path. write/append require path and content.",
-      state_schema_parameters(),
-    ),
-    schema(
-      "set_title",
-      "Set the user-visible session title in session metadata. Use once the coding session goal is clear, and again only if the goal materially changes.",
-      json!({"type":"object","properties":{"title":{"type":"string","description":"Concise sentence-case session title, normally 3-7 words."}},"required":["title"],"additionalProperties":false}),
-    ),
-    schema(
-      "dispatch_workers",
-      "Spawn a worker batch and return worker ids immediately. Results are not available yet; call wait_workers next to receive completed worker results. Arguments must be exactly an object with one workers array. Example: {\"workers\":[{\"role\":\"implementer\",\"task\":\"# Task\\nEdit README.md only.\\n\\n# Required output\\nSummary and verification.\"}]}.",
-      json!({"type":"object","properties":{"workers":{"type":"array","minItems":1,"items":{"type":"object","properties":{"role":{"type":"string"},"task":{"type":"string"}},"required":["role","task"],"additionalProperties":false}}},"required":["workers"],"additionalProperties":false}),
-    ),
-    schema(
-      "wait_workers",
-      "Wait for worker results. Returns immediately if any worker run has completed; otherwise waits about 15 seconds before reporting still-running workers. A completed worker run means the worker produced a final response without a runtime error; inspect the worker output Status/evidence before accepting the task. Use after dispatch_workers and repeat until all needed worker results are returned.",
-      json!({"type":"object","properties":{},"additionalProperties":false}),
-    ),
-    schema(
-      "inspect_worker",
-      "Read a worker's persisted states.json by worker id. Use to check progress/current, partial results, or errors before deciding to cancel or wait.",
-      json!({"type":"object","properties":{"id":{"type":"string"}},"required":["id"],"additionalProperties":false}),
-    ),
-    schema(
-      "cancel_workers",
-      "Cancel running workers by their worker_ids. Aborts in-flight tasks immediately. Returns cancelled and not_found ids. Prefer waiting for workers that have already modified files, to avoid leaving partial or inconsistent changes. Consider canceling workers that are stuck, off-track, or have not yet produced durable changes.",
-      json!({"type":"object","properties":{"ids":{"type":"array","items":{"type":"string"}}},"required":["ids"],"additionalProperties":false}),
-    ),
-  ]
 }
 
 fn build_worker_tools() -> Vec<Tool> {
@@ -240,46 +135,6 @@ fn build_worker_tools() -> Vec<Tool> {
       state_schema_parameters(),
     ),
   ]
-}
-
-pub fn is_read_only_tool(name: &str) -> bool {
-  matches!(
-    name,
-    "read_file"
-      | "read_hash_anchors"
-      | "repo_map"
-      | "code_map"
-      | "web_search"
-      | "web_read"
-      | "web_code_context"
-      | "load_skill"
-  )
-}
-
-#[derive(Deserialize)]
-struct SetTitleArgs {
-  title: String,
-}
-
-fn set_title(agent: &mut Agent, args: &str) -> Result<String> {
-  if agent.meta.flags.worker {
-    bail!("set_title is only available to the Director");
-  }
-  let args: SetTitleArgs = parse_args(args)?;
-  let title = args.title.trim();
-  require_nonempty(title, "title")?;
-  if title.chars().any(char::is_control) {
-    bail!("title must be a single line without control characters");
-  }
-  if title.chars().count() > 80 {
-    bail!("title must be 80 characters or fewer");
-  }
-  agent.meta.title = Some(title.to_string());
-  if !agent.meta.flags.temp {
-    crate::session::write_meta_in(&agent.workspace, &agent.meta)?;
-  }
-  agent.emit_session();
-  Ok("ok".to_string())
 }
 
 pub fn parse_args<T: serde::de::DeserializeOwned>(args: &str) -> Result<T> {
@@ -442,62 +297,10 @@ fn resolve_cd_target(base: &Path, path: &str) -> Result<PathBuf> {
   Ok(base.join(path))
 }
 
-fn check_director_bash_allowlist(command: &str) -> Result<()> {
-  for forbidden in ["&&", "||", "|", ";", "\n", "\r", ">", "<", "`", "$("] {
-    if command.contains(forbidden) {
-      bail!("director bash only allows a single plain `colgrep` or `rg` command");
-    }
-  }
-
-  let line = command.trim();
-  if line.is_empty() || line.starts_with('#') {
-    return Ok(());
-  }
-  let words: Vec<_> = line
-    .split_whitespace()
-    .map(|w| w.trim_matches(|c| c == '"' || c == '\''))
-    .collect();
-  let mut i = 0;
-  while i < words.len() && words[i].contains('=') && !words[i].contains('/') {
-    i += 1;
-  }
-  let Some(first) = words.get(i).copied() else {
-    return Ok(());
-  };
-  if first != "colgrep" && first != "rg" {
-    bail!("director bash only allows `colgrep` and `rg` executables");
-  }
-
-  if first == "rg" {
-    let lists_only = words
-      .iter()
-      .skip(i + 1)
-      .any(|w| *w == "-l" || *w == "--files-with-matches");
-    if !lists_only {
-      let pattern = words.iter().skip(i + 1).find(|w| !w.starts_with('-'));
-      if pattern.is_some_and(|p| matches!(*p, "" | "." | ".*" | "^" | "$")) {
-        bail!("director `rg` cannot be used to dump file contents");
-      }
-    }
-  }
-  Ok(())
-}
-
 async fn bash(workspace: &Workspace, args: &str) -> Result<String> {
-  bash_internal(workspace, args, false).await
-}
-
-pub async fn director_bash(workspace: &Workspace, args: &str) -> Result<String> {
-  bash_internal(workspace, args, true).await
-}
-
-async fn bash_internal(workspace: &Workspace, args: &str, director_mode: bool) -> Result<String> {
   let args: BashArgs = parse_args(args)?;
   require_nonempty(&args.command, "command")?;
   check_bash_cds(workspace, &args.command)?;
-  if director_mode {
-    check_director_bash_allowlist(&args.command)?;
-  }
   let secs = if args.timeout_seconds == 0 {
     120
   } else {
@@ -864,71 +667,6 @@ fn write_state_map(path: &Path, map: &BTreeMap<String, String>) -> Result<()> {
   fs::write(path, data).with_context(|| format!("write {}", path.display()))
 }
 
-async fn dispatch_workers(agent: &mut Agent, args: &str) -> Result<String> {
-  if agent.meta.flags.worker {
-    bail!("worker mode cannot dispatch workers");
-  }
-  let args: crate::workers::DispatchWorkersArgs =
-    serde_json::from_str(args).with_context(|| {
-      "bad dispatch_workers args; expected exactly: \
-       {\"workers\":[{\"role\":\"implementer\",\"task\":\"# Task\\n...\"}]}. \
-       `workers` must be an array of objects, each with string `role` and string `task`; \
-       close the JSON with `]}` and do not include `sync`, `worker_ids`, or top-level `role`/`task`"
-    })?;
-  agent
-    .worker_manager
-    .dispatch(args, &agent.meta.session_id, &agent.meta.profile)
-    .await
-}
-
-async fn wait_workers(agent: &mut Agent, args: &str) -> Result<String> {
-  if agent.meta.flags.worker {
-    bail!("worker mode cannot wait on workers");
-  }
-  let value: serde_json::Value = serde_json::from_str(args).context("bad wait_workers args")?;
-  if !value.as_object().is_some_and(|obj| obj.is_empty()) {
-    bail!("wait_workers takes no arguments; pass {{}}");
-  }
-  agent.worker_manager.wait().await
-}
-
-#[derive(Deserialize)]
-struct InspectWorkerArgs {
-  id: String,
-}
-
-fn inspect_worker(agent: &mut Agent, args: &str) -> Result<String> {
-  if agent.meta.flags.worker {
-    bail!("worker mode cannot inspect workers");
-  }
-  let args: InspectWorkerArgs = parse_args(args)?;
-  require_nonempty(&args.id, "id")?;
-  let path =
-    crate::session::worker_state_path_in(&agent.workspace, &agent.meta.session_id, &args.id);
-  if !path.exists() {
-    bail!("worker {} has no state file", args.id);
-  }
-  let content = fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
-  Ok(content)
-}
-
-#[derive(Deserialize)]
-struct CancelWorkersArgs {
-  ids: Vec<String>,
-}
-
-async fn cancel_workers(agent: &mut Agent, args: &str) -> Result<String> {
-  if agent.meta.flags.worker {
-    bail!("worker mode cannot cancel workers");
-  }
-  let args: CancelWorkersArgs = parse_args(args)?;
-  let (cancelled, not_found) = agent.worker_manager.cancel(args.ids).await;
-  Ok(serde_json::to_string(&json!({
-    "cancelled": cancelled,
-    "not_found": not_found,
-  }))?)
-}
-
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -978,60 +716,28 @@ mod tests {
       crate::workspace::Workspace::from_current_dir(),
       dummy_client(),
       crate::prompts::build_messages(""),
-      configured_director_tools(),
+      configured_worker_tools(),
       crate::agent::CompactState::disabled(),
       meta,
       worker_parent_session_id,
       worker_id,
-      crate::config::Config::default(),
     )
   }
 
   #[test]
-  fn is_read_only_tool_classification() {
-    assert!(is_read_only_tool("read_file"));
-    assert!(is_read_only_tool("read_hash_anchors"));
-    assert!(is_read_only_tool("repo_map"));
-    assert!(is_read_only_tool("code_map"));
-    assert!(is_read_only_tool("web_search"));
-    assert!(is_read_only_tool("web_read"));
-    assert!(is_read_only_tool("web_code_context"));
-    assert!(is_read_only_tool("load_skill"));
-    assert!(!is_read_only_tool("write_file"));
-    assert!(!is_read_only_tool("edit_hash_anchors"));
-    assert!(!is_read_only_tool("bash"));
-    assert!(!is_read_only_tool("state"));
-    assert!(!is_read_only_tool("set_title"));
-  }
-
-  #[test]
-  fn configured_director_tools_includes_expected() {
-    let tools = configured_director_tools();
+  fn configured_worker_tools_excludes_director_only_tools() {
+    let tools = configured_worker_tools();
     let names: Vec<_> = tools.iter().map(|t| t.function.name.as_str()).collect();
     assert!(names.contains(&"repo_map"));
     assert!(names.contains(&"code_map"));
     assert!(names.contains(&"bash"));
     assert!(names.contains(&"state"));
-    assert!(names.contains(&"set_title"));
-    assert!(names.contains(&"dispatch_workers"));
-    assert!(names.contains(&"wait_workers"));
-    assert!(names.contains(&"inspect_worker"));
-    assert!(names.contains(&"cancel_workers"));
     assert!(names.contains(&"load_skill"));
-    assert!(!names.contains(&"read_file"));
-    assert!(!names.contains(&"web_search"));
-    assert!(!names.contains(&"web_read"));
-    assert!(!names.contains(&"web_code_context"));
-    assert!(!names.contains(&"write_file"));
-    assert!(!names.contains(&"edit_hash_anchors"));
-
-    let code_map = tools
-      .iter()
-      .find(|tool| tool.function.name == "code_map")
-      .unwrap();
-    assert!(code_map.function.description.contains("routing"));
-    assert!(code_map.function.description.contains("dispatch a worker"));
-    assert!(!code_map.function.description.contains("read_file"));
+    assert!(!names.contains(&"set_title"));
+    assert!(!names.contains(&"dispatch_workers"));
+    assert!(!names.contains(&"wait_workers"));
+    assert!(!names.contains(&"inspect_worker"));
+    assert!(!names.contains(&"cancel_workers"));
   }
 
   #[test]
@@ -1047,22 +753,6 @@ mod tests {
     assert!(!names.contains(&"set_title"));
     assert!(!names.contains(&"dispatch_workers"));
     assert!(!names.contains(&"wait_workers"));
-  }
-
-  #[test]
-  fn check_director_bash_allowlist_accepts_rg_and_colgrep() {
-    assert!(check_director_bash_allowlist("rg foo src").is_ok());
-    assert!(check_director_bash_allowlist("colgrep \"search\" ./src").is_ok());
-    assert!(check_director_bash_allowlist("rg -l \"\" docs").is_ok());
-  }
-
-  #[test]
-  fn check_director_bash_allowlist_rejects_other_execs() {
-    assert!(check_director_bash_allowlist("ls -la").is_err());
-    assert!(check_director_bash_allowlist("rg foo src | head -n 1").is_err());
-    assert!(check_director_bash_allowlist("rg foo src && colgrep bar ./src").is_err());
-    assert!(check_director_bash_allowlist("rg -n \".\" docs/index.md").is_err());
-    assert!(check_director_bash_allowlist("python -c 'print(1)'").is_err());
   }
 
   #[test]
@@ -1135,39 +825,6 @@ mod tests {
     assert!(worker_path.exists());
   }
 
-  #[test]
-  fn set_title_updates_session_meta() {
-    let id = TEST_COUNTER.fetch_add(1, Ordering::SeqCst);
-    let root = std::env::temp_dir().join(format!("ogent-set-title-test-{id}"));
-    std::fs::create_dir_all(&root).unwrap();
-    let mut agent = dummy_agent(None);
-    agent.workspace = crate::workspace::Workspace::from_root(root.clone());
-    agent.meta.flags.temp = false;
-
-    set_title(&mut agent, r#"{"title":"Fix websocket session title"}"#).unwrap();
-
-    assert_eq!(
-      agent.meta.title.as_deref(),
-      Some("Fix websocket session title")
-    );
-    let persisted = crate::session::read_meta_in(&agent.workspace, &agent.meta.session_id).unwrap();
-    assert_eq!(
-      persisted.title.as_deref(),
-      Some("Fix websocket session title")
-    );
-    let _ = std::fs::remove_dir_all(root);
-  }
-
-  #[test]
-  fn set_title_rejects_invalid_titles() {
-    let mut agent = dummy_agent(None);
-    let err = set_title(&mut agent, r#"{"title":" "}"#).unwrap_err();
-    assert!(err.to_string().contains("title is required"));
-
-    let err = set_title(&mut agent, "{\"title\":\"Bad\\ntitle\"}").unwrap_err();
-    assert!(err.to_string().contains("single line"));
-  }
-
   #[tokio::test]
   async fn execute_tool_unknown_returns_error() {
     let result = execute_tool(
@@ -1181,57 +838,5 @@ mod tests {
     .await;
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("unknown tool"));
-  }
-
-  #[tokio::test]
-  async fn dispatch_workers_bad_json_explains_expected_shape() {
-    let mut agent = dummy_agent(None);
-    let err = dispatch_workers(
-      &mut agent,
-      r#"{"workers":[{"role":"implementer","task":"missing array close"}"#,
-    )
-    .await
-    .expect_err("malformed JSON should fail");
-    let msg = err.to_string();
-    assert!(msg.contains("bad dispatch_workers args"));
-    assert!(msg.contains("\"workers\""));
-    assert!(msg.contains("close the JSON"));
-  }
-
-  #[tokio::test]
-  async fn wait_workers_without_running_workers_returns_immediately() {
-    let mut agent = dummy_agent(None);
-    let out = wait_workers(&mut agent, "{}").await.unwrap();
-    assert!(out.contains("No workers are running"));
-  }
-
-  #[test]
-  fn inspect_worker_reads_worker_state_file() {
-    let mut agent = dummy_agent(None);
-    let root = std::env::temp_dir().join(format!(
-      "ogent-inspect-test-{}",
-      TEST_COUNTER.fetch_add(1, Ordering::SeqCst)
-    ));
-    std::fs::create_dir_all(&root).unwrap();
-    agent.workspace = crate::workspace::Workspace::from_root(root.clone());
-    agent.meta.flags.temp = false;
-
-    let worker_id = "worker-inspect-1";
-    let state_path =
-      crate::session::worker_state_path_in(&agent.workspace, &agent.meta.session_id, worker_id);
-    std::fs::create_dir_all(state_path.parent().unwrap()).unwrap();
-    std::fs::write(&state_path, r#"{"progress/current":"indexing files"}"#).unwrap();
-
-    let out = inspect_worker(&mut agent, &format!(r#"{{"id":"{worker_id}"}}"#)).unwrap();
-    assert!(out.contains("indexing files"));
-
-    let _ = std::fs::remove_dir_all(root);
-  }
-
-  #[test]
-  fn inspect_worker_rejects_missing_state_file() {
-    let mut agent = dummy_agent(None);
-    let err = inspect_worker(&mut agent, r#"{"id":"worker-missing"}"#).unwrap_err();
-    assert!(err.to_string().contains("has no state file"));
   }
 }

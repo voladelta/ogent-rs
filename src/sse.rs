@@ -4,6 +4,7 @@ use serde::{Deserialize, Deserializer};
 use crate::types::{ChatResponse, FunctionCall, ToolCall, Usage};
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub enum StreamEvent {
   Content(String),
   Reasoning(String),
@@ -401,25 +402,22 @@ mod tests {
     assert_eq!(tc.function.arguments, "");
   }
 
-  #[tokio::test]
-  async fn flush_tool_calls_repairs_missing_closing_delimiters() {
+  #[test]
+  fn flush_tool_calls_repairs_missing_closing_delimiters() {
     let mut resp = ChatResponse::default();
-    let mut acc = Vec::new();
-    let mut tc = false;
-    process_line(
-      r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"x","type":"function","function":{"name":"dispatch_workers","arguments":"{\"workers\":[{\"role\":\"implementer\",\"task\":\"fix it\"}"}}]}}]}"#,
-      &mut resp,
-      &mut acc,
-      &mut None,
-      &mut tc,
-    ).await;
+    let mut acc = vec![AccToolCall {
+      id: "x".to_string(),
+      kind: "function".to_string(),
+      name: "write_file".to_string(),
+      arguments: r#"{"path":"out.txt","content":"fix it""#.to_string(),
+    }];
 
     flush_tool_calls(&mut acc, &mut resp);
 
     let tc = resp.tool_calls.first().unwrap();
     assert_eq!(
       tc.function.arguments,
-      "{\"workers\":[{\"role\":\"implementer\",\"task\":\"fix it\"}]}"
+      "{\"path\":\"out.txt\",\"content\":\"fix it\"}"
     );
   }
 

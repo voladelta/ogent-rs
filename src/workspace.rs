@@ -14,6 +14,7 @@ impl Workspace {
     }
   }
 
+  #[cfg(test)]
   pub fn from_root(root: PathBuf) -> Self {
     Self {
       root: normalize(&root),
