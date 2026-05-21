@@ -136,7 +136,7 @@ fn build_director_tools() -> Vec<Tool> {
     ),
     schema(
       "code_map",
-      "Display a symbol map of source files (Rust and Go), showing structs, enums, traits, impls, functions, interfaces, types, and modules with line ranges. Use to understand the shape and contents of source files before deciding which files or line ranges to read. For a single file, pass its path; for a directory, pass the directory path to map all .rs and .go files inside. Use before read_file to target exact line ranges.",
+      "Display a symbol map of source files (Rust and Go), showing structs, enums, traits, impls, functions, interfaces, types, and modules with line ranges. Use to understand source shape for routing and scoped delegation. Director mode cannot read files directly; dispatch a worker when exact file contents or line-level evidence are required. For a single file, pass its path; for a directory, pass the directory path to map all .rs and .go files inside.",
       json!({"type":"object","properties":{"path":{"type":"string","description":"File or directory path relative to workspace root. Default: \".\""}},"additionalProperties":false}),
     ),
     schema(
@@ -161,7 +161,7 @@ fn build_director_tools() -> Vec<Tool> {
     ),
     schema(
       "wait_workers",
-      "Wait for worker results. Returns immediately if any worker has completed; otherwise waits about 15 seconds before reporting still-running workers. Use after dispatch_workers and repeat until all needed worker results are returned.",
+      "Wait for worker results. Returns immediately if any worker run has completed; otherwise waits about 15 seconds before reporting still-running workers. A completed worker run means the worker produced a final response without a runtime error; inspect the worker output Status/evidence before accepting the task. Use after dispatch_workers and repeat until all needed worker results are returned.",
       json!({"type":"object","properties":{},"additionalProperties":false}),
     ),
     schema(
@@ -1024,6 +1024,14 @@ mod tests {
     assert!(!names.contains(&"web_code_context"));
     assert!(!names.contains(&"write_file"));
     assert!(!names.contains(&"edit_hash_anchors"));
+
+    let code_map = tools
+      .iter()
+      .find(|tool| tool.function.name == "code_map")
+      .unwrap();
+    assert!(code_map.function.description.contains("routing"));
+    assert!(code_map.function.description.contains("dispatch a worker"));
+    assert!(!code_map.function.description.contains("read_file"));
   }
 
   #[test]

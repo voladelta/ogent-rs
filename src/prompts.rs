@@ -266,4 +266,10 @@ mod tests {
     assert!(prompt.contains("You are QA Writer."));
     assert!(prompt.contains("Accepted Answer"));
   }
+
+  #[test]
+  fn system_prompt_lists_qa_writer_role() {
+    assert!(SYSTEM_PROMPT.contains("qa_writer"));
+    assert!(SYSTEM_PROMPT.contains("answer programming and technical questions directly"));
+  }
 }

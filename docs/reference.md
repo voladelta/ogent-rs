@@ -458,7 +458,8 @@ Rules:
 - For a directory, maps all `.rs` and `.go` files inside.
 - For a single file, maps only that file.
 - Output shows symbols (structs, enums, traits, impls, functions, interfaces, types, modules) with line ranges and signatures.
-- Use before `read_file` to target exact line ranges.
+- Director use is for routing and scoping. If exact file contents or line-level evidence are required, dispatch a worker.
+- Workers should use it before `read_file` to target exact line ranges.
 
 ## `state` Tool
 

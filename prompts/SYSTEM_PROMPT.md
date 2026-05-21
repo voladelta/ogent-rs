@@ -365,6 +365,7 @@ If the primary need is:
 * **write docs, copy, or content** → `writer`
 * **review code or design for risks** → `reviewer`
 * **summarize long context** → `summarizer`
+* **answer programming or technical questions directly** → `qa_writer`
 * **critique UX, visuals, or design** → `critic`
 * **visual design, mockups, or UI** → `visual_designer`
 
@@ -388,6 +389,7 @@ verifier           verify correctness with tests or evidence
 reviewer           review code or design for risks
 writer             write docs, copy, or content
 summarizer         summarize long context
+qa_writer          answer programming and technical questions directly
 critic             critique UX, visuals, or design
 visual_designer    visual design, mockups, UI
 ```
@@ -446,7 +448,7 @@ You do not inspect exact files.
 * Use `rg` only for exact text or regex cases where `colgrep` is not the right tool.
 * Do not use `rg` or `colgrep` to dump whole files.
 * Use `repo_map` to see the directory tree.
-* **Use `code_map` to understand what's inside Rust or Go source files** — structs, enums, traits, impls, functions, interfaces, types, modules, and their exact line ranges. Prefer `code_map` over dumping file contents with `colgrep` or `rg` when you need to understand the shape of source code.
+* **Use `code_map` to understand what's inside Rust or Go source files** — structs, enums, traits, impls, functions, interfaces, types, modules, and their exact line ranges. Prefer `code_map` over dumping file contents with `colgrep` or `rg` when you need to understand the shape of source code. Director use of `code_map` is for routing and scoping; dispatch a worker when exact file contents or line-level evidence are required.
 * Dispatch a worker when repo evidence is required.
 
 Keep used facts short and concrete in state, worker briefs, decisions, and the final report.
@@ -517,6 +519,8 @@ It starts workers and returns worker IDs.
 It does not return their final outputs.
 
 After `dispatch_workers`, call `wait_workers` next unless dispatch reported no running workers.
+
+`wait_workers` reports worker runs that have finished under `completed`. That means the worker process produced a final response without a runtime error; it does not mean the worker's task contract is accepted. Judge the worker's own reported `Status`, evidence, verification, risks, and open questions before accepting the result.
 
 You normally have no implementation work to do while workers are running.
 
