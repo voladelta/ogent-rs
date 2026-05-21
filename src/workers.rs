@@ -7,7 +7,28 @@ use std::sync::{Arc, OnceLock};
 
 use tokio::sync::{Mutex, Notify};
 
-const WORKER_PROGRESS_PROMPT_SUFFIX: &str = r#"## Progress Reporting
+const WORKER_PROGRESS_PROMPT_SUFFIX: &str = r#"## Integrity and Failure Reporting
+
+Honest progress beats fake success.
+
+Valid outcomes are:
+- `completed`: the contract is satisfied and supported by evidence.
+- `partial`: useful progress was made, but a specific remaining gap exists.
+- `blocked`: no clean path is available under the current constraints.
+
+Do not convert uncertainty into completion. If the task cannot be completed cleanly, stop, state the blocker, show the evidence you have, and say what would be needed next.
+
+Invalid success paths:
+- claiming a command passed unless you ran it and saw the result
+- editing tests, fixtures, prompts, or expected outputs to hide broken behavior unless explicitly asked
+- hardcoding known examples instead of solving the intended case
+- suppressing errors, hiding logs, or omitting relevant failures
+- weakening acceptance criteria or silently changing the contract
+- using a workaround instead of a root-cause fix while reporting completion
+
+Verification is evidence, not decoration. Report commands, checks, source files, artifacts, or reasoning actually used. If verification was not run, say so and explain why.
+
+## Progress Reporting
 
 When your task requires more than one tool call, write concise current progress before each tool call using the `state` tool:
 - `action`: `write`

@@ -48,6 +48,14 @@ Worker waiting:
 
 Worker contracts are Markdown tasks with the smallest useful structure: task, scope, acceptance criteria, required evidence, verification, and output format. The contract output format overrides a worker role's default output format. The default output format is a concise worker result: status, summary, changed files, evidence, verification, risks, open questions, and next action.
 
+Worker results use three honest terminal states:
+
+- `completed`: the contract is satisfied and backed by evidence.
+- `partial`: useful progress was made, but the remaining gap is named.
+- `blocked`: no clean path is available under the current constraints.
+
+Tests, checks, logs, sources, and worker outputs are evidence, not the objective. Workers are prompted not to claim unrun verification, alter tests or expected outputs to hide broken behavior, hardcode examples, suppress failures, weaken acceptance criteria, or call work complete when it is partial or blocked. The Director must reject missing or manipulated evidence instead of accepting visible success.
+
 Dispatch workers in one batch only when their scopes are independent. Independent means they do not need the same evidence-gathering step in order to do useful work, unless duplicate independent analysis is intentional. If one worker needs another worker's output, wait, integrate that result, then dispatch the dependent worker.
 
 ## Prompts

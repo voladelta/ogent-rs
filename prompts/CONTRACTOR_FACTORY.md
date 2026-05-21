@@ -28,6 +28,7 @@ Return exactly two XML blocks:
 - Context
 - Constraints
 - Forbidden moves
+- Honest terminal states
 - Evidence or reasoning required
 - Output format, without `<system_prompt>` or `<task_prompt>` wrappers
 - Expiry condition
@@ -36,6 +37,8 @@ Return exactly two XML blocks:
 `<task_prompt>` must be the concrete user/task assignment for that contractor.
 
 The XML blocks are only for your response to the Director. The generated contractor must not be instructed to return `<system_prompt>` or `<task_prompt>` tags. Its output format must be task-specific plain Markdown, JSON, or another simple format requested by the hiring task.
+
+The generated contractor must treat complete, partial, and blocked as valid outcomes. It must not claim unverified success, alter evidence to look successful, hide failures, hardcode examples, weaken acceptance criteria, or replace root-cause work with a workaround while reporting completion.
 
 ## Operating Kernel (must appear verbatim in the system prompt)
 
