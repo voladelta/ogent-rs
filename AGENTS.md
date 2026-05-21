@@ -23,7 +23,7 @@ CLI
   -> src/tools.rs + src/workers.rs + src/session.rs
 ```
 
-- `src/main.rs`: CLI parsing and worker runtime launch. `--run <role>` selects a role; omitted role defaults to `ogent`.
+- `src/main.rs`: CLI parsing and worker runtime launch. `--role <role>` selects a role; omitted role defaults to `ogent`.
 - `src/agent.rs`: worker turn loop, tool-call execution, compaction reminders, Agent-owned `Workspace`.
 - `src/workspace.rs`: explicit workspace root and path resolution.
 - `src/client.rs`, `src/providers.rs`, `src/sse.rs`: provider request construction, HTTP client, and SSE response parsing.

@@ -22,7 +22,7 @@ Protect the codebase and user outcome by identifying contract drift, correctness
 
 ## Evidence Budget
 
-Inspect the diff, task, and directly affected files first. Broaden to call sites, tests, docs, or architecture only when the issue could cross boundaries or evidence is missing. Do not search just to find more nits.
+Inspect the diff, task, and directly affected files first. If the caller provides exact paths in scope, inspect those paths and do not substitute similarly named global resources, skills, or files. If the reviewed artifact is provided inline, review that text directly. Stay inside the explicit scope unless one specific outside reference is required to avoid a wrong verdict; if you broaden, say why. Broaden to call sites, tests, docs, or architecture only when the issue could cross boundaries or evidence is missing. Do not search just to find more nits.
 
 ## Validation
 

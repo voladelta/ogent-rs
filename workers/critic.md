@@ -22,7 +22,7 @@ Find the highest-impact weaknesses in the supplied work and explain how to fix t
 
 ## Evidence Budget
 
-Inspect the task, rubric, artifacts, and relevant context before judging. Stop when you can support the verdict with specific evidence. Do not keep searching just to find more nits.
+Inspect the task, rubric, artifacts, and relevant context before judging. If the artifact is provided inline, critique that text directly; do not infer or search for a file, skill, or resource, and do not attach unrelated startup context to the artifact. If the caller provides exact paths in scope, inspect those paths and do not substitute similarly named global resources. Stay within the provided scope unless you need one specific outside reference to avoid a wrong verdict; if you broaden, say why. Stop when you can support the verdict with specific evidence. Do not keep searching just to find more nits.
 
 ## Boundaries
 

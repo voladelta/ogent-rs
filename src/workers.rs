@@ -55,7 +55,9 @@ completed | partial | blocked | question
 # Next Action
 ```
 
-Leave `# Question` empty unless status is `question`."#;
+Leave `# Question` empty unless status is `question`.
+
+Do not add other top-level Markdown headings in the final response. Put role-specific content under the required sections."#;
 
 pub async fn resolve_worker_prompts(
   role: &str,
@@ -91,21 +93,19 @@ pub(crate) fn build_worker_messages(
   prompt: &str,
   session_id: &str,
 ) -> Vec<crate::types::Message> {
-  let mut messages = vec![
-    crate::types::Message {
-      role: "system".into(),
-      content: system_prompt.to_string(),
-      origin: crate::types::MessageOrigin::Internal,
-      ..Default::default()
-    },
-    crate::types::Message {
-      role: "user".into(),
-      content: format!("[session: {session_id}]\n\n{prompt}"),
-      origin: crate::types::MessageOrigin::Human,
-      ..Default::default()
-    },
-  ];
+  let mut messages = vec![crate::types::Message {
+    role: "system".into(),
+    content: system_prompt.to_string(),
+    origin: crate::types::MessageOrigin::Internal,
+    ..Default::default()
+  }];
   crate::prompts::enrich_initial_messages(&mut messages);
+  messages.push(crate::types::Message {
+    role: "user".into(),
+    content: format!("[session: {session_id}]\n\n{prompt}"),
+    origin: crate::types::MessageOrigin::Human,
+    ..Default::default()
+  });
   messages
 }
 
@@ -147,6 +147,14 @@ mod tests {
     assert!(sys.contains("## Context"));
     assert!(sys.contains("src/lib.rs"));
     assert_eq!(task, "review src/lib.rs");
+  }
+
+  #[test]
+  fn build_worker_messages_keeps_human_task_last() {
+    let messages = build_worker_messages("system", "do the task", "session-1");
+    let last = messages.last().unwrap();
+    assert_eq!(last.origin, crate::types::MessageOrigin::Human);
+    assert_eq!(last.content, "[session: session-1]\n\ndo the task");
   }
 
   #[tokio::test]

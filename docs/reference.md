@@ -6,7 +6,7 @@
 | --- | --- |
 | `--profile <name>` | Model/profile selection, overriding `config.yaml` |
 | `--autocompact <percent>` | Auto-compaction threshold; `-1` disables it |
-| `--run <role>` | Run with an explicit worker role; default is `ogent` |
+| `--role <role>` | Run with an explicit worker role; default is `ogent` |
 
 ## Worker Run
 
@@ -14,7 +14,7 @@
 
 ```bash
 ogent "Fix the failing parser test"
-ogent --run reviewer --profile kimi "Review the staged diff"
+ogent --role reviewer --profile kimi "Review the staged diff"
 ```
 
 Worker runs:

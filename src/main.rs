@@ -162,7 +162,7 @@ mod tests {
 
   #[test]
   fn parses_run_role_and_task() {
-    let args = parse_test_args(&["ogent", "--run", "implementer", "fix the parser"]);
+    let args = parse_test_args(&["ogent", "--role", "implementer", "fix the parser"]);
     assert_eq!(args.role.as_deref(), Some("implementer"));
     assert_eq!(args.prompt, vec!["fix the parser"]);
     assert!(ensure_run_mode_flags(&args).is_ok());

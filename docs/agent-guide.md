@@ -4,7 +4,7 @@
 
 `ogent` now runs as a single worker-mode agent from the CLI.
 
-`ogent --run <role> "task"` starts a single worker-mode `Agent`.
+`ogent --role <role> "task"` starts a single worker-mode `Agent`.
 `ogent "task"` does the same with default role `ogent`.
 
 Direct worker runs:
@@ -37,6 +37,7 @@ Direct worker runs:
 
 Unknown role or `factory` role uses contractor-factory generation.
 All worker system prompts append the shared integrity, progress, and result-reporting instructions; role files should describe role goals, constraints, and evidence focus rather than duplicating the final format.
+The `ogent` wrapper skill is filtered out of worker skill discovery so workers do not route back to their own launcher guidance.
 
 ## State and Exit
 

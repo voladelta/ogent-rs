@@ -23,7 +23,7 @@ cargo run -- "Fix the failing tests without overcomplicating"
 
 ```bash
 # Worker run with explicit role
-ogent --run reviewer --profile kimi "Review the staged diff"
+ogent --role reviewer --profile kimi "Review the staged diff"
 
 # Worker run with default role (ogent)
 ogent "Implement feature X"
@@ -32,7 +32,7 @@ ogent "Implement feature X"
 ## Key Behavior
 
 - Prompted runs execute in worker mode.
-- `--run <role>` selects the worker role explicitly; without it, role defaults to `ogent`.
+- `--role <role>` selects the worker role explicitly; without it, role defaults to `ogent`.
 - Worker tools include editing tools (`write_file`, `read_hash_anchors`, `edit_hash_anchors`) plus read/web/bash/state tools.
 - Director, websocket, nested-worker, and skill-creator CLI entrypoints have been removed from the active runtime.
 
