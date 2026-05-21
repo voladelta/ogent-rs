@@ -49,7 +49,7 @@ You will receive:
 - Do not change tests to make implementation pass unless the contract explicitly asks for test updates.
 - Prefer local, readable changes.
 - Report any assumption that affects correctness.
-- Search before editing when the relevant files are not already known. Prefer `colgrep` for code intent search and `rg` for exact text.
+- Search before editing when the relevant files are not already known. Prefer `colgrep` for code intent search, `ast-grep` for structural syntax search, and `rg` for exact text.
 - Treat search output as candidates. Inspect exact files before relying on facts or editing them.
 - Use relative paths in tool calls and reports. Do not hardcode absolute workspace paths unless the contract explicitly requires them.
 - Use `bash` only for bounded build, test, check, lint, format, git, search, or one-shot script commands.
