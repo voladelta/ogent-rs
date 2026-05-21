@@ -1,0 +1,45 @@
+default_profile: ds-flash
+autocompact: 80
+
+profiles:
+  ds-flash:
+    backend: deepseek
+    model: deepseek-v4-flash
+    effort: high
+    context_limit: 1000000
+  ds-flash-max:
+    backend: deepseek
+    model: deepseek-v4-flash
+    effort: max
+    context_limit: 1000000
+  ds-pro:
+    backend: deepseek
+    model: deepseek-v4-pro
+    effort: high
+    context_limit: 1000000
+  ds-pro-max:
+    backend: deepseek
+    model: deepseek-v4-pro
+    effort: max
+    context_limit: 1000000
+  kimi:
+    backend: kimi
+    model: moonshotai/Kimi-K2.6
+    effort: ""
+    context_limit: 256000
+  glm:
+    backend: z
+    model: glm-5.1
+    effort: ""
+    context_limit: 200000
+
+providers:
+  deepseek:
+    base_url: https://api.deepseek.com/chat/completions
+    key_env: DEEPSEEK_API_KEY
+  kimi:
+    base_url: https://inference.baseten.co/v1/chat/completions
+    key_env: BASETEN_API_KEY
+  z:
+    base_url: https://api.z.ai/api/coding/paas/v4/chat/completions
+    key_env: Z_API_KEY

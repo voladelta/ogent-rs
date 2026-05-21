@@ -6,7 +6,7 @@ The Director makes decomposition decisions blind every time: how many workers, w
 
 1. What to track (signal design)
 After each worker batch completes, store a minimal calibration entry:
-
+```
 role: implementer
 task_type: refactor | feature | bugfix | test
 scope_size: 1-file | 2-5-files | 6+-files | cross-module
@@ -14,6 +14,7 @@ outcome: completed | partial | blocked | failed
 retries: 0 | 1 | 2+
 parallelized: yes | no
 contract_quality: well_scoped | too_broad | ambiguous | wrong_role
+```
 
 Key design choice: `scope_size` and `contract_quality` are the Director's self-assessment, not objective measures. The Director judges its own decomposition after seeing the result. This is realistic — a manager learns "I gave them too much" by seeing the output.
 
@@ -53,7 +54,7 @@ No Rust changes. Prompt-only. Add to SYSTEM_PROMPT.md:
 
 ## Calibration
 After integrating each worker batch, compact the outcome into `calibration_log`:
-
+```
 role: <role>
 task_type: explore | design | implement | debug | review | verify
 scope: <1-file | 2-5-files | 6+-files | cross-module>
@@ -61,7 +62,7 @@ outcome: completed | partial | blocked
 retries: <count>
 parallelized: yes | no
 decomposition_quality: <good | too_broad | ambiguous | wrong_role>
-
+```
 Before dispatching, check `calibration_log` for patterns:
 - 2+ failures on similar scope → split or narrow
 - parallel conflicts on specific file areas → serialize
