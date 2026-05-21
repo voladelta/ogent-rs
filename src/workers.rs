@@ -523,7 +523,7 @@ pub(crate) fn build_worker_messages(
   prompt: &str,
   session_id: &str,
 ) -> Vec<crate::types::Message> {
-  vec![
+  let mut messages = vec![
     crate::types::Message {
       role: "system".into(),
       content: system_prompt.to_string(),
@@ -536,7 +536,9 @@ pub(crate) fn build_worker_messages(
       origin: crate::types::MessageOrigin::Human,
       ..Default::default()
     },
-  ]
+  ];
+  crate::prompts::enrich_initial_messages(&mut messages);
+  messages
 }
 
 static ARCHITECT_CLIENT: OnceLock<Result<crate::client::Client, String>> = OnceLock::new();
@@ -678,6 +680,30 @@ Some trailing text"#;
   #[test]
   fn extract_tag_returns_none_for_missing() {
     assert!(extract_tag("no tags", "system_prompt").is_none());
+  }
+
+  #[test]
+  fn build_worker_messages_applies_initial_prompt_enrichment() {
+    let mut expected = vec![
+      crate::types::Message {
+        role: "system".into(),
+        content: "Worker system".into(),
+        origin: crate::types::MessageOrigin::Internal,
+        ..Default::default()
+      },
+      crate::types::Message {
+        role: "user".into(),
+        content: "[session: session-1]\n\nDo the work".into(),
+        origin: crate::types::MessageOrigin::Human,
+        ..Default::default()
+      },
+    ];
+    crate::prompts::enrich_initial_messages(&mut expected);
+
+    assert_eq!(
+      build_worker_messages("Worker system", "Do the work", "session-1"),
+      expected
+    );
   }
 
   #[test]

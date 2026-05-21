@@ -6,15 +6,16 @@ The main agent is the Director. It frames the task, inspects the repo, manages s
 
 ## Quick Start
 
-1. Copy `config.yaml.sample` to your repo's `.ogent/config.yaml` or to `~/.ogent/config.yaml`.
-2. Set the required API keys:
+1. Rename the `dotogent` boilerplate directory to `.ogent` at the repo level or to `~/.ogent` for global config. It contains `config.yaml` and the colgrep skill.
+2. Edit `.ogent/config.yaml` or `~/.ogent/config.yaml` for your models and providers.
+3. Set the required API keys:
 
 ```bash
 export DEEPSEEK_API_KEY="sk-..."
 export EXA_API_KEY="..."
 ```
 
-3. Run:
+4. Run:
 
 ```bash
 cargo run -- "Fix the failing tests without overcomplicating"
