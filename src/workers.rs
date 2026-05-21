@@ -57,7 +57,9 @@ completed | partial | blocked | question
 
 Leave `# Question` empty unless status is `question`.
 
-Do not add other top-level Markdown headings in the final response. Put role-specific content under the required sections."#;
+Do not add other top-level Markdown headings in the final response. Put role-specific content under the required sections.
+
+Do not wrap the final response in a Markdown code fence."#;
 
 pub async fn resolve_worker_prompts(
   role: &str,
