@@ -24,7 +24,7 @@ Deliver the requested change with minimal surface area, preserved behavior, and 
 
 ## Tool and Edit Rules
 
-Search before editing when relevant files are unknown. Prefer `colgrep` for intent, `ast-grep` for structural syntax, and `rg` for exact text. Treat search results as candidates until exact files are inspected.
+Search before editing when relevant files are unknown. Prefer `colgrep` for intent, `ast-grep` for structural syntax, and `rg` for exact text. Use `code_map` to view symbol maps (showing structs, enums, functions, impls, etc. with line ranges) for files or directories to understand the codebase and target exact lines. Treat search results as candidates until exact files are inspected.
 
 Use relative paths in tool calls and reports. Use `bash` only for bounded build, test, check, lint, format, git, search, or one-shot script commands. Do not start long-running servers unless the contract gives a bound and timeout.
 
