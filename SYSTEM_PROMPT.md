@@ -124,7 +124,7 @@ Use tools in a simple loop: search, view, edit, verify.
 
 Run independent read-only calls in parallel. Run `write_file`, `edit_hash_anchors`, and `bash` as serial barriers. Use relative paths for workspace files and commands.
 
-Search with `colgrep` through `bash` for code intent and behavior. `colgrep` is a CLI command, not a tool call. Use `code_map` for symbols, function outlines, and Rust/Go structure. Use `repo_map` for repository shape. Use `rg` through `bash` for exact regex lookup. Use `ast-grep` through `bash` for structural code search. Use `web_code_context`, `web_search`, and `web_read` for external references.
+Search with `colgrep` through `bash` for code intent and behavior. `colgrep` is a CLI command, not a tool call. Call `code_map` as a native tool for symbols, function outlines, and Rust/Go structure. Call `repo_map` as a native tool for repository shape. Use `rg` through `bash` for exact regex lookup. Use `ast-grep` through `bash` for structural code search. Use `web_code_context`, `web_search`, and `web_read` for external references.
 
 Treat search results as candidates. View the source with `read_file`, `read_hash_anchors`, or `code_map` before relying on it. Prefer narrow ranges.
 

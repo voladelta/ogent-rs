@@ -157,10 +157,11 @@ impl Agent {
           &tool_call.function.name,
           &tool_call.function.arguments,
         )
-        .await?;
+        .await;
+        let content = tool_result_content(&tool_call.function.name, result);
         let tool_message = Message {
           role: "tool".to_string(),
-          content: result,
+          content,
           origin: MessageOrigin::Tool,
           reasoning_content: String::new(),
           tool_calls: Vec::new(),
@@ -186,5 +187,28 @@ impl Agent {
     } else {
       session::persist_session_in(&self.workspace, &self.messages, &self.meta.session_id)
     }
+  }
+}
+
+fn tool_result_content(tool_name: &str, result: Result<String>) -> String {
+  match result {
+    Ok(content) => content,
+    Err(err) => format!(
+      "tool `{tool_name}` failed:\n{err}\n\nUse this tool error as evidence, then adjust the next tool call or report the failure."
+    ),
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn tool_result_content_reports_errors_to_model() {
+    let content = tool_result_content("bash", Err(anyhow::anyhow!("exit err: exit status: 127")));
+
+    assert!(content.contains("tool `bash` failed"));
+    assert!(content.contains("exit status: 127"));
+    assert!(content.contains("adjust the next tool call"));
   }
 }
