@@ -21,8 +21,11 @@ pub fn generate_session_id() -> String {
   )
 }
 
-pub fn session_dir_in(workspace: &Workspace, session_id: &str) -> PathBuf {
-  workspace.root().join(".ogent/sessions").join(session_id)
+pub fn session_file_in(workspace: &Workspace, session_id: &str) -> PathBuf {
+  workspace
+    .root()
+    .join(".ogent/sessions")
+    .join(format!("{}.jsonl", session_id))
 }
 
 #[cfg(test)]
@@ -39,9 +42,13 @@ impl Drop for SessionLock {
 
 #[cfg(test)]
 pub fn try_acquire_session_lock_in(workspace: &Workspace, session_id: &str) -> Result<SessionLock> {
-  let dir = session_dir_in(workspace, session_id);
-  fs::create_dir_all(&dir)?;
-  let lock_path = dir.join("active.lock");
+  let lock_path = workspace
+    .root()
+    .join(".ogent/sessions")
+    .join(format!("{}.lock", session_id));
+  if let Some(parent) = lock_path.parent() {
+    fs::create_dir_all(parent)?;
+  }
   for _ in 0..2 {
     match std::fs::OpenOptions::new()
       .write(true)
@@ -112,7 +119,7 @@ pub fn persist_session_in(
   messages: &[Message],
   session_id: &str,
 ) -> Result<()> {
-  let path = session_dir_in(workspace, session_id).join("messages.jsonl");
+  let path = session_file_in(workspace, session_id);
   persist_messages(messages, &path)
 }
 
@@ -171,27 +178,28 @@ mod tests {
     drop(lock1);
     let lock2 = try_acquire_session_lock_in(&ws, &session_id).unwrap();
     drop(lock2);
-    let _ = std::fs::remove_dir_all(session_dir_in(&ws, &session_id));
   }
 
   #[test]
   fn stale_session_lock_is_reclaimed() {
     let ws = Workspace::from_current_dir();
     let session_id = format!("stale-lock-test-{}", timestamp_ms());
-    let lock_path = session_dir_in(&ws, &session_id).join("active.lock");
+    let lock_path = ws
+      .root()
+      .join(".ogent/sessions")
+      .join(format!("{}.lock", &session_id));
     std::fs::create_dir_all(lock_path.parent().unwrap()).unwrap();
     std::fs::write(&lock_path, "pid=4294967295\nts_ms=0\n").unwrap();
     let lock = try_acquire_session_lock_in(&ws, &session_id).unwrap();
     drop(lock);
-    let _ = std::fs::remove_dir_all(session_dir_in(&ws, &session_id));
   }
 
   #[test]
   fn workspace_scoped_paths_use_workspace_root() {
     let ws = Workspace::from_root(PathBuf::from("/tmp/ogent-session-test"));
     assert_eq!(
-      session_dir_in(&ws, "abc"),
-      PathBuf::from("/tmp/ogent-session-test/.ogent/sessions/abc")
+      session_file_in(&ws, "abc"),
+      PathBuf::from("/tmp/ogent-session-test/.ogent/sessions/abc.jsonl")
     );
   }
 }

@@ -77,8 +77,7 @@ Session transcripts are stored at the repository level:
 ```txt
 {workspace_root}/.ogent/
   sessions/
-    {session_id}/
-      messages.jsonl
+    {session_id}.jsonl
 ```
 
-- **Transcript Persistence**: Direct CLI invocations write the conversation transcript to `messages.jsonl` on exit.
+- **Transcript Persistence**: Direct CLI invocations write the conversation transcript to `{session_id}.jsonl` on exit.

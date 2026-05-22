@@ -39,7 +39,6 @@ pub fn configured_worker_tools() -> Vec<Tool> {
   WORKER_TOOLS.get_or_init(build_worker_tools).clone()
 }
 
-
 fn build_worker_tools() -> Vec<Tool> {
   vec![
     schema(
@@ -581,8 +580,6 @@ fn load_skill(args: &str) -> Result<String> {
   ))
 }
 
-
-
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -634,7 +631,6 @@ mod tests {
     assert!(names.contains(&"code_map"));
     assert!(names.contains(&"edit_hash_anchors"));
   }
-
 
   #[tokio::test]
   async fn execute_tool_unknown_returns_error() {

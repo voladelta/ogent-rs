@@ -181,9 +181,7 @@ impl Agent {
         self.emit_tool_call(&tool_call);
         let workspace = self.workspace.clone();
         let result = execute_tool(
-          ToolContext {
-            workspace,
-          },
+          ToolContext { workspace },
           &tool_call.function.name,
           &tool_call.function.arguments,
         )
@@ -287,7 +285,7 @@ mod tests {
 
     agent.persist_if_dirty().unwrap();
 
-    let path = crate::session::session_dir_in(&workspace, session_id).join("messages.jsonl");
+    let path = crate::session::session_file_in(&workspace, session_id);
     assert!(path.exists());
     let data = std::fs::read_to_string(&path).unwrap();
     assert!(data.contains("\"content\":\"hello\""));

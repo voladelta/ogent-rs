@@ -40,7 +40,7 @@ ogent --profile kimi "Review the staged diff"
 
 - **Worker Mode**: Invocations execute in worker mode.
 - **System Prompt**: It relies on [SYSTEM_PROMPT.md](SYSTEM_PROMPT.md) for its prompt loop, state, and result formatting guidelines.
-- **Session Persistence**: CLI runs persist conversation transcripts to `.ogent/sessions/{session_id}/messages.jsonl` on exit.
+- **Session Persistence**: CLI runs persist conversation transcripts to `.ogent/sessions/{session_id}.jsonl` on exit.
 - **Run Completion**: A run terminates when the agent returns a final message without calling any more tools.
 
 ---
