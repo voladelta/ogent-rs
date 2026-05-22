@@ -10,13 +10,11 @@ pub const WORKER_PROMPT_VERIFIER: &str = include_str!("../workers/verifier.md");
 pub const WORKER_PROMPT_DEBUGGER: &str = include_str!("../workers/debugger.md");
 pub const WORKER_PROMPT_RESEARCHER: &str = include_str!("../workers/researcher.md");
 pub const WORKER_PROMPT_WRITER: &str = include_str!("../workers/writer.md");
-pub const WORKER_PROMPT_CRITIC: &str = include_str!("../workers/critic.md");
 pub const WORKER_PROMPT_VISUAL_DESIGNER: &str = include_str!("../workers/visual_designer.md");
 pub const WORKER_PROMPT_DATABASE_ARCHITECT: &str = include_str!("../workers/database_architect.md");
 pub const WORKER_PROMPT_SYSTEM_ARCHITECT: &str = include_str!("../workers/system_architect.md");
 pub const WORKER_PROMPT_SUMMARIZER: &str = include_str!("../workers/summarizer.md");
 pub const WORKER_PROMPT_REVIEWER: &str = include_str!("../workers/reviewer.md");
-pub const WORKER_PROMPT_QA_WRITER: &str = include_str!("../workers/qa_writer.md");
 
 pub fn get_builtin_worker_prompt(name: &str) -> Option<&'static str> {
   match name {
@@ -26,13 +24,11 @@ pub fn get_builtin_worker_prompt(name: &str) -> Option<&'static str> {
     "debugger" => Some(WORKER_PROMPT_DEBUGGER),
     "researcher" => Some(WORKER_PROMPT_RESEARCHER),
     "writer" => Some(WORKER_PROMPT_WRITER),
-    "critic" => Some(WORKER_PROMPT_CRITIC),
     "visual_designer" => Some(WORKER_PROMPT_VISUAL_DESIGNER),
     "database_architect" => Some(WORKER_PROMPT_DATABASE_ARCHITECT),
     "system_architect" => Some(WORKER_PROMPT_SYSTEM_ARCHITECT),
     "summarizer" => Some(WORKER_PROMPT_SUMMARIZER),
     "reviewer" => Some(WORKER_PROMPT_REVIEWER),
-    "qa_writer" => Some(WORKER_PROMPT_QA_WRITER),
     _ => None,
   }
 }
@@ -239,10 +235,16 @@ mod tests {
   }
 
   #[test]
-  fn qa_writer_is_builtin_worker_prompt() {
-    let prompt = get_builtin_worker_prompt("qa_writer").unwrap();
-    assert!(prompt.contains("You are QA Writer."));
-    assert!(prompt.contains("Accepted Answer"));
+  fn writer_handles_technical_answers() {
+    let prompt = get_builtin_worker_prompt("writer").unwrap();
+    assert!(prompt.contains("technical answer"));
+    assert!(prompt.contains("direct answer"));
+  }
+
+  #[test]
+  fn collapsed_worker_roles_are_not_builtins() {
+    assert!(get_builtin_worker_prompt("critic").is_none());
+    assert!(get_builtin_worker_prompt("qa_writer").is_none());
   }
 
   #[test]

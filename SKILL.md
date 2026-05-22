@@ -7,7 +7,7 @@ description: Use ogent as an external coding co-worker for focused software engi
 
 Use `ogent` when an independent coding co-worker would help make concrete progress in the current repository.
 
-`ogent` is best for focused, bounded work: implementing a scoped change, debugging a failure, reviewing a diff, gathering evidence, validating claims, summarizing run state, or asking a specialist role for design/writing/research judgment.
+`ogent` is best for focused, bounded work: implementing a scoped change, debugging a failure, reviewing or critiquing an artifact, gathering evidence, validating claims, summarizing run state, or asking a specialist role for design/writing/research judgment.
 
 ## When to Use
 
@@ -17,7 +17,7 @@ Use this skill when:
 - a second pass would improve confidence: review, verification, debugging, or research
 - the task benefits from a specialist role rather than general conversation
 
-Do not use it for tiny one-shot answers, broad ambiguous goals without a contract, destructive operations, credential discovery, or work outside the current repository unless the user explicitly asks.
+Use direct conversation for tiny one-shot answers. Ask the user to narrow broad ambiguous goals before delegation. Keep destructive operations, credential discovery, and work outside the current repository out of scope unless the user explicitly asks.
 
 ## First Check
 
@@ -40,15 +40,13 @@ Default to `ogent` for general software engineering. Use a specialist role when 
 | `ogent` | general coding, planning, investigation, mixed tasks |
 | `implementer` | scoped code or artifact changes |
 | `debugger` | root-cause analysis and minimal fix path |
-| `reviewer` | judging whether work satisfies a contract |
+| `reviewer` | judging whether work satisfies a contract, including sharp critique before delivery |
 | `verifier` | running or designing evidence checks |
 | `researcher` | gathering and organizing evidence |
 | `system_architect` | module/API/system boundary decisions |
 | `database_architect` | data model, schema, query, migration decisions |
 | `visual_designer` | UI direction, layout, hierarchy, visual implementation notes |
-| `writer` | drafting or rewriting prose |
-| `qa_writer` | StackOverflow-style technical answers |
-| `critic` | sharp critique before user-facing delivery |
+| `writer` | drafting, rewriting prose, and StackOverflow-style technical answers |
 | `summarizer` | compressing transcript or run history into continuation state |
 
 ## Task Contract
@@ -64,14 +62,14 @@ Scope:
 
 Constraints:
 
-Forbidden moves (actions `ogent` must not take, such as editing tests, deleting files, or broad refactors):
+Boundaries (actions outside scope, such as editing tests, deleting files, or broad refactors):
 
 Evidence required:
 
 Expected output:
 ```
 
-Good contracts name files, commands, acceptance criteria, risk boundaries, and whether edits are allowed. Prefer relative paths. Do not pass secrets.
+Good contracts name files, commands, acceptance criteria, risk boundaries, and whether edits are allowed. Prefer relative paths. Keep secrets out of task contracts.
 
 ## Invocation Patterns
 
@@ -107,10 +105,10 @@ Scope:
 src/parser.rs, src/lexer.rs, parser tests.
 
 Constraints:
-Do not edit tests unless the failure is a test bug and you can prove it.
+Treat tests as intended-behavior evidence. Edit tests only if the failure is a test bug and you can prove it.
 
-Forbidden moves:
-Do not change parser public APIs.
+Boundaries:
+Keep parser public APIs unchanged.
 
 Evidence required:
 Reproduction command, root-cause evidence, and minimal fix path.
@@ -149,7 +147,7 @@ If status is `question`, answer the missing question yourself if possible, then 
 ## Safety and Repo Hygiene
 
 - Check `git status` before and after delegated edit tasks.
-- Keep delegation scoped; avoid asking `ogent` to refactor broadly unless the user requested it.
-- Do not ask `ogent` to bypass tests, hide failures, weaken acceptance criteria, or perform destructive operations.
-- Treat `.ogent/sessions/`, `.ogent/journal.md`, and build outputs as runtime artifacts; read them only when needed and do not edit them unless requested.
-- Do not claim `ogent` ran checks or changed files unless you observed the output or inspected the repository state.
+- Keep delegation scoped; request broad refactors only when the user requested them.
+- Ask `ogent` to preserve tests, surface failures, keep acceptance criteria stable, and leave destructive operations to explicit user requests.
+- Treat `.ogent/sessions/`, `.ogent/journal.md`, and build outputs as runtime artifacts; read them only when needed and edit them only when requested.
+- Claim `ogent` ran checks or changed files only after you observed the output or inspected the repository state.

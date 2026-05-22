@@ -26,13 +26,11 @@ Direct worker runs:
   - `debugger`
   - `researcher`
   - `writer`
-  - `critic`
   - `visual_designer`
   - `database_architect`
   - `system_architect`
   - `summarizer`
   - `reviewer`
-  - `qa_writer`
 
 Unknown roles return an error from the worker prompt resolver.
 All worker system prompts append the shared integrity, progress, and result-reporting instructions; role files should describe role goals, constraints, and evidence focus rather than duplicating the final format.
