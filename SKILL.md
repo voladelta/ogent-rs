@@ -61,6 +61,8 @@ With a specific model/profile when the caller requires it:
 ogent --profile kimi "<task contract>"
 ```
 
+Available profiles: `glm`, `kimi`, `ds-flash`, `ds-flash-max`, `ds-pro`, `ds-pro-max`
+
 For multiline contracts, use a heredoc so the task is readable and reproducible:
 
 ```bash
