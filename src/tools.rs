@@ -528,20 +528,20 @@ async fn web_code_context(args: &str) -> Result<String> {
   Ok(v["response"].as_str().unwrap_or("").to_string())
 }
 
-fn exa_api_key() -> Result<String> {
+fn exa_api_key() -> String {
+  std::env::var("EXA_API_KEY").unwrap_or_default()
+}
+
+pub fn ensure_exa_api_key_set() -> Result<()> {
   let key = std::env::var("EXA_API_KEY").unwrap_or_default();
   if key.trim().is_empty() {
     bail!("EXA_API_KEY is not set. Set EXA_API_KEY before running ogent.");
   }
-  Ok(key)
-}
-
-pub fn ensure_exa_api_key_set() -> Result<()> {
-  exa_api_key().map(|_| ())
+  Ok(())
 }
 
 async fn exa_post(url: &str, body: Value) -> Result<Value> {
-  let key = exa_api_key()?;
+  let key = exa_api_key();
   let resp = exa_client()?
     .post(url)
     .header("x-api-key", key)
