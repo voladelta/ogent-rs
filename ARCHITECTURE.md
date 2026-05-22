@@ -57,7 +57,3 @@ Active CLI runs set `temp: true`, so `persist_if_dirty` skips `messages.jsonl`. 
 - Tool execution, bash current directory, state paths, and session files are workspace-scoped.
 - Worker file edits are done via worker toolset (`write_file`, `edit_hash_anchors`).
 - A run ends when the worker sends a final assistant message (no tool calls).
-
-## Purge Status
-
-This pass removes redundant CLI surfaces (`--serve`, `--resume`, `--fork`, `--create-skill`) and deletes the old websocket, steer, and artifact-creator source modules from the active tree. Nested-worker orchestration is no longer exposed by the worker CLI.

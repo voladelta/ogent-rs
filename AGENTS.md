@@ -32,13 +32,6 @@ CLI
 - `src/prompts.rs`: built-in worker prompts and skill discovery/injection.
 - `src/symbol_tree.rs`: tree-sitter based symbol extraction for `code_map` (Rust and Go).
 
-Removed legacy surfaces:
-
-- No Director runtime.
-- No websocket server.
-- No nested worker dispatch/wait/cancel tools.
-- No `--resume`, `--fork`, `--serve`, or `--create-skill` CLI flow.
-
 ## File Routing Map
 
 | Request area | Start here | Also check |

@@ -9,6 +9,8 @@ Use `ogent` when an independent coding co-worker would help make concrete progre
 
 `ogent` is best for focused, bounded work: implementing a scoped change, debugging a failure, reviewing or critiquing an artifact, gathering evidence, validating claims, or summarizing run state.
 
+Run `ogent` from the repository root or the intended workspace. Its workspace is the process current directory.
+
 ## When to Use
 
 Use this skill when:
@@ -17,18 +19,6 @@ Use this skill when:
 - a second pass would improve confidence: review, verification, debugging, or research
 
 Use direct conversation for tiny one-shot answers. Ask the user to narrow broad ambiguous goals before delegation. Keep destructive operations, credential discovery, and work outside the current repository out of scope unless the user explicitly asks.
-
-## First Check
-
-Before invoking `ogent`, verify it is available:
-
-```bash
-ogent --help
-```
-
-If unavailable, say so and continue without claiming delegation.
-
-Run `ogent` from the repository root or the intended workspace. Its workspace is the process current directory.
 
 ## Task Contract
 
