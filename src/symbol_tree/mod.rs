@@ -1,0 +1,303 @@
+use anyhow::{Result, bail};
+use std::fs;
+use std::path::{Path, PathBuf};
+use tree_sitter::Node;
+
+mod go;
+mod rust;
+
+pub struct Symbol {
+  pub kind: &'static str,
+  pub name: String,
+  pub line_start: usize,
+  pub line_end: usize,
+  pub signature: String,
+  pub children: Vec<Symbol>,
+}
+
+pub fn collect_source_files(path: &Path) -> Vec<PathBuf> {
+  let mut files = Vec::new();
+  if let Err(e) = collect_files_inner(path, &mut files) {
+    eprintln!("symbol_tree: walk error: {}", e);
+  }
+  files
+}
+
+fn collect_files_inner(path: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
+  if path.is_file() {
+    if let Some(ext) = path.extension()
+      && (ext == "rs" || ext == "go")
+    {
+      files.push(path.to_path_buf());
+    }
+  } else if path.is_dir() {
+    for entry in fs::read_dir(path)? {
+      let entry = entry?;
+      let name = entry.file_name();
+      let name = name.to_string_lossy();
+      if name.starts_with('.') || name == "target" || name == "node_modules" {
+        continue;
+      }
+      collect_files_inner(&entry.path(), files)?;
+    }
+  }
+  Ok(())
+}
+
+pub fn format_path(path: &Path) -> Result<String> {
+  let files = collect_source_files(path);
+  if files.is_empty() {
+    bail!("no .rs or .go files found at {}", path.display());
+  }
+  let mut out = String::new();
+  for file in &files {
+    if let Ok(text) = process_file(file) {
+      out.push_str(&text);
+      out.push('\n');
+    }
+  }
+  Ok(out)
+}
+
+fn process_file(path: &Path) -> Result<String> {
+  let source = fs::read_to_string(path)?;
+  let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+  let syms = match ext {
+    "rs" => rust::parse(&source)?,
+    "go" => go::parse(&source)?,
+    _ => bail!("unsupported extension: {}", ext),
+  };
+  let mut out = String::new();
+  out.push_str(&format!("{}\n", path.display()));
+  for sym in syms {
+    format_symbol(&mut out, &sym, 1);
+  }
+  Ok(out)
+}
+
+fn format_symbol(out: &mut String, sym: &Symbol, depth: usize) {
+  let indent = "  ".repeat(depth);
+  let sig = sym.signature.trim();
+  let sig_compact: String = sig.lines().map(|l| l.trim()).collect::<Vec<_>>().join(" ");
+  if sig_compact.is_empty() {
+    out.push_str(&format!(
+      "{}{} {}@{}:{}\n",
+      indent, sym.kind, sym.name, sym.line_start, sym.line_end
+    ));
+  } else {
+    let rest = display_rest(sym.kind, &sig_compact);
+    out.push_str(&format!(
+      "{}{} @{}:{} {}\n",
+      indent, sym.kind, sym.line_start, sym.line_end, rest
+    ));
+  }
+  for child in &sym.children {
+    format_symbol(out, child, depth + 1);
+  }
+}
+
+fn display_rest(kind: &str, signature: &str) -> String {
+  let s = signature.trim();
+  let target = format!("{} ", kind);
+  if let Some(pos) = s.find(&target) {
+    s[pos + target.len()..].to_string()
+  } else {
+    s.to_string()
+  }
+}
+
+// ── Shared helpers for language extractors ───────────────────────────────────
+
+pub(crate) fn byte_to_line(source: &str, byte: usize) -> usize {
+  let end = byte.min(source.len());
+  source[..end].chars().filter(|&c| c == '\n').count() + 1
+}
+
+pub(crate) fn signature_text(source: &str, node: Node, body_kinds: &[&str]) -> String {
+  let mut end_byte = node.end_byte();
+  let mut cursor = node.walk();
+  for child in node.children(&mut cursor) {
+    if body_kinds.contains(&child.kind()) {
+      end_byte = child.start_byte();
+      break;
+    }
+  }
+  let text = &source[node.start_byte()..end_byte.min(source.len())];
+  let text = text.trim_end();
+  if end_byte < node.end_byte() {
+    text.trim_end_matches(';').trim_end().to_string()
+  } else {
+    text.to_string()
+  }
+}
+
+/// Extract the "name" named field of `node` as a String.
+pub(crate) fn node_name(source: &str, node: Node) -> Option<String> {
+  node
+    .child_by_field_name("name")?
+    .utf8_text(source.as_bytes())
+    .ok()
+    .map(|s| s.to_string())
+}
+
+/// Build a Symbol from a tree-sitter node, computing line positions automatically.
+pub(crate) fn make_symbol(
+  source: &str,
+  node: Node,
+  kind: &'static str,
+  name: String,
+  signature: String,
+  children: Vec<Symbol>,
+) -> Symbol {
+  Symbol {
+    kind,
+    name,
+    line_start: byte_to_line(source, node.start_byte()),
+    line_end: byte_to_line(source, node.end_byte()),
+    signature,
+    children,
+  }
+}
+
+/// Collapse a child list into a single symbol or a `(group)` wrapper.
+///
+/// - 0 children → None
+/// - 1 child    → that child (unwrapped)
+/// - N children → a group symbol containing all children
+pub(crate) fn group_or_single(
+  source: &str,
+  node: Node,
+  kind: &'static str,
+  signature: String,
+  children: Vec<Symbol>,
+) -> Option<Symbol> {
+  match children.len() {
+    0 => None,
+    1 => children.into_iter().next(),
+    _ => Some(make_symbol(
+      source,
+      node,
+      kind,
+      "(group)".to_string(),
+      signature,
+      children,
+    )),
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn go_simple_file() {
+    let src = r#"package main
+
+import "fmt"
+
+const MaxSize = 100
+
+var GlobalVar = 42
+
+type Person struct {
+	Name string
+	Age  int
+}
+
+type Stringer interface {
+	String() string
+}
+
+type (
+	Counter int
+	ID      string
+)
+
+func Hello(name string) string {
+	return "Hello " + name
+}
+
+func (p *Person) String() string {
+	return p.Name
+}
+
+func main() {
+	fmt.Println("Hello")
+}
+"#;
+    let syms = go::parse(src).unwrap();
+    assert!(!syms.is_empty());
+    // Should find package, const, var, types, funcs
+    let kinds: Vec<_> = syms.iter().map(|s| s.kind).collect();
+    assert!(kinds.contains(&"package"));
+    assert!(kinds.contains(&"const"));
+    assert!(kinds.contains(&"var"));
+    assert!(kinds.contains(&"struct"));
+    assert!(kinds.contains(&"interface"));
+    assert!(kinds.contains(&"fn"));
+  }
+
+  #[test]
+  fn go_group_declarations() {
+    let src = r#"package foo
+
+type (
+	A struct { X int }
+	B interface { M() }
+)
+
+const (
+	One = 1
+	Two = 2
+)
+
+var (
+	X = "x"
+	Y = "y"
+)
+"#;
+    let syms = go::parse(src).unwrap();
+    let names: Vec<_> = syms.iter().map(|s| (s.kind, s.name.as_str())).collect();
+    // Should unwrap group declarations into individual symbols when single, or group when multiple
+    assert!(names.contains(&("type", "(group)")));
+    assert!(names.contains(&("const", "(group)")));
+    assert!(names.contains(&("var", "(group)")));
+  }
+
+  #[test]
+  fn go_format_output() {
+    let src = r#"package main
+
+const MaxSize = 100
+
+var GlobalVar = 42
+
+type Person struct {
+	Name string
+	Age  int
+}
+
+type Stringer interface {
+	String() string
+}
+
+func Hello(name string) string {
+	return "Hello " + name
+}
+
+func (p *Person) String() string {
+	return p.Name
+}
+"#;
+    let syms = go::parse(src).unwrap();
+    let mut out = String::new();
+    out.push_str("test.go\n");
+    for sym in syms {
+      format_symbol(&mut out, &sym, 1);
+    }
+    assert!(out.contains("package"));
+    assert!(out.contains("struct"));
+    assert!(out.contains("interface"));
+    assert!(out.contains("fn"));
+  }
+}
