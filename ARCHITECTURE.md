@@ -82,5 +82,5 @@ Session and progress state is stored at the repository level:
       states.json
 ```
 
-- **Temporary Runs (`temp: true`)**: Direct CLI invocations run in temporary mode. The transcript (`messages.jsonl`) is not written to disk on exit.
-- **State Persistence**: The `state` tool continues to write key-value pairs (including progress tracking keys like `progress/current`) to `states.json` even in temporary/CLI runs.
+- **Transcript Persistence**: Direct CLI invocations write the conversation transcript to `messages.jsonl` on exit.
+- **State Persistence**: The `state` tool writes key-value pairs, including progress tracking keys like `progress/current`, to `states.json`.

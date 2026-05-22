@@ -250,12 +250,11 @@ struct BashArgs {
 }
 
 fn check_bash_cds(workspace: &Workspace, command: &str) -> Result<()> {
-  let mut cmd = command.to_string();
-  for sep in ["&&", "||", "|", ";", "\n", "\r"] {
-    cmd = cmd.replace(sep, "\n");
-  }
+  let cmd = strip_heredoc_bodies(command);
+  let cmd = split_shell_separators(&cmd);
   let base = workspace.root();
   let tmp = Path::new("/tmp");
+  let mut cwd = base.to_path_buf();
   for line in cmd.split('\n') {
     let mut words = line.split_whitespace();
     if words.next() == Some("cd") {
@@ -265,7 +264,7 @@ fn check_bash_cds(workspace: &Workspace, command: &str) -> Result<()> {
           "cd without argument is not allowed (would go to $HOME). Use a relative path within the workspace (e.g., ./foo) or /tmp."
         );
       }
-      let target = resolve_cd_target(base, path)?;
+      let target = resolve_cd_target(&cwd, path)?;
       let norm = crate::workspace::normalize(&target);
       let in_workspace = norm.starts_with(base);
       let in_tmp = norm.starts_with(tmp);
@@ -274,9 +273,53 @@ fn check_bash_cds(workspace: &Workspace, command: &str) -> Result<()> {
           "cd to {path} is not allowed. You cannot cd outside the workspace or /tmp. Use relative paths within the workspace (e.g., ./foo or foo)."
         );
       }
+      cwd = norm;
     }
   }
   Ok(())
+}
+
+fn split_shell_separators(command: &str) -> String {
+  let mut cmd = command.to_string();
+  for sep in ["&&", "||", "|", ";", "\n", "\r"] {
+    cmd = cmd.replace(sep, "\n");
+  }
+  cmd
+}
+
+fn strip_heredoc_bodies(command: &str) -> String {
+  let mut out = String::new();
+  let mut lines = command.lines();
+  while let Some(line) = lines.next() {
+    out.push_str(line);
+    out.push('\n');
+
+    let Some(marker) = heredoc_marker(line) else {
+      continue;
+    };
+
+    for body_line in lines.by_ref() {
+      if body_line.trim() == marker {
+        out.push_str(body_line);
+        out.push('\n');
+        break;
+      }
+    }
+  }
+  out
+}
+
+fn heredoc_marker(line: &str) -> Option<String> {
+  let marker = line.split_once("<<")?.1.trim_start();
+  let marker = marker
+    .split_whitespace()
+    .next()?
+    .trim_matches(|c| matches!(c, '\'' | '"'));
+  if marker.is_empty() {
+    None
+  } else {
+    Some(marker.to_string())
+  }
 }
 
 fn resolve_cd_target(base: &Path, path: &str) -> Result<PathBuf> {
@@ -664,6 +707,7 @@ fn write_state_map(path: &Path, map: &BTreeMap<String, String>) -> Result<()> {
 mod tests {
   use super::*;
   use crate::client::Client;
+  use std::path::PathBuf;
   use std::sync::atomic::{AtomicU64, Ordering};
 
   static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -686,8 +730,43 @@ mod tests {
       crate::prompts::build_messages(""),
       configured_worker_tools(),
       format!("tools-test-session-{id}"),
-      true, // temp
     )
+  }
+
+  fn test_workspace(root: &str) -> Workspace {
+    Workspace::from_root(PathBuf::from(root))
+  }
+
+  #[test]
+  fn check_bash_cds_tracks_cwd_after_tmp_cd() {
+    let ws = test_workspace("/tmp/demo");
+
+    let err = check_bash_cds(&ws, "cd /tmp && cd ..").unwrap_err();
+
+    assert!(err.to_string().contains("cd to .. is not allowed"));
+  }
+
+  #[test]
+  fn check_bash_cds_allows_relative_tmp_child_after_tmp_cd() {
+    let ws = test_workspace("/workspace/project");
+
+    assert!(check_bash_cds(&ws, "cd /tmp && cd src").is_ok());
+  }
+
+  #[test]
+  fn check_bash_cds_tracks_workspace_relative_cd_chain() {
+    let ws = test_workspace("/workspace/project");
+
+    assert!(check_bash_cds(&ws, "cd src && cd ..").is_ok());
+    assert!(check_bash_cds(&ws, "cd src && cd ../..").is_err());
+  }
+
+  #[test]
+  fn check_bash_cds_ignores_heredoc_body_examples() {
+    let ws = test_workspace("/workspace/project");
+    let command = "cat <<'EOF'\ncd /tmp && cd ..\nEOF";
+
+    assert!(check_bash_cds(&ws, command).is_ok());
   }
 
   #[test]

@@ -88,7 +88,6 @@ pub struct Agent {
   pub messages: Vec<Message>,
   pub tools: Vec<Tool>,
   pub session_id: String,
-  pub temp: bool,
   pub progress_sink: Option<Arc<Mutex<String>>>,
   pub dirty: bool,
   output_sink: Option<Arc<dyn AgentOutputSink>>,
@@ -101,7 +100,6 @@ impl Agent {
     messages: Vec<Message>,
     tools: Vec<Tool>,
     session_id: String,
-    temp: bool,
   ) -> Self {
     Self {
       workspace,
@@ -109,7 +107,6 @@ impl Agent {
       messages,
       tools,
       session_id,
-      temp,
       progress_sink: None,
       dirty: false,
       output_sink: None,
@@ -230,7 +227,7 @@ impl Agent {
   }
 
   pub fn persist_if_dirty(&self) -> Result<()> {
-    if !self.dirty || self.temp {
+    if !self.dirty {
       return Ok(());
     }
     session::persist_session_in(&self.workspace, &self.messages, &self.session_id)
@@ -262,6 +259,8 @@ fn first_line(s: &str) -> &str {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::client::Client;
+  use std::path::PathBuf;
 
   #[test]
   fn tool_result_content_reports_errors_to_model() {
@@ -275,5 +274,42 @@ mod tests {
   #[test]
   fn truncate_for_cli_keeps_short_text() {
     assert_eq!(truncate_for_cli("hello   world", 20), "hello world");
+  }
+
+  #[test]
+  fn persist_if_dirty_writes_messages_jsonl() {
+    let root = std::env::temp_dir().join(format!(
+      "ogent-agent-persist-test-{}",
+      crate::session::timestamp_ms()
+    ));
+    let workspace = Workspace::from_root(root.clone());
+    let session_id = "persist-test";
+    let client = Client::new(
+      "http://localhost",
+      "dummy".into(),
+      |_, _| Ok(serde_json::Value::Null),
+      30,
+    )
+    .unwrap();
+    let mut agent = Agent::new(
+      workspace.clone(),
+      client,
+      vec![Message {
+        role: "user".to_string(),
+        content: "hello".to_string(),
+        ..Default::default()
+      }],
+      Vec::new(),
+      session_id.to_string(),
+    );
+    agent.dirty = true;
+
+    agent.persist_if_dirty().unwrap();
+
+    let path = crate::session::session_dir_in(&workspace, session_id).join("messages.jsonl");
+    assert!(path.exists());
+    let data = std::fs::read_to_string(&path).unwrap();
+    assert!(data.contains("\"content\":\"hello\""));
+    let _ = std::fs::remove_dir_all(PathBuf::from(root));
   }
 }

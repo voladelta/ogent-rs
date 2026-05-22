@@ -40,7 +40,7 @@ ogent --profile kimi "Review the staged diff"
 
 - **Worker Mode**: Invocations execute in worker mode.
 - **System Prompt**: It relies on [SYSTEM_PROMPT.md](SYSTEM_PROMPT.md) for its prompt loop, state, and result formatting guidelines.
-- **Temporary Sessions**: CLI runs default to `temp: true`, meaning conversation transcripts (`messages.jsonl`) are not persisted on exit. The agent still writes `states.json` under `.ogent/sessions/{session_id}/` when the `state` tool is used.
+- **Session Persistence**: CLI runs persist conversation transcripts to `.ogent/sessions/{session_id}/messages.jsonl` and write `states.json` in the same directory when the `state` tool is used.
 - **Run Completion**: A run terminates when the agent returns a final message without calling any more tools.
 
 ---

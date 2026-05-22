@@ -87,7 +87,6 @@ async fn run_worker_cli(run: WorkerCliRun<'_>) -> Result<()> {
     messages,
     tools::configured_worker_tools(),
     session_id,
-    true, // temp
   );
   agent.set_output_sink(Some(agent::cli_output_sink()));
   agent.dirty = true;
