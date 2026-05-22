@@ -78,6 +78,9 @@ Use one of: bug, limitation, contract mismatch, non-issue.
 
 Validation note:
 For claims about parsing, repair, escaping, serialization, security, or execution, name the exact before/after value and whether the relevant parser/check accepts it.
+
+Edge-case check:
+After tests pass, inspect the changed logic against one or two nearby untested edge cases that follow from the same contract. Report whether the implementation handles them, or list them under # Risks without broadening the task.
 ```
 
 Use the precision blocks to reduce guessing. Prefer them when the task asks for bounded findings, compares models, reviews parser/security behavior, or depends on a narrow definition of what counts as in scope.
@@ -92,6 +95,7 @@ Before invoking `ogent`, check the contract:
 - Evidence requirements are inspectable by you after the run.
 - Review or investigation tasks include a candidate filter that defines what counts as an in-scope finding.
 - Parser, repair, escaping, serialization, security, or execution tasks include exact value validation when a claim depends on transformation correctness.
+- Editing tasks include an edge-case check when visible tests cover parser, escaping, serialization, state machines, concurrency, or security boundaries.
 
 ## Invocation Patterns
 
