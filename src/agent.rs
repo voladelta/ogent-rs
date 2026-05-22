@@ -6,7 +6,7 @@ use crate::client::{Client, ClientError};
 use crate::session;
 use crate::sse::StreamEvent;
 use crate::tools::{ToolContext, execute_tool};
-use crate::types::{Message, MessageOrigin, Tool, ToolCall};
+use crate::types::{Message, MessageOrigin, Role, Tool, ToolCall};
 use crate::workspace::Workspace;
 
 #[derive(Debug, thiserror::Error)]
@@ -31,7 +31,7 @@ struct CliOutputSink;
 
 impl AgentOutputSink for CliOutputSink {
   fn message(&self, message: &Message) {
-    if message.role == "assistant" && !message.content.trim().is_empty() {
+    if message.role == Role::Assistant && !message.content.trim().is_empty() {
       println!("{}", message.content);
     }
   }
@@ -155,14 +155,7 @@ impl Agent {
         let _ = handle.await;
       }
 
-      let assistant = Message {
-        role: "assistant".to_string(),
-        content: resp.content,
-        origin: MessageOrigin::Model,
-        reasoning_content: resp.reasoning_content,
-        tool_calls: resp.tool_calls,
-        tool_call_id: String::new(),
-      };
+      let assistant = Message::assistant(resp);
       self.messages.push(assistant.clone());
       if streaming_to_sink && !assistant.content.is_empty() {
         if !assistant.content.ends_with('\n') {
@@ -189,14 +182,7 @@ impl Agent {
         let failed = result.is_err();
         let content = tool_result_content(&tool_call.function.name, result);
         self.emit_tool_result(&tool_call.function.name, &content, failed);
-        let tool_message = Message {
-          role: "tool".to_string(),
-          content,
-          origin: MessageOrigin::Tool,
-          reasoning_content: String::new(),
-          tool_calls: Vec::new(),
-          tool_call_id: tool_call.id,
-        };
+        let tool_message = Message::tool_result(tool_call.id, content);
         self.messages.push(tool_message.clone());
         self.emit_message(&tool_message);
       }
@@ -273,11 +259,7 @@ mod tests {
     let mut agent = Agent::new(
       workspace.clone(),
       client,
-      vec![Message {
-        role: "user".to_string(),
-        content: "hello".to_string(),
-        ..Default::default()
-      }],
+      vec![Message::user("hello", MessageOrigin::Human)],
       Vec::new(),
       session_id.to_string(),
     );

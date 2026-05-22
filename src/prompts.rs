@@ -26,19 +26,12 @@ pub(crate) fn build_initial_messages(
   task_prompt: &str,
   session_id: &str,
 ) -> Vec<Message> {
-  let mut messages = vec![Message {
-    role: "system".into(),
-    content: system_prompt.to_string(),
-    origin: MessageOrigin::Internal,
-    ..Default::default()
-  }];
+  let mut messages = vec![Message::system(system_prompt.to_string())];
   enrich_initial_messages(&mut messages);
-  messages.push(Message {
-    role: "user".into(),
-    content: format!("[session: {session_id}]\n\n{}", task_prompt.trim()),
-    origin: MessageOrigin::Human,
-    ..Default::default()
-  });
+  messages.push(Message::user(
+    format!("[session: {session_id}]\n\n{}", task_prompt.trim()),
+    MessageOrigin::Human,
+  ));
   messages
 }
 
@@ -162,19 +155,9 @@ fn xml_escape(s: &str) -> String {
 
 #[cfg(test)]
 pub fn build_messages(prompt: &str) -> Vec<Message> {
-  let mut messages = vec![Message {
-    role: "system".into(),
-    content: SYSTEM_PROMPT.to_string(),
-    origin: MessageOrigin::Internal,
-    ..Default::default()
-  }];
+  let mut messages = vec![Message::system(SYSTEM_PROMPT.to_string())];
   if !prompt.is_empty() {
-    messages.push(Message {
-      role: "user".into(),
-      content: prompt.to_string(),
-      origin: MessageOrigin::Human,
-      ..Default::default()
-    });
+    messages.push(Message::user(prompt.to_string(), MessageOrigin::Human));
   }
   messages
 }
@@ -193,17 +176,13 @@ fn push_internal_user_message(messages: &mut Vec<Message>, content: String) {
   if content.is_empty() {
     return;
   }
-  messages.push(Message {
-    role: "user".into(),
-    content,
-    origin: MessageOrigin::Internal,
-    ..Default::default()
-  });
+  messages.push(Message::user(content, MessageOrigin::Internal));
 }
 
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::types::Role;
 
   #[test]
   fn compose_system_prompt_includes_context() {
@@ -229,10 +208,10 @@ mod tests {
     push_internal_user_message(&mut messages, "internal context".into());
 
     assert_eq!(messages.len(), 3);
-    assert_eq!(messages[1].role, "user");
+    assert_eq!(messages[1].role, Role::User);
     assert_eq!(messages[1].origin, MessageOrigin::Human);
     assert_eq!(messages[1].content, "do the task");
-    assert_eq!(messages[2].role, "user");
+    assert_eq!(messages[2].role, Role::User);
     assert_eq!(messages[2].origin, MessageOrigin::Internal);
     assert_eq!(messages[2].content, "internal context");
   }

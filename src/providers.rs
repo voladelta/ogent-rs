@@ -4,7 +4,7 @@ use std::env;
 
 use crate::client::Client;
 use crate::config::{Profile, ProviderConfig};
-use crate::types::{Message, Tool, ToolCall};
+use crate::types::{Message, Role, Tool, ToolCall};
 
 #[derive(Serialize)]
 struct DeepSeekRequest<'a> {
@@ -62,7 +62,7 @@ struct ZThinking {
 
 #[derive(Serialize)]
 struct ProviderMessage<'a> {
-  role: &'a str,
+  role: &'a Role,
   content: &'a str,
   #[serde(skip_serializing_if = "str::is_empty")]
   reasoning_content: &'a str,
@@ -172,16 +172,11 @@ fn env_key(name: &str) -> Result<String> {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::types::MessageOrigin;
+  use crate::types::{MessageOrigin, Role};
 
   #[test]
   fn provider_message_does_not_serialize_origin() {
-    let message = Message {
-      role: "user".into(),
-      content: "hello".into(),
-      origin: MessageOrigin::Internal,
-      ..Default::default()
-    };
+    let message = Message::user("hello", MessageOrigin::Internal);
     let value = serde_json::to_value(ProviderMessage::from(&message)).unwrap();
     assert!(value.get("origin").is_none());
     assert_eq!(
@@ -198,7 +193,7 @@ mod tests {
   fn kimi_request_omits_tool_choice_without_tools() {
     let tool_calls = Vec::new();
     let messages = vec![ProviderMessage {
-      role: "user",
+      role: &Role::User,
       content: "hello",
       reasoning_content: "",
       tool_calls: &tool_calls,

@@ -1,7 +1,7 @@
 use futures_util::StreamExt;
 use serde::{Deserialize, Deserializer};
 
-use crate::types::{ChatResponse, FunctionCall, ToolCall, Usage};
+use crate::types::{ChatResponse, ToolCall, Usage};
 
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
@@ -81,14 +81,71 @@ struct AccToolCall {
 
 impl AccToolCall {
   fn into_tool_call(self) -> ToolCall {
-    ToolCall {
-      id: self.id,
-      kind: self.kind,
-      function: FunctionCall {
-        name: self.name,
-        arguments: repair_tool_arguments_json(&self.arguments),
-      },
+    ToolCall::function(
+      self.id,
+      self.name,
+      repair_tool_arguments_json(&self.arguments),
+    )
+  }
+}
+
+#[derive(Default)]
+struct ChatAccumulator {
+  response: ChatResponse,
+  tool_calls: Vec<AccToolCall>,
+  emitted_tool_calling: bool,
+}
+
+impl ChatAccumulator {
+  fn apply(&mut self, chunk: StreamChunk) -> Vec<StreamEvent> {
+    let mut events = Vec::new();
+    if let Some(usage) = chunk.usage {
+      self.response.usage = usage;
     }
+    for choice in chunk.choices {
+      if let Some(reasoning_content) = choice.delta.reasoning_content {
+        events.push(StreamEvent::Reasoning(reasoning_content.clone()));
+        self.response.reasoning_content.push_str(&reasoning_content);
+      }
+      if let Some(content) = choice.delta.content {
+        events.push(StreamEvent::Content(content.clone()));
+        self.response.content.push_str(&content);
+      }
+      if !choice.delta.tool_calls.is_empty() && !self.emitted_tool_calling {
+        self.emitted_tool_calling = true;
+        events.push(StreamEvent::ToolCalling);
+      }
+      for tc in choice.delta.tool_calls {
+        if tc.index >= self.tool_calls.len() {
+          self.tool_calls.resize_with(tc.index + 1, AccToolCall::default);
+        }
+        let a = &mut self.tool_calls[tc.index];
+        if !tc.id.is_empty() {
+          a.id = tc.id;
+        }
+        if !tc.kind.is_empty() {
+          a.kind = tc.kind;
+        }
+        if let Some(name) = tc.function.name
+          && !name.is_empty()
+        {
+          a.name = name;
+        }
+        if let Some(args) = tc.function.arguments {
+          a.arguments.push_str(&args);
+        }
+      }
+    }
+    events
+  }
+
+  fn finish(mut self) -> ChatResponse {
+    self.response.tool_calls.extend(
+      std::mem::take(&mut self.tool_calls)
+        .into_iter()
+        .map(AccToolCall::into_tool_call),
+    );
+    self.response
   }
 }
 
@@ -140,14 +197,6 @@ fn repair_tool_arguments_json(arguments: &str) -> String {
   }
 }
 
-fn flush_tool_calls(acc: &mut Vec<AccToolCall>, result: &mut ChatResponse) {
-  result.tool_calls.extend(
-    std::mem::take(acc)
-      .into_iter()
-      .map(AccToolCall::into_tool_call),
-  );
-}
-
 fn truncate_for_log(s: &str, limit: usize) -> String {
   if s.len() <= limit {
     return s.to_string();
@@ -166,13 +215,28 @@ async fn send_event(tx: &mut Option<tokio::sync::mpsc::Sender<StreamEvent>>, ev:
   }
 }
 
+fn parse_sse_data_line(line: &str) -> Option<StreamChunk> {
+  let data = line.strip_prefix("data:")?.trim_start();
+  if data == "[DONE]" {
+    return None;
+  }
+  match serde_json::from_str::<StreamChunk>(data) {
+    Ok(chunk) => Some(chunk),
+    Err(_) => {
+      eprintln!(
+        "failed to parse sse data chunk: {}",
+        truncate_for_log(data, 240)
+      );
+      None
+    }
+  }
+}
+
 pub async fn parse_sse_response(
   resp: reqwest::Response,
   mut stream_tx: Option<tokio::sync::mpsc::Sender<StreamEvent>>,
 ) -> Result<ChatResponse, SseError> {
-  let mut result = ChatResponse::default();
-  let mut acc: Vec<AccToolCall> = Vec::new();
-  let mut tool_calling = false;
+  let mut accumulator = ChatAccumulator::default();
   let mut stream = resp.bytes_stream();
   let mut buf = String::new();
   let mut consumed = 0;
@@ -183,14 +247,11 @@ pub async fn parse_sse_response(
     while let Some(pos) = buf[consumed..].find('\n') {
       let abs_pos = consumed + pos;
       let line = buf[consumed..abs_pos].trim_end_matches('\r');
-      process_line(
-        line,
-        &mut result,
-        &mut acc,
-        &mut stream_tx,
-        &mut tool_calling,
-      )
-      .await;
+      if let Some(chunk) = parse_sse_data_line(line) {
+        for ev in accumulator.apply(chunk) {
+          send_event(&mut stream_tx, ev).await;
+        }
+      }
       consumed = abs_pos + 1;
     }
     if consumed > 0 {
@@ -199,195 +260,95 @@ pub async fn parse_sse_response(
     }
   }
   if !buf[consumed..].is_empty() {
-    process_line(
-      buf[consumed..].trim_end_matches('\r'),
-      &mut result,
-      &mut acc,
-      &mut stream_tx,
-      &mut tool_calling,
-    )
-    .await;
-  }
-  flush_tool_calls(&mut acc, &mut result);
-  Ok(result)
-}
-
-async fn process_line(
-  line: &str,
-  result: &mut ChatResponse,
-  acc: &mut Vec<AccToolCall>,
-  stream_tx: &mut Option<tokio::sync::mpsc::Sender<StreamEvent>>,
-  tool_calling: &mut bool,
-) {
-  let Some(data) = line.strip_prefix("data:") else {
-    return;
-  };
-  let data = data.trim_start();
-  if data == "[DONE]" {
-    return;
-  }
-  let Ok(chunk) = serde_json::from_str::<StreamChunk>(data) else {
-    eprintln!(
-      "failed to parse sse data chunk: {}",
-      truncate_for_log(data, 240)
-    );
-    return;
-  };
-  if let Some(usage) = chunk.usage {
-    result.usage = usage;
-  }
-  for choice in chunk.choices {
-    if let Some(reasoning_content) = choice.delta.reasoning_content {
-      send_event(stream_tx, StreamEvent::Reasoning(reasoning_content.clone())).await;
-      result.reasoning_content.push_str(&reasoning_content);
-    }
-    if let Some(content) = choice.delta.content {
-      send_event(stream_tx, StreamEvent::Content(content.clone())).await;
-      result.content.push_str(&content);
-    }
-    if !choice.delta.tool_calls.is_empty() && !*tool_calling {
-      *tool_calling = true;
-      send_event(stream_tx, StreamEvent::ToolCalling).await;
-    }
-    for tc in choice.delta.tool_calls {
-      if tc.index >= acc.len() {
-        acc.resize_with(tc.index + 1, AccToolCall::default);
-      }
-      let a = &mut acc[tc.index];
-      if !tc.id.is_empty() {
-        a.id = tc.id;
-      }
-      if !tc.kind.is_empty() {
-        a.kind = tc.kind;
-      }
-      if let Some(name) = tc.function.name
-        && !name.is_empty()
-      {
-        a.name = name;
-      }
-      if let Some(args) = tc.function.arguments {
-        a.arguments.push_str(&args);
+    if let Some(chunk) = parse_sse_data_line(buf[consumed..].trim_end_matches('\r')) {
+      for ev in accumulator.apply(chunk) {
+        send_event(&mut stream_tx, ev).await;
       }
     }
   }
+  Ok(accumulator.finish())
 }
 
 #[cfg(test)]
 mod tests {
   use super::*;
 
+  fn apply_line(acc: &mut ChatAccumulator, line: &str) -> Vec<StreamEvent> {
+    let chunk = parse_sse_data_line(line).expect("valid test line");
+    acc.apply(chunk)
+  }
+
   #[tokio::test]
-  async fn process_line_accumulates_tool_args() {
-    let mut resp = ChatResponse::default();
-    let mut acc = Vec::new();
-    let mut tc = false;
-    process_line(
+  async fn accumulator_applies_tool_call_chunks() {
+    let mut acc = ChatAccumulator::default();
+    apply_line(
+      &mut acc,
       r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"x","type":"function","function":{"name":"bash","arguments":"{\"command\""}}]}}]}"#,
-      &mut resp,
+    );
+    apply_line(
       &mut acc,
-      &mut None,
-      &mut tc,
-    ).await;
-    process_line(
       r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":":\"ls\""}}]}}]}"#,
-      &mut resp,
-      &mut acc,
-      &mut None,
-      &mut tc,
-    ).await;
-    assert_eq!(acc.first().unwrap().arguments, "{\"command\":\"ls\"");
+    );
+    assert_eq!(acc.tool_calls.first().unwrap().arguments, "{\"command\":\"ls\"");
   }
 
   #[tokio::test]
-  async fn process_line_accepts_null_content_chunks() {
-    let mut resp = ChatResponse::default();
-    let mut acc = Vec::new();
-    let mut tc = false;
-    process_line(
+  async fn accumulator_accepts_null_content_chunks() {
+    let mut acc = ChatAccumulator::default();
+    apply_line(
+      &mut acc,
       r#"data: {"choices":[{"delta":{"content":null,"reasoning_content":"thinking"}}]}"#,
-      &mut resp,
+    );
+    apply_line(
       &mut acc,
-      &mut None,
-      &mut tc,
-    )
-    .await;
-    process_line(
       r#"data: {"choices":[{"delta":{"content":"hello","reasoning_content":null}}]}"#,
-      &mut resp,
-      &mut acc,
-      &mut None,
-      &mut tc,
-    )
-    .await;
-    assert_eq!(resp.reasoning_content, "thinking");
-    assert_eq!(resp.content, "hello");
+    );
+    assert_eq!(acc.response.reasoning_content, "thinking");
+    assert_eq!(acc.response.content, "hello");
   }
 
   #[tokio::test]
-  async fn process_line_accepts_null_function_fields() {
-    let mut resp = ChatResponse::default();
-    let mut acc = Vec::new();
-    let mut tc = false;
-    process_line(
+  async fn accumulator_accepts_null_function_fields() {
+    let mut acc = ChatAccumulator::default();
+    apply_line(
+      &mut acc,
       r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"x","type":"function","function":{"name":"read_file","arguments":""}}]}}]}"#,
-      &mut resp,
+    );
+    apply_line(
       &mut acc,
-      &mut None,
-      &mut tc,
-    ).await;
-    process_line(
       r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":null,"arguments":"{\"path\": \"README.md"}}]}}]}"#,
-      &mut resp,
+    );
+    apply_line(
       &mut acc,
-      &mut None,
-      &mut tc,
-    ).await;
-    process_line(
       r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":null,"arguments":"\"}"}}]}}]}"#,
-      &mut resp,
-      &mut acc,
-      &mut None,
-      &mut tc,
-    ).await;
-    flush_tool_calls(&mut acc, &mut resp);
+    );
+    let resp = acc.finish();
     let tc = resp.tool_calls.first().unwrap();
     assert_eq!(tc.function.name, "read_file");
     assert_eq!(tc.function.arguments, "{\"path\": \"README.md\"}");
   }
 
   #[tokio::test]
-  async fn process_line_accepts_null_tool_calls() {
-    let mut resp = ChatResponse::default();
-    let mut acc = Vec::new();
-    let mut tc = false;
-    process_line(
-      r#"data: {"choices":[{"delta":{"content":"hello","reasoning_content":"thinking","tool_calls":null}}]}"#,
-      &mut resp,
+  async fn accumulator_accepts_null_tool_calls() {
+    let mut acc = ChatAccumulator::default();
+    apply_line(
       &mut acc,
-      &mut None,
-      &mut tc,
-    )
-    .await;
-    assert_eq!(resp.reasoning_content, "thinking");
-    assert_eq!(resp.content, "hello");
-    assert!(acc.is_empty());
-    assert!(!tc);
+      r#"data: {"choices":[{"delta":{"content":"hello","reasoning_content":"thinking","tool_calls":null}}]}"#,
+    );
+    assert_eq!(acc.response.reasoning_content, "thinking");
+    assert_eq!(acc.response.content, "hello");
+    assert!(acc.tool_calls.is_empty());
+    assert!(!acc.emitted_tool_calling);
   }
 
   #[tokio::test]
-  async fn process_line_accepts_null_function_object() {
-    let mut resp = ChatResponse::default();
-    let mut acc = Vec::new();
-    let mut tc = false;
-    process_line(
-      r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"x","type":"function","function":null}]}}]}"#,
-      &mut resp,
+  async fn accumulator_accepts_null_function_object() {
+    let mut acc = ChatAccumulator::default();
+    apply_line(
       &mut acc,
-      &mut None,
-      &mut tc,
-    )
-    .await;
-    flush_tool_calls(&mut acc, &mut resp);
+      r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"x","type":"function","function":null}]}}]}"#,
+    );
+    let resp = acc.finish();
     let tc = resp.tool_calls.first().unwrap();
     assert_eq!(tc.id, "x");
     assert_eq!(tc.kind, "function");
@@ -396,16 +357,19 @@ mod tests {
   }
 
   #[test]
-  fn flush_tool_calls_repairs_missing_closing_delimiters() {
-    let mut resp = ChatResponse::default();
-    let mut acc = vec![AccToolCall {
-      id: "x".to_string(),
-      kind: "function".to_string(),
-      name: "write_file".to_string(),
-      arguments: r#"{"path":"out.txt","content":"fix it""#.to_string(),
-    }];
+  fn finish_repairs_missing_closing_delimiters() {
+    let acc = ChatAccumulator {
+      response: ChatResponse::default(),
+      tool_calls: vec![AccToolCall {
+        id: "x".to_string(),
+        kind: "function".to_string(),
+        name: "write_file".to_string(),
+        arguments: r#"{"path":"out.txt","content":"fix it""#.to_string(),
+      }],
+      emitted_tool_calling: false,
+    };
 
-    flush_tool_calls(&mut acc, &mut resp);
+    let resp = acc.finish();
 
     let tc = resp.tool_calls.first().unwrap();
     assert_eq!(
