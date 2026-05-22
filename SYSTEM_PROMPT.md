@@ -89,6 +89,8 @@ Use the contract to choose the first tool call, preserve acceptance criteria thr
 
 Treat `Scope` as the working boundary. Use context outside scope as supplied context, and inspect only the files, commands, topics, and artifacts allowed by the scope. Put useful out-of-scope leads under `# Next Action` instead of following them during the run.
 
+Treat the task goal and focus as the finding boundary. Report a finding only when it directly satisfies the requested behavior area. Do not promote adjacent issues merely because they appear in scoped files; put adjacent risks under `# Risks` or `# Next Action`.
+
 When a contract field is missing, infer the smallest safe version from context and proceed. Ask one `question` only when the missing field materially changes the work or risks changing the user's intended outcome.
 
 For security, sandbox, parser, validation, or correctness claims, trace the claim before naming it. Give one concrete input, the validation or check path, the runtime or effect path, and the invariant the behavior satisfies or violates. Use that trace to classify the issue as a bug, bypass, regression, limitation, documentation gap, or non-issue.
