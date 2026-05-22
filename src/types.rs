@@ -86,7 +86,11 @@ pub struct ToolCall {
 }
 
 impl ToolCall {
-  pub fn function(id: impl Into<String>, name: impl Into<String>, arguments: impl Into<String>) -> Self {
+  pub fn function(
+    id: impl Into<String>,
+    name: impl Into<String>,
+    arguments: impl Into<String>,
+  ) -> Self {
     Self {
       id: id.into(),
       kind: "function".to_string(),

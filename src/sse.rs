@@ -117,7 +117,9 @@ impl ChatAccumulator {
       }
       for tc in choice.delta.tool_calls {
         if tc.index >= self.tool_calls.len() {
-          self.tool_calls.resize_with(tc.index + 1, AccToolCall::default);
+          self
+            .tool_calls
+            .resize_with(tc.index + 1, AccToolCall::default);
         }
         let a = &mut self.tool_calls[tc.index];
         if !tc.id.is_empty() {
@@ -289,7 +291,10 @@ mod tests {
       &mut acc,
       r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":":\"ls\""}}]}}]}"#,
     );
-    assert_eq!(acc.tool_calls.first().unwrap().arguments, "{\"command\":\"ls\"");
+    assert_eq!(
+      acc.tool_calls.first().unwrap().arguments,
+      "{\"command\":\"ls\""
+    );
   }
 
   #[tokio::test]

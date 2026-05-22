@@ -8,7 +8,7 @@ main.rs
   -> agent.rs
     -> workspace.rs
     -> client.rs + providers.rs + sse.rs
-    -> tools.rs + session.rs
+    -> tools/ + session.rs
       -> hashline.rs
       -> symbol_tree.rs
 ```
@@ -28,8 +28,13 @@ main.rs
   - Prevents the agent from executing commands or accessing files outside the workspace root.
 - [src/client.rs](file:///Users/mbp/Codehub/ogent-rs/src/client.rs), [src/providers.rs](file:///Users/mbp/Codehub/ogent-rs/src/providers.rs), [src/sse.rs](file:///Users/mbp/Codehub/ogent-rs/src/sse.rs)
   - LLM client initialization, provider payload generation, Server-Sent Events (SSE) parsing, and partial JSON argument repair.
-- [src/tools.rs](file:///Users/mbp/Codehub/ogent-rs/src/tools.rs)
-  - Worker tool schemas, arguments parsing, and backend execution (filesystem, web, bash).
+- [src/tools/mod.rs](file:///Users/mbp/Codehub/ogent-rs/src/tools/mod.rs)
+  - Tool registry (`ToolDef`), dispatch, and schema collection. Submodules own each domain:
+    - `fs.rs` — read_file, write_file, hash-anchor read/edit.
+    - `shell.rs` — bash execution and cd policy.
+    - `repo.rs` — repo_map and code_map.
+    - `web.rs` — Exa web API client.
+    - `skills.rs` — load_skill.
 - [src/session.rs](file:///Users/mbp/Codehub/ogent-rs/src/session.rs)
   - Transcript persistence and workspace-scoped session state routing.
 - [src/prompts.rs](file:///Users/mbp/Codehub/ogent-rs/src/prompts.rs)
@@ -49,12 +54,12 @@ Use this map to locate source files for specific request areas:
 | --- | --- | --- |
 | CLI flags and worker launch | [src/main.rs](file:///Users/mbp/Codehub/ogent-rs/src/main.rs) | [README.md](file:///Users/mbp/Codehub/ogent-rs/README.md) |
 | Worker loop and execution | [src/agent.rs](file:///Users/mbp/Codehub/ogent-rs/src/agent.rs) | [SYSTEM_PROMPT.md](file:///Users/mbp/Codehub/ogent-rs/SYSTEM_PROMPT.md) |
-| Tool schemas and behavior | [src/tools.rs](file:///Users/mbp/Codehub/ogent-rs/src/tools.rs) | [src/hashline.rs](file:///Users/mbp/Codehub/ogent-rs/src/hashline.rs) |
+| Tool schemas and behavior | [src/tools/mod.rs](file:///Users/mbp/Codehub/ogent-rs/src/tools/mod.rs) | [src/hashline.rs](file:///Users/mbp/Codehub/ogent-rs/src/hashline.rs) |
 | System prompt and initial messages | [src/prompts.rs](file:///Users/mbp/Codehub/ogent-rs/src/prompts.rs) | [SYSTEM_PROMPT.md](file:///Users/mbp/Codehub/ogent-rs/SYSTEM_PROMPT.md) |
 | Session routing | [src/session.rs](file:///Users/mbp/Codehub/ogent-rs/src/session.rs) | [src/workspace.rs](file:///Users/mbp/Codehub/ogent-rs/src/workspace.rs) |
-| Workspace path validation | [src/workspace.rs](file:///Users/mbp/Codehub/ogent-rs/src/workspace.rs) | [src/tools.rs](file:///Users/mbp/Codehub/ogent-rs/src/tools.rs) |
-| Anchored editing mechanics | [src/hashline.rs](file:///Users/mbp/Codehub/ogent-rs/src/hashline.rs) | [src/tools.rs](file:///Users/mbp/Codehub/ogent-rs/src/tools.rs) |
-| Symbol mapping & AST parsing | [src/symbol_tree.rs](file:///Users/mbp/Codehub/ogent-rs/src/symbol_tree.rs) | [src/tools.rs](file:///Users/mbp/Codehub/ogent-rs/src/tools.rs) |
+| Workspace path validation | [src/workspace.rs](file:///Users/mbp/Codehub/ogent-rs/src/workspace.rs) | [src/tools/fs.rs](file:///Users/mbp/Codehub/ogent-rs/src/tools/fs.rs) |
+| Anchored editing mechanics | [src/hashline.rs](file:///Users/mbp/Codehub/ogent-rs/src/hashline.rs) | [src/tools/fs.rs](file:///Users/mbp/Codehub/ogent-rs/src/tools/fs.rs) |
+| Symbol mapping & AST parsing | [src/symbol_tree.rs](file:///Users/mbp/Codehub/ogent-rs/src/symbol_tree.rs) | [src/tools/repo.rs](file:///Users/mbp/Codehub/ogent-rs/src/tools/repo.rs) |
 
 ---
 
