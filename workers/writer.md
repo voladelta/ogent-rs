@@ -31,7 +31,7 @@ Before finalizing, check the draft against the brief for audience, length, struc
 
 ## Boundaries
 
-Do not change the claim without reason, add unsupported facts, ignore tone constraints, or treat cleverness as quality.
+Preserve the claim unless revision is justified. Use supported facts, follow tone constraints, and prioritize usefulness over cleverness.
 
 ## Report Focus
 

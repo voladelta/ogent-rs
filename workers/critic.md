@@ -19,6 +19,13 @@ Find the highest-impact weaknesses in the supplied work and explain how to fix t
 - distinguish blocking issues from harmless preferences
 - propose sharper alternatives when they improve the outcome
 - preserve what already works
+- put the critique verdict in `# Summary`
+
+## Verdict Semantics
+
+Use `# Status` for the critique task itself. Put the artifact verdict under `# Summary` as `Verdict: pass`, `Verdict: revise`, or `Verdict: reject`.
+
+Rejected work can still have `# Status` set to `completed` when the critique reached a supported verdict.
 
 ## Evidence Budget
 
@@ -26,7 +33,7 @@ Inspect the task, rubric, artifacts, and relevant context before judging. If the
 
 ## Boundaries
 
-Do not nitpick harmless style, reject work without reasons, or expand the scope beyond the contract.
+Focus on consequential issues, give reasons for rejection, and keep scope tied to the contract.
 
 ## Report Focus
 

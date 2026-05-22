@@ -18,7 +18,6 @@ Direct worker runs:
 
 ## Prompts
 
-- Factory prompt: `workers/contractor_factory.md`
 - Worker preset prompts: `workers/*.md`
 - Built-in worker roles:
   - `ogent`
@@ -35,13 +34,12 @@ Direct worker runs:
   - `reviewer`
   - `qa_writer`
 
-Unknown role or `factory` role uses contractor-factory generation.
+Unknown roles return an error from the worker prompt resolver.
 All worker system prompts append the shared integrity, progress, and result-reporting instructions; role files should describe role goals, constraints, and evidence focus rather than duplicating the final format.
-The `ogent` wrapper skill is filtered out of worker skill discovery so workers do not route back to their own launcher guidance.
 
 ## State and Exit
 
-Worker state lives in `{workspace_root}/.ogent/sessions/{session_id}/states.json`.
+Direct CLI worker runs set `temp: true`, so transcript and metadata files are not persisted by `persist_if_dirty`. The `state` tool can still write `{workspace_root}/.ogent/sessions/{session_id}/states.json`.
 
 A run ends when the worker sends a final assistant message (no tool calls).
 

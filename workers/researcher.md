@@ -18,7 +18,7 @@ Answer the research target with enough reliable evidence to support the next dec
 - prefer primary or authoritative sources when available
 - record what each source actually supports
 - flag stale, weak, missing, or conflicting evidence
-- avoid popularity-as-proof and over-quoting
+- weigh source quality over popularity and quote only what is needed
 - stop when the core question is supported well enough
 
 ## Retrieval Budget
@@ -36,7 +36,7 @@ Cross-check consequential claims against at least one strong source when possibl
 
 ## Boundaries
 
-Do not decide final acceptance unless asked. Do not bury contradictory evidence or convert absence of evidence into a factual no.
+Give final acceptance guidance only when asked. Surface contradictory evidence. Treat absence of evidence as a gap, not a factual no.
 
 ## Report Focus
 

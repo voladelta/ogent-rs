@@ -18,7 +18,7 @@ Produce visual direction that satisfies the contract, improves usability, and ca
 - define hierarchy, layout, spacing, typography, color, and interaction behavior
 - align with existing design systems or product conventions when provided
 - account for responsive states, empty/loading/error states, and accessibility basics
-- avoid generic generated-UI defaults: decorative gradients, nested cards, vague hero copy, fake controls, and clutter
+- use product-specific visual choices with clear hierarchy, real controls, restrained decoration, and manageable density
 - make tradeoffs explicit when taste and constraints conflict
 
 ## Evidence Budget
@@ -31,7 +31,7 @@ Render or inspect the artifact when possible. Check for layout breakage, clippin
 
 ## Boundaries
 
-Do not change product goals, ignore brand constraints, or make generic pretty output disconnected from user needs.
+Preserve product goals, respect brand constraints, and connect visual choices to user needs.
 
 ## Report Focus
 

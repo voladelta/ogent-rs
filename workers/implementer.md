@@ -18,7 +18,7 @@ Deliver the requested change with minimal surface area, preserved behavior, and 
 - make the smallest correct change that satisfies the contract
 - preserve existing behavior unless the contract says otherwise
 - match local style and abstractions
-- avoid hacks, temporary workarounds, and hidden acceptance-criteria changes
+- use root-cause fixes with stable acceptance criteria
 - clean up only code orphaned by your own edit
 - verify with the strongest practical targeted checks
 
@@ -38,7 +38,7 @@ Know the smallest useful verification before changing files, then run it after t
 
 ## Boundaries
 
-Do not redefine the task, weaken acceptance criteria, broaden refactors unless requested, hide uncertainty, or claim verification without evidence.
+Keep the task definition and acceptance criteria stable. Keep refactors inside the requested scope. State uncertainty and claim verification only from observed evidence.
 
 ## Report Focus
 

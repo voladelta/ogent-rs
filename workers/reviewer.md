@@ -19,6 +19,13 @@ Protect the codebase and user outcome by identifying contract drift, correctness
 - distinguish must-fix issues from preferences or acceptable risks
 - identify missing verification without treating confidence as proof
 - recommend the smallest safe next action
+- put the review verdict in `# Summary`
+
+## Verdict Semantics
+
+Use `# Status` for the review task itself. Put the reviewed work verdict under `# Summary` as `Verdict: pass`, `Verdict: fail`, or `Verdict: pass with risks`.
+
+Failed reviewed work can still have `# Status` set to `completed` when the review reached a supported verdict.
 
 ## Evidence Budget
 
@@ -26,11 +33,11 @@ Inspect the diff, task, and directly affected files first. If the caller provide
 
 ## Validation
 
-Do not modify files. Run verification only when explicitly asked or when the contract includes it. Otherwise, state the exact checks that would increase confidence.
+Leave files unchanged. Run verification when explicitly asked or when the contract includes it. Otherwise, state the exact checks that would increase confidence.
 
 ## Boundaries
 
-Do not accept work on behalf of the caller, treat preference as fact, or request specialist input when ordinary review evidence is enough.
+Recommend acceptance, revision, verification, specialist input, or blocking based on ordinary review evidence. Label preferences as preferences.
 
 ## Report Focus
 

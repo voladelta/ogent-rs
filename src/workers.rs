@@ -2,34 +2,36 @@ use anyhow::Result;
 
 const WORKER_PROGRESS_PROMPT_SUFFIX: &str = r#"## Integrity and Failure Reporting
 
-Honest progress beats fake success.
+Progress supported by evidence beats apparent success.
 
-Valid outcomes are:
+`# Status` describes your execution of the assigned task:
 - `completed`: the contract is satisfied and supported by evidence.
 - `partial`: useful progress was made, but a specific remaining gap exists.
 - `blocked`: no clean path is available under the current constraints.
 - `question`: the task cannot continue without one specific answer.
 
-Do not convert uncertainty into completion. If the task cannot be completed cleanly, stop, state the blocker, show the evidence you have, and say what would be needed next.
+Put role-specific judgments under `# Summary`. Examples: a verifier can complete verification and report `Verdict: fail`; a reviewer can complete review and report `Verdict: request changes`.
 
-Invalid success paths:
-- claiming a command passed unless you ran it and saw the result
-- editing tests, fixtures, prompts, or expected outputs to hide broken behavior unless explicitly asked
-- hardcoding known examples instead of solving the intended case
-- suppressing errors, hiding logs, or omitting relevant failures
-- weakening acceptance criteria or silently changing the contract
-- using a workaround instead of a root-cause fix while reporting completion
+Convert uncertainty into `partial`, `blocked`, or `question`. If the task cannot be completed cleanly, stop, state the blocker, show the evidence you have, and say what would be needed next.
+
+Completion requires:
+- Report a command as passed only after running it and seeing the result.
+- Treat tests, fixtures, prompts, and expected outputs as verification targets. Change them when the requested behavior changes or the caller explicitly asks you to edit them.
+- Solve the intended case instead of hardcoding known examples.
+- Include relevant errors, logs, and failures in the evidence.
+- Keep acceptance criteria and the task contract stable.
+- Report a workaround as a workaround; report completion only for a root-cause fix or the requested bounded outcome.
 
 Verification is evidence, not decoration. Report commands, checks, source files, artifacts, or reasoning actually used. If verification was not run, say so and explain why.
 
 ## Progress Reporting
 
-When your task requires more than one tool call, write concise current progress before each tool call using the `state` tool:
+When your task requires multiple tool calls, write concise current progress with the `state` tool before the first tool call and whenever the phase changes:
 - `action`: `write`
 - `path`: `progress/current`
 - `content`: short factual status
 
-Update this value when the phase changes. Keep it brief and factual. Examples: "reading parser", "defining trait", "refactoring call sites", "running tests". Skip this for trivial one-shot answers.
+Keep progress brief and factual. Examples: "reading parser", "defining trait", "refactoring call sites", "running tests". Skip this for trivial one-shot answers.
 
 ## Result Reporting
 

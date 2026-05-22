@@ -1,6 +1,6 @@
 # ogent Agent Guide
 
-`ogent` currently runs as a single worker-mode coding agent from the CLI. Codex or another outer caller is expected to prepare the task, launch one `ogent` worker, inspect its transcript/result, verify, and relaunch when needed.
+`ogent` currently runs as a single worker-mode coding agent from the CLI. Codex or another outer caller is expected to prepare the task, launch one `ogent` worker, inspect its result, verify, and relaunch when needed.
 
 ## Operating Rules
 
@@ -28,9 +28,9 @@ CLI
 - `src/workspace.rs`: explicit workspace root and path resolution.
 - `src/client.rs`, `src/providers.rs`, `src/sse.rs`: provider request construction, HTTP client, and SSE response parsing.
 - `src/tools.rs`: worker tool schemas and execution (`read_file`, `write_file`, `bash`, `repo_map`, `code_map`, web tools, `state`, hashline editing).
-- `src/workers.rs`: worker role prompt resolution, contractor-factory role generation, shared worker progress/result prompt injection.
+- `src/workers.rs`: worker role prompt resolution and shared worker integrity/progress/result prompt injection.
 - `src/session.rs`: workspace-scoped session meta/messages/state paths and persistence.
-- `src/prompts.rs`: factory prompt, built-in worker prompts, skill discovery/injection.
+- `src/prompts.rs`: built-in worker prompts and skill discovery/injection.
 - `src/symbol_tree.rs`: tree-sitter based symbol extraction for `code_map` (Rust and Go).
 
 Removed legacy surfaces:
@@ -47,7 +47,7 @@ Removed legacy surfaces:
 | CLI flags and worker launch | `src/main.rs` | `docs/reference.md`, `README.md` |
 | Worker loop / exit / compaction reminders | `src/agent.rs` | `docs/agent-guide.md`, `ARCHITECTURE.md` |
 | Tool schema/behavior | `src/tools.rs` | `src/workers.rs`, `docs/reference.md` |
-| Role prompt resolution | `src/workers.rs` | `workers/*.md`, `workers/contractor_factory.md` |
+| Role prompt resolution | `src/workers.rs` | `workers/*.md` |
 | Session/state pathing | `src/session.rs` | `src/workspace.rs`, `src/tools.rs` |
 | Prompt loading and built-ins | `src/prompts.rs` | `workers/*.md`, `docs/agent-guide.md` |
 | Anchored editing | `src/hashline.rs` | `src/tools.rs`, `docs/reference.md` |
@@ -56,7 +56,7 @@ Removed legacy surfaces:
 
 ## Runtime State
 
-Current worker run layout:
+Session persistence paths:
 
 ```txt
 {workspace_root}/.ogent/
@@ -67,9 +67,10 @@ Current worker run layout:
       states.json
 ```
 
-- `messages.jsonl` is the inspectable transcript.
-- `states.json` is worker-owned runtime state.
-- Workers are prompted to write `progress/current` when a task spans multiple tool calls.
+- Direct CLI runs set `temp: true`, so `meta.json` and `messages.jsonl` are not persisted by `persist_if_dirty`.
+- The `state` tool can still write `states.json`, including `progress/current` when a task spans multiple tool calls.
+- Non-temp or embedded runs can persist `meta.json` and `messages.jsonl`.
+- Embedded worker scopes can still persist under `{parent_session}/workers/{worker_id}/`, but the active CLI launches one direct worker and does not expose worker-dispatch tools.
 
 ## Key Invariants
 

@@ -19,9 +19,10 @@ ogent --role reviewer --profile kimi "Review the staged diff"
 
 Worker runs:
 
-- resolve the requested role through built-in worker prompts or the contractor factory
+- resolve the requested role through built-in worker prompts
 - expose worker tools only
-- write transcript/state under `.ogent/sessions/{session_id}/`
+- run in temporary mode, so transcript and metadata are not persisted by `persist_if_dirty`
+- write state under `.ogent/sessions/{session_id}/states.json` when the `state` tool is used
 - exit when the model sends a final assistant message with no tool calls
 
 ## Worker Tools
@@ -53,5 +54,4 @@ Director orchestration tools such as `dispatch_workers`, `wait_workers`, `inspec
       states.json
 ```
 
-`messages.jsonl` is the inspectable transcript. `states.json` is worker-owned runtime state,
-including `progress/current` when the worker reports progress.
+Direct CLI runs do not persist `messages.jsonl` or `meta.json`. `states.json` is worker-owned runtime state, including `progress/current` when the worker reports progress.

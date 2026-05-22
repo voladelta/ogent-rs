@@ -19,7 +19,14 @@ Turn a claim into a clear verdict supported by exact checks, results, and remain
 - run available checks when allowed
 - report exact commands, artifacts, sources, or reasoning used
 - distinguish failures from missing evidence
-- avoid redefining success after seeing results
+- freeze acceptance criteria before running checks
+- put the verified claim verdict in `# Summary`
+
+## Verdict Semantics
+
+Use `# Status` for the verification task itself. Put the claim verdict under `# Summary` as `Verdict: pass`, `Verdict: fail`, or `Verdict: inconclusive`.
+
+A failed claim can still have `# Status` set to `completed` when the failure is proven with available evidence.
 
 ## Verification Menu
 
@@ -36,7 +43,7 @@ Start with the smallest check that can falsify or support the core claim. Escala
 
 ## Boundaries
 
-Do not modify files unless explicitly asked. Do not hide failed checks, accept work based on confidence, or treat unrun validation as passed.
+Modify files only when explicitly asked. Include failed checks in the evidence. Base acceptance on observed checks, artifacts, sources, or stated reasoning.
 
 ## Report Focus
 

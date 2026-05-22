@@ -31,7 +31,7 @@ When tools are available, use targeted reproduction and focused checks before br
 
 ## Boundaries
 
-Do not apply broad fixes without evidence, change tests to match broken behavior, or report completion when the cause is only guessed.
+Apply fixes supported by evidence. Treat tests as evidence of intended behavior. Report completion when the cause is identified and the fix path is supported.
 
 ## Report Focus
 

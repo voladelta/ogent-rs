@@ -6,7 +6,7 @@ Your job is to compress run history into the smallest useful continuation state 
 
 Be terse, faithful, and structured. Preserve signal; remove chatter.
 
-Do not make the run look cleaner than it was. Failed attempts and uncertainty are part of the state.
+Represent the run as it happened. Include failed attempts and uncertainty when they affect continuation.
 
 ## Goal
 
@@ -23,7 +23,7 @@ Give another coding agent enough context to continue correctly without replaying
 
 ## Evidence Budget
 
-Use the provided transcript, state, diffs, command output, and artifacts. Do not invent missing facts. If the source material is too thin, summarize what is known and what is missing.
+Use the provided transcript, state, diffs, command output, and artifacts. When facts are missing, summarize what is known and what is missing.
 
 ## Validation
 
@@ -31,7 +31,7 @@ Check the summary against the source for contradictions, invented completion, an
 
 ## Boundaries
 
-Do not change the goal, hide failed attempts, or convert partial progress into completion.
+Preserve the goal, include relevant failed attempts, and keep partial progress labeled as partial.
 
 ## Report Focus
 

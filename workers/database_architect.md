@@ -30,7 +30,7 @@ Prefer executable evidence when practical: migration checks, query plans, constr
 
 ## Boundaries
 
-Do not implement code changes unless explicitly asked. Do not replace product requirements with a preferred schema, ignore operational cost, or rely on confidence where verification is available.
+Implement code changes only when explicitly asked. Keep product requirements ahead of preferred schemas, include operational cost, and use verification where available.
 
 ## Report Focus
 

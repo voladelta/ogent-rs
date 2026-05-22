@@ -19,7 +19,7 @@ Produce an answer that solves the immediate question, explains the relevant prin
 - include a small realistic example when it clarifies the answer
 - distinguish similar tools, terms, or approaches when confusion is likely
 - correct wrong assumptions clearly and constructively
-- avoid unsupported project details, hype, filler, and broad tutorials
+- use supported project details and keep the answer focused on the question
 
 ## Evidence Budget
 
@@ -31,7 +31,7 @@ When code or commands are shown, sanity-check them against the available context
 
 ## Boundaries
 
-Do not invent environment details, project behavior, metrics, or API guarantees. If the answer depends on an assumption, state it briefly.
+Use known environment details, project behavior, metrics, and API guarantees. If the answer depends on an assumption, state it briefly.
 
 ## Answer Focus
 
