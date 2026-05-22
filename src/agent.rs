@@ -18,28 +18,25 @@ pub enum AgentError {
 }
 
 pub trait AgentOutputSink: Send + Sync {
-  fn message(&self, source: &str, message: &Message);
+  fn message(&self, message: &Message);
 
-  fn stream_event(&self, _source: &str, _event: &StreamEvent) {}
+  fn stream_event(&self, _event: &StreamEvent) {}
 
-  fn tool_call(&self, _source: &str, _tool_call: &ToolCall) {}
+  fn tool_call(&self, _tool_call: &ToolCall) {}
 
-  fn tool_result(&self, _source: &str, _tool_name: &str, _content: &str, _failed: bool) {}
+  fn tool_result(&self, _tool_name: &str, _content: &str, _failed: bool) {}
 }
 
 struct CliOutputSink;
 
 impl AgentOutputSink for CliOutputSink {
-  fn message(&self, source: &str, message: &Message) {
-    if source == "worker" && message.role == "assistant" && !message.content.trim().is_empty() {
+  fn message(&self, message: &Message) {
+    if message.role == "assistant" && !message.content.trim().is_empty() {
       println!("{}", message.content);
     }
   }
 
-  fn stream_event(&self, source: &str, event: &StreamEvent) {
-    if source != "worker" {
-      return;
-    }
+  fn stream_event(&self, event: &StreamEvent) {
     match event {
       StreamEvent::Content(content) => {
         print!("{content}");
@@ -55,18 +52,12 @@ impl AgentOutputSink for CliOutputSink {
     }
   }
 
-  fn tool_call(&self, source: &str, tool_call: &ToolCall) {
-    if source != "worker" {
-      return;
-    }
+  fn tool_call(&self, tool_call: &ToolCall) {
     let args = truncate_for_cli(&tool_call.function.arguments, 180);
     eprintln!("[tool] {} {args}", tool_call.function.name);
   }
 
-  fn tool_result(&self, source: &str, tool_name: &str, content: &str, failed: bool) {
-    if source != "worker" {
-      return;
-    }
+  fn tool_result(&self, tool_name: &str, content: &str, failed: bool) {
     if failed {
       eprintln!("[tool:error] {tool_name}: {}", first_line(content));
     } else {
@@ -119,19 +110,19 @@ impl Agent {
 
   fn emit_message(&self, message: &Message) {
     if let Some(sink) = &self.output_sink {
-      sink.message(self.source_label(), message);
+      sink.message(message);
     }
   }
 
   fn emit_tool_call(&self, tool_call: &ToolCall) {
     if let Some(sink) = &self.output_sink {
-      sink.tool_call(self.source_label(), tool_call);
+      sink.tool_call(tool_call);
     }
   }
 
   fn emit_tool_result(&self, tool_name: &str, content: &str, failed: bool) {
     if let Some(sink) = &self.output_sink {
-      sink.tool_result(self.source_label(), tool_name, content, failed);
+      sink.tool_result(tool_name, content, failed);
     }
   }
 
@@ -142,28 +133,22 @@ impl Agent {
     tokio::task::JoinHandle<()>,
   )> {
     let sink = self.output_sink.clone()?;
-    let source = self.source_label().to_string();
     let (tx, mut rx) = tokio::sync::mpsc::channel(128);
     let handle = tokio::spawn(async move {
       while let Some(event) = rx.recv().await {
-        sink.stream_event(&source, &event);
+        sink.stream_event(&event);
       }
     });
     Some((tx, handle))
   }
 
-  fn source_label(&self) -> &str {
-    "worker"
-  }
-
   pub async fn run_loop(&mut self) -> Result<(), AgentError> {
     loop {
-      let stream = self.stream_events_to_sink();
-      let streaming_to_sink = stream.is_some();
-      let (stream_tx, stream_handle) = match stream {
+      let (stream_tx, stream_handle) = match self.stream_events_to_sink() {
         Some((tx, handle)) => (Some(tx), Some(handle)),
         None => (None, None),
       };
+      let streaming_to_sink = stream_handle.is_some();
       let resp = self
         .client
         .chat(&self.messages, &self.tools, stream_tx)
