@@ -49,7 +49,14 @@ fn node_to_symbol(source: &str, node: Node) -> Option<Symbol> {
   match node.kind() {
     "function_item" | "function_signature_item" => {
       let name = node_name(source, node)?;
-      Some(make_symbol(source, node, "fn", name, signature(source, node), vec![]))
+      Some(make_symbol(
+        source,
+        node,
+        "fn",
+        name,
+        signature(source, node),
+        vec![],
+      ))
     }
     "struct_item" => {
       let name = node_name(source, node)?;
@@ -119,19 +126,47 @@ fn node_to_symbol(source: &str, node: Node) -> Option<Symbol> {
     }
     "type_item" => {
       let name = node_name(source, node)?;
-      Some(make_symbol(source, node, "type", name, signature(source, node), vec![]))
+      Some(make_symbol(
+        source,
+        node,
+        "type",
+        name,
+        signature(source, node),
+        vec![],
+      ))
     }
     "const_item" => {
       let name = node_name(source, node)?;
-      Some(make_symbol(source, node, "const", name, signature(source, node), vec![]))
+      Some(make_symbol(
+        source,
+        node,
+        "const",
+        name,
+        signature(source, node),
+        vec![],
+      ))
     }
     "static_item" => {
       let name = node_name(source, node)?;
-      Some(make_symbol(source, node, "static", name, signature(source, node), vec![]))
+      Some(make_symbol(
+        source,
+        node,
+        "static",
+        name,
+        signature(source, node),
+        vec![],
+      ))
     }
     "macro_definition" => {
       let name = node_name(source, node)?;
-      Some(make_symbol(source, node, "macro", name, signature(source, node), vec![]))
+      Some(make_symbol(
+        source,
+        node,
+        "macro",
+        name,
+        signature(source, node),
+        vec![],
+      ))
     }
     _ => None,
   }

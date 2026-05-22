@@ -50,11 +50,25 @@ fn node_to_symbol(source: &str, node: Node) -> Option<Symbol> {
         .utf8_text(source.as_bytes())
         .ok()?
         .to_string();
-      Some(make_symbol(source, node, "package", name, signature(source, node), vec![]))
+      Some(make_symbol(
+        source,
+        node,
+        "package",
+        name,
+        signature(source, node),
+        vec![],
+      ))
     }
     "function_declaration" | "method_declaration" => {
       let name = node_name(source, node)?;
-      Some(make_symbol(source, node, "fn", name, signature(source, node), vec![]))
+      Some(make_symbol(
+        source,
+        node,
+        "fn",
+        name,
+        signature(source, node),
+        vec![],
+      ))
     }
     "type_declaration" => {
       let mut cursor = node.walk();
@@ -136,7 +150,14 @@ fn extract_interface_methods(source: &str, node: Node) -> Vec<Symbol> {
 
 fn spec_to_symbol(source: &str, node: Node, kind: &'static str) -> Option<Symbol> {
   let name = node_name(source, node)?;
-  Some(make_symbol(source, node, kind, name, signature(source, node), vec![]))
+  Some(make_symbol(
+    source,
+    node,
+    kind,
+    name,
+    signature(source, node),
+    vec![],
+  ))
 }
 
 fn collect_specs(
