@@ -53,7 +53,7 @@ pub fn load_config(workspace_root: &Path) -> Result<Config> {
   }
 
   bail!(
-    "config.yaml not found. Create one from config.yaml.sample at either:\n  {}\n  {}",
+    "config.yaml not found. Create one from dotogent/config.yaml at either:\n  {}\n  {}",
     repo_config.display(),
     home_config.display()
   )
