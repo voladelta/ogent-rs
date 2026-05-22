@@ -83,9 +83,6 @@ pub fn discover_skills_message() -> String {
       let (name, desc) = parse_skill_frontmatter(&content);
       let dir_name = entry.file_name().to_string_lossy().to_string();
       let key = if name.is_empty() { dir_name } else { name };
-      if !is_discoverable_skill(&key) {
-        continue;
-      }
       if !seen.insert(key.clone()) {
         continue;
       }
@@ -156,10 +153,6 @@ fn xml_escape(s: &str) -> String {
     }
   }
   out
-}
-
-fn is_discoverable_skill(name: &str) -> bool {
-  name != "ogent"
 }
 
 #[cfg(test)]
@@ -243,12 +236,6 @@ mod tests {
     push_internal_user_message(&mut messages, String::new());
 
     assert_eq!(messages.len(), 2);
-  }
-
-  #[test]
-  fn ogent_skill_is_not_discoverable() {
-    assert!(!is_discoverable_skill("ogent"));
-    assert!(is_discoverable_skill("colgrep"));
   }
 
   #[test]
