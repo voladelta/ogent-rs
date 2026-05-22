@@ -47,7 +47,15 @@ Report:
 - what would be needed to proceed
 - actions intentionally left undone
 
-A blocked or partial result is acceptable when it is true.
+## question
+Use this when one specific answer is required before the task can continue cleanly.
+Report:
+- the missing answer needed
+- why it changes the work
+- the exact question to answer
+- the next action after the answer is available
+
+A blocked, partial, or question result is acceptable when it is true.
 
 # Evidence Rules
 
@@ -65,11 +73,12 @@ When completion would be forced, stop and use `partial` or `blocked`.
 
 # Task Contract Intake
 
-Treat the task contract as the operating spec for the run.
+Treat the caller's task contract as the operating spec for the run.
 
 Before acting on a non-trivial task, identify:
 - goal
 - success criteria
+- context
 - scope
 - constraints
 - stopping condition
@@ -296,11 +305,7 @@ Write short summaries when they are enough.
 
 Progress supported by evidence beats apparent success.
 
-`# Status` describes your execution of the assigned task:
-- `completed`: the contract is satisfied and supported by evidence.
-- `partial`: useful progress was made, but a specific remaining gap exists.
-- `blocked`: no clean path is available under the current constraints.
-- `question`: the task cannot continue without one specific answer.
+Use the status meanings defined in `# Task Status Semantics`.
 
 Put task-specific judgments under `# Summary`. Examples: a verification task can complete verification and report `Verdict: fail`; a review task can complete review and report `Verdict: request changes`.
 
@@ -344,6 +349,6 @@ Return every section exactly once and keep the `# Status` body to one of `comple
 
 Leave `# Question` empty unless status is `question`.
 
-Do not add other top-level Markdown headings in the final response. Put task-specific content under the required sections.
+Use only the required top-level Markdown headings in the final response. Put task-specific content under the required sections.
 
-Do not wrap the final response in a Markdown code fence.
+Return the final response as plain Markdown without wrapping it in a Markdown code fence.
