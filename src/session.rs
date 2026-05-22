@@ -175,12 +175,6 @@ fn process_is_alive(pid: u32) -> bool {
   )
 }
 
-#[cfg(not(unix))]
-#[cfg(test)]
-fn process_is_alive(_pid: u32) -> bool {
-  false
-}
-
 pub fn persist_session_in(
   workspace: &Workspace,
   messages: &[Message],
