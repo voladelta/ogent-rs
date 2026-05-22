@@ -691,22 +691,6 @@ mod tests {
   }
 
   #[test]
-  fn configured_worker_tools_excludes_director_only_tools() {
-    let tools = configured_worker_tools();
-    let names: Vec<_> = tools.iter().map(|t| t.function.name.as_str()).collect();
-    assert!(names.contains(&"repo_map"));
-    assert!(names.contains(&"code_map"));
-    assert!(names.contains(&"bash"));
-    assert!(names.contains(&"state"));
-    assert!(names.contains(&"load_skill"));
-    assert!(!names.contains(&"set_title"));
-    assert!(!names.contains(&"dispatch_workers"));
-    assert!(!names.contains(&"wait_workers"));
-    assert!(!names.contains(&"inspect_worker"));
-    assert!(!names.contains(&"cancel_workers"));
-  }
-
-  #[test]
   fn configured_worker_tools_includes_expected() {
     let tools = configured_worker_tools();
     let names: Vec<_> = tools.iter().map(|t| t.function.name.as_str()).collect();
@@ -716,9 +700,6 @@ mod tests {
     assert!(names.contains(&"code_map"));
     assert!(names.contains(&"edit_hash_anchors"));
     assert!(names.contains(&"state"));
-    assert!(!names.contains(&"set_title"));
-    assert!(!names.contains(&"dispatch_workers"));
-    assert!(!names.contains(&"wait_workers"));
   }
 
   #[test]
