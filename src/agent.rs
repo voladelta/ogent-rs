@@ -1,8 +1,10 @@
 use anyhow::Result;
+use std::io::Write;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::client::{Client, ClientError};
 use crate::session;
+use crate::sse::StreamEvent;
 use crate::tools::{ToolContext, execute_tool};
 use crate::types::{Message, MessageOrigin, Tool};
 use crate::workspace::Workspace;
@@ -44,6 +46,8 @@ impl CompactState {
 
 pub trait AgentOutputSink: Send + Sync {
   fn message(&self, source: &str, message: &Message);
+
+  fn stream_event(&self, _source: &str, _event: &StreamEvent) {}
 }
 
 struct CliOutputSink;
@@ -52,6 +56,25 @@ impl AgentOutputSink for CliOutputSink {
   fn message(&self, source: &str, message: &Message) {
     if source == "worker" && message.role == "assistant" && !message.content.trim().is_empty() {
       println!("{}", message.content);
+    }
+  }
+
+  fn stream_event(&self, source: &str, event: &StreamEvent) {
+    if source != "worker" {
+      return;
+    }
+    match event {
+      StreamEvent::Content(content) => {
+        print!("{content}");
+        let _ = std::io::stdout().flush();
+      }
+      StreamEvent::Reasoning(content) => {
+        eprint!("{content}");
+        let _ = std::io::stderr().flush();
+      }
+      StreamEvent::ToolCalling => {
+        eprintln!();
+      }
     }
   }
 }
@@ -114,16 +137,42 @@ impl Agent {
     }
   }
 
+  fn stream_events_to_sink(
+    &self,
+  ) -> Option<(
+    tokio::sync::mpsc::Sender<StreamEvent>,
+    tokio::task::JoinHandle<()>,
+  )> {
+    let sink = self.output_sink.clone()?;
+    let source = self.source_label().to_string();
+    let (tx, mut rx) = tokio::sync::mpsc::channel(128);
+    let handle = tokio::spawn(async move {
+      while let Some(event) = rx.recv().await {
+        sink.stream_event(&source, &event);
+      }
+    });
+    Some((tx, handle))
+  }
+
   fn source_label(&self) -> &str {
     self.worker_id.as_deref().unwrap_or("worker")
   }
 
   pub async fn run_loop(&mut self) -> Result<(), AgentError> {
     loop {
+      let stream = self.stream_events_to_sink();
+      let streaming_to_sink = stream.is_some();
+      let (stream_tx, stream_handle) = match stream {
+        Some((tx, handle)) => (Some(tx), Some(handle)),
+        None => (None, None),
+      };
       let resp = self
         .client
-        .chat(&self.messages, &self.tools, None, None)
+        .chat(&self.messages, &self.tools, None, stream_tx)
         .await?;
+      if let Some(handle) = stream_handle {
+        let _ = handle.await;
+      }
 
       self.meta.usage.total_tokens = self
         .meta
@@ -140,7 +189,13 @@ impl Agent {
         tool_call_id: String::new(),
       };
       self.messages.push(assistant.clone());
-      self.emit_message(&assistant);
+      if streaming_to_sink && !assistant.content.is_empty() {
+        if !assistant.content.ends_with('\n') {
+          println!();
+        }
+      } else {
+        self.emit_message(&assistant);
+      }
       self.dirty = true;
 
       if assistant.tool_calls.is_empty() {
