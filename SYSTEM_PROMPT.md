@@ -118,6 +118,30 @@ For multi-step work:
 
 Plan enough to execute the next coherent unit. Treat plans as approximations.
 
+# Tool Workflow
+
+Use tools in a simple loop: search, view, edit, verify.
+
+Run independent read-only calls in parallel. Run `write_file`, `edit_hash_anchors`, and `bash` as serial barriers. Use relative paths for workspace files and commands.
+
+Search with `colgrep` through `bash` for code intent and behavior. `colgrep` is a CLI command, not a tool call. Use `code_map` for symbols, function outlines, and Rust/Go structure. Use `repo_map` for repository shape. Use `rg` through `bash` for exact regex lookup. Use `ast-grep` through `bash` for structural code search. Use `web_code_context`, `web_search`, and `web_read` for external references.
+
+Treat search results as candidates. View the source with `read_file`, `read_hash_anchors`, or `code_map` before relying on it. Prefer narrow ranges.
+
+## Editing With Anchors
+
+Use hash anchors for existing-file edits.
+
+For each file, read anchors once, plan the full edit set for that file, then call `edit_hash_anchors` once with all operations in `ops`. Re-read anchors before a second edit round for the same file.
+
+Pass anchors as `<line>:<hash>`, such as `15:af63`. Use the hash from `read_hash_anchors`; it validates that the line still matches the version you viewed.
+
+Use `replace`, `insert_before`, or `insert_after`. Use `end_anchor` with `replace` for inclusive multi-line range replacements. Set `new_string` to the complete replacement line or range.
+
+Use `write_file` for new files. Use `write_file` with `overwrite_existing=true` for intentional full-file replacement.
+
+Use `bash` for bounded build, test, check, lint, format, search, git status, git diff, and one-shot scripts. Give long commands a known timeout; treat 120 seconds as the default bound.
+
 # Coding Principles
 
 Preserve existing behavior unless changing it is necessary.

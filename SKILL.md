@@ -7,7 +7,7 @@ description: Use ogent as an external coding co-worker for focused software engi
 
 Use `ogent` when an independent coding co-worker would help make concrete progress in the current repository.
 
-`ogent` is best for focused, bounded work: implementing a scoped change, debugging a failure, reviewing or critiquing an artifact, gathering evidence, validating claims, summarizing run state, or asking a specialist role for design/writing/research judgment.
+`ogent` is best for focused, bounded work: implementing a scoped change, debugging a failure, reviewing or critiquing an artifact, gathering evidence, validating claims, or summarizing run state.
 
 ## When to Use
 
@@ -15,7 +15,6 @@ Use this skill when:
 - the user explicitly asks to use `ogent`
 - a focused task can be delegated with a clear contract
 - a second pass would improve confidence: review, verification, debugging, or research
-- the task benefits from a specialist role rather than general conversation
 
 Use direct conversation for tiny one-shot answers. Ask the user to narrow broad ambiguous goals before delegation. Keep destructive operations, credential discovery, and work outside the current repository out of scope unless the user explicitly asks.
 
@@ -31,32 +30,17 @@ If unavailable, say so and continue without claiming delegation.
 
 Run `ogent` from the repository root or the intended workspace. Its workspace is the process current directory.
 
-## Role Selection
-
-Default to `ogent` for general software engineering. Use a specialist role when the task has a clear shape:
-
-| Role | Use for |
-| --- | --- |
-| `ogent` | general coding, planning, investigation, mixed tasks |
-| `implementer` | scoped code or artifact changes |
-| `debugger` | root-cause analysis and minimal fix path |
-| `reviewer` | judging whether work satisfies a contract, including sharp critique before delivery |
-| `verifier` | running or designing evidence checks |
-| `researcher` | gathering and organizing evidence |
-| `system_architect` | module/API/system boundary decisions |
-| `database_architect` | data model, schema, query, migration decisions |
-| `visual_designer` | UI direction, layout, hierarchy, visual implementation notes |
-| `writer` | drafting, rewriting prose, and StackOverflow-style technical answers |
-| `summarizer` | compressing transcript or run history into continuation state |
-
-Specialist roles receive scoped tool groups. Choose `ogent` when the task genuinely needs the full worker toolset. Choose `writer` or `summarizer` when the task may create a requested file but does not need shell commands or anchored code edits.
-
 ## Task Contract
 
-Give `ogent` a complete but compact contract. Include only what changes behavior:
+Give `ogent` a complete but compact task prompt. Use outcome-first structure when you are writing a new task contract:
 
 ```text
-Goal:
+Goal: <one sentence>
+
+Success means:
+- <observable result>
+- <required evidence>
+- <format or scope requirement>
 
 Context:
 
@@ -64,14 +48,14 @@ Scope:
 
 Constraints:
 
-Boundaries (actions outside scope, such as editing tests, deleting files, or broad refactors):
+Stop when:
 
 Evidence required:
 
 Expected output:
 ```
 
-Good contracts name files, commands, acceptance criteria, risk boundaries, and whether edits are allowed. Prefer relative paths. Keep secrets out of task contracts.
+Good contracts name files, commands, acceptance criteria, risk boundaries, and whether edits are allowed. Prefer relative paths. Keep secrets out of task contracts. Put tool workflow details in the repo system prompt; put task-specific outcomes in the contract.
 
 ## Invocation Patterns
 
@@ -81,16 +65,10 @@ General task:
 ogent "<task contract>"
 ```
 
-Specialist role:
-
-```bash
-ogent --role reviewer "<review contract>"
-```
-
 With a specific model/profile when the caller requires it:
 
 ```bash
-ogent --role implementer --profile kimi "<implementation contract>"
+ogent --profile kimi "<task contract>"
 ```
 
 For multiline contracts, use a heredoc so the task is readable and reproducible:
@@ -114,10 +92,13 @@ Keep parser public APIs unchanged.
 
 Evidence required:
 Reproduction command, root-cause evidence, and minimal fix path.
+
+Stop when:
+The root cause and smallest justified next step are clear.
 TASK
 )
 
-ogent --role debugger "$task_contract"
+ogent "$task_contract"
 ```
 
 ## Handling Results
