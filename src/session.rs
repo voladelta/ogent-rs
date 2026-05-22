@@ -1,45 +1,11 @@
 use crate::types::Message;
 use crate::workspace::Workspace;
 use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SessionMeta {
-  pub session_id: String,
-  #[serde(skip_serializing_if = "Option::is_none")]
-  pub parent_session: Option<String>,
-  #[serde(skip_serializing_if = "Option::is_none")]
-  pub title: Option<String>,
-  pub profile: String,
-  pub mode: String,
-  pub flags: SessionFlags,
-  pub usage: SessionUsage,
-  #[serde(skip_serializing_if = "Option::is_none")]
-  pub draft_input: Option<String>,
-  #[serde(skip_serializing_if = "Option::is_none")]
-  pub start_ts: Option<u64>,
-  #[serde(skip_serializing_if = "Option::is_none")]
-  pub end_ts: Option<u64>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SessionFlags {
-  pub steer: bool,
-  pub worker: bool,
-  pub autocompact: i32,
-  pub resume: bool,
-  pub temp: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SessionUsage {
-  pub total_tokens: u64,
-}
 
 static SESSION_NONCE: AtomicU64 = AtomicU64::new(0);
 
@@ -61,36 +27,6 @@ pub fn session_dir_in(workspace: &Workspace, session_id: &str) -> PathBuf {
 
 pub fn state_path_in(workspace: &Workspace, session_id: &str) -> PathBuf {
   session_dir_in(workspace, session_id).join("states.json")
-}
-
-pub fn worker_dir_in(workspace: &Workspace, parent_session_id: &str, worker_id: &str) -> PathBuf {
-  session_dir_in(workspace, parent_session_id)
-    .join("workers")
-    .join(worker_id)
-}
-
-pub fn worker_state_path_in(
-  workspace: &Workspace,
-  parent_session_id: &str,
-  worker_id: &str,
-) -> PathBuf {
-  worker_dir_in(workspace, parent_session_id, worker_id).join("states.json")
-}
-
-pub fn worker_messages_path_in(
-  workspace: &Workspace,
-  parent_session_id: &str,
-  worker_id: &str,
-) -> PathBuf {
-  worker_dir_in(workspace, parent_session_id, worker_id).join("messages.jsonl")
-}
-
-pub fn write_meta_in(workspace: &Workspace, meta: &SessionMeta) -> Result<()> {
-  let dir = session_dir_in(workspace, &meta.session_id);
-  fs::create_dir_all(&dir)?;
-  let data = serde_json::to_string_pretty(meta)?;
-  fs::write(dir.join("meta.json"), data)?;
-  Ok(())
 }
 
 #[cfg(test)]
@@ -184,16 +120,6 @@ pub fn persist_session_in(
   persist_messages(messages, &path)
 }
 
-pub fn persist_worker_session_in(
-  workspace: &Workspace,
-  messages: &[Message],
-  parent_session_id: &str,
-  worker_id: &str,
-) -> Result<()> {
-  let path = worker_messages_path_in(workspace, parent_session_id, worker_id);
-  persist_messages(messages, &path)
-}
-
 fn persist_messages(messages: &[Message], path: &PathBuf) -> Result<()> {
   if messages.is_empty() {
     return Ok(());
@@ -216,6 +142,7 @@ fn elapsed_since_epoch() -> std::time::Duration {
     .unwrap_or_default()
 }
 
+#[allow(dead_code)]
 pub fn timestamp_ms() -> u64 {
   elapsed_since_epoch().as_millis() as u64
 }
@@ -223,64 +150,6 @@ pub fn timestamp_ms() -> u64 {
 #[cfg(test)]
 mod tests {
   use super::*;
-
-  #[test]
-  fn meta_serializes_new_fields() {
-    let meta = SessionMeta {
-      session_id: "abc".into(),
-      parent_session: None,
-      title: Some("Fix login button".into()),
-      profile: "ds-pro".into(),
-      mode: "steer".into(),
-      flags: SessionFlags {
-        steer: true,
-        worker: false,
-        autocompact: -1,
-        resume: false,
-        temp: false,
-      },
-      usage: SessionUsage { total_tokens: 150 },
-      draft_input: Some("unsent draft".into()),
-      start_ts: Some(1_234_567_890),
-      end_ts: Some(1_234_567_999),
-    };
-    let json = serde_json::to_string_pretty(&meta).unwrap();
-    assert!(json.contains("\"draft_input\""));
-    assert!(json.contains("\"unsent draft\""));
-    assert!(json.contains("\"title\""));
-    assert!(json.contains("\"Fix login button\""));
-    assert!(json.contains("\"start_ts\""));
-    assert!(json.contains("1234567890"));
-    assert!(json.contains("\"end_ts\""));
-    assert!(json.contains("1234567999"));
-  }
-
-  #[test]
-  fn meta_omits_none_fields() {
-    let meta = SessionMeta {
-      session_id: "abc".into(),
-      parent_session: None,
-      title: None,
-      profile: "ds-pro".into(),
-      mode: "steer".into(),
-      flags: SessionFlags {
-        steer: true,
-        worker: false,
-        autocompact: -1,
-        resume: false,
-        temp: false,
-      },
-      usage: SessionUsage { total_tokens: 0 },
-      draft_input: None,
-      start_ts: None,
-      end_ts: None,
-    };
-    let json = serde_json::to_string_pretty(&meta).unwrap();
-    assert!(!json.contains("\"title\""));
-    assert!(!json.contains("\"draft_input\""));
-    assert!(!json.contains("\"start_ts\""));
-    assert!(!json.contains("\"end_ts\""));
-  }
 
   #[test]
   fn timestamp_ms_increases() {
@@ -327,10 +196,6 @@ mod tests {
     assert_eq!(
       session_dir_in(&ws, "abc"),
       PathBuf::from("/tmp/ogent-session-test/.ogent/sessions/abc")
-    );
-    assert_eq!(
-      worker_state_path_in(&ws, "parent", "worker-1"),
-      PathBuf::from("/tmp/ogent-session-test/.ogent/sessions/parent/workers/worker-1/states.json")
     );
   }
 }

@@ -12,7 +12,6 @@ Direct worker runs:
 - use the full worker toolset
 - do not expose Director worker-management tools (`dispatch_workers`, `wait_workers`, `inspect_worker`, `cancel_workers`, `set_title`)
 - use the configured default profile unless `--profile` is passed
-- use the configured autocompact default
 - force temporary mode, so no resumable session is persisted
 
 ## Prompts
@@ -22,7 +21,7 @@ Direct worker runs:
 
 ## State and Exit
 
-Direct CLI worker runs set `temp: true`, so transcript and metadata files are not persisted by `persist_if_dirty`. The `state` tool can still write `{workspace_root}/.ogent/sessions/{session_id}/states.json`.
+Direct CLI worker runs set `temp: true`, so transcript messages are not persisted by `persist_if_dirty`. The `state` tool can still write `{workspace_root}/.ogent/sessions/{session_id}/states.json`.
 
 A run ends when the worker sends a final assistant message (no tool calls).
 

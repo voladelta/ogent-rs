@@ -6,7 +6,6 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
   pub default_profile: String,
-  pub autocompact: i32,
   pub profiles: HashMap<String, Profile>,
   pub providers: HashMap<String, ProviderConfig>,
 }
@@ -16,6 +15,7 @@ pub struct Profile {
   pub backend: String,
   pub model: String,
   pub effort: String,
+  #[allow(dead_code)]
   pub context_limit: usize,
 }
 
@@ -157,7 +157,6 @@ impl Default for Config {
 
     Self {
       default_profile: "ds-flash".to_string(),
-      autocompact: 80,
       profiles,
       providers,
     }

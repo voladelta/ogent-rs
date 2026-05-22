@@ -11,8 +11,6 @@ type BuildReq = Arc<dyn Fn(&[Message], &[Tool]) -> Result<Value, serde_json::Err
 
 #[derive(Debug, thiserror::Error)]
 pub enum ClientError {
-  #[error("chat aborted by context cancellation")]
-  Aborted { resp: ChatResponse },
   #[error("rate limited (429): {body}")]
   RateLimited { body: String },
   #[error("api error {status}: {body}")]
@@ -71,7 +69,6 @@ impl Client {
     &self,
     messages: &[Message],
     tools: &[Tool],
-    cancel: Option<&tokio_util::sync::CancellationToken>,
     stream_tx: Option<tokio::sync::mpsc::Sender<crate::sse::StreamEvent>>,
   ) -> Result<ChatResponse, ClientError> {
     let req_body = (self.build_req)(messages, tools).map_err(ClientError::BuildRequest)?;
@@ -81,7 +78,7 @@ impl Client {
         let delay_secs = 2u64.saturating_pow((attempt - 1) as u32).min(60);
         sleep(Duration::from_secs(delay_secs)).await;
       }
-      match self.chat_once(&req_body, cancel, stream_tx.clone()).await {
+      match self.chat_once(&req_body, stream_tx.clone()).await {
         Ok(resp) => return Ok(resp),
         Err(err) if !err.is_retryable() => return Err(err),
         Err(err) => last_err = Some(err),
@@ -100,14 +97,8 @@ impl Client {
   async fn chat_once(
     &self,
     req_body: &Value,
-    cancel: Option<&tokio_util::sync::CancellationToken>,
     stream_tx: Option<tokio::sync::mpsc::Sender<crate::sse::StreamEvent>>,
   ) -> Result<ChatResponse, ClientError> {
-    if cancel.is_some_and(tokio_util::sync::CancellationToken::is_cancelled) {
-      return Err(ClientError::Aborted {
-        resp: ChatResponse::default(),
-      });
-    }
     let resp = self
       .http
       .post(&self.url)
@@ -129,7 +120,7 @@ impl Client {
         body: body.trim().to_string(),
       });
     }
-    parse_sse_response(resp, cancel, stream_tx)
+    parse_sse_response(resp, stream_tx)
       .await
       .map_err(Into::into)
   }

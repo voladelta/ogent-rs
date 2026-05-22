@@ -15,7 +15,7 @@ use anyhow::{Context, Result, bail};
 use clap::{CommandFactory, Parser};
 use std::env;
 
-use agent::{Agent, CompactState};
+use agent::Agent;
 
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
@@ -24,8 +24,6 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 struct Args {
   #[arg(long)]
   profile: Option<String>,
-  #[arg(long)]
-  autocompact: Option<i32>,
   prompt: Vec<String>,
 }
 
@@ -42,7 +40,6 @@ async fn main() -> Result<()> {
     .profile
     .clone()
     .unwrap_or_else(|| config.default_profile.clone());
-  let autocompact = args.autocompact.unwrap_or(config.autocompact);
   if let Err(err) = ensure_run_mode_flags(&args) {
     if args.prompt.is_empty() {
       let mut cmd = Args::command();
@@ -58,14 +55,10 @@ async fn main() -> Result<()> {
   let provider = config
     .provider_for(profile)
     .context("missing provider config for profile")?;
-  let context_limit = profile.context_limit;
   let client = providers::new_client(profile, provider)?;
   run_worker_cli(WorkerCliRun {
     workspace,
     client,
-    profile_name: &profile_name,
-    context_limit,
-    autocompact,
     task: &args.prompt.join(" "),
   })
   .await
@@ -81,9 +74,6 @@ fn ensure_run_mode_flags(args: &Args) -> Result<()> {
 struct WorkerCliRun<'a> {
   workspace: crate::workspace::Workspace,
   client: crate::client::Client,
-  profile_name: &'a str,
-  context_limit: usize,
-  autocompact: i32,
   task: &'a str,
 }
 
@@ -91,38 +81,13 @@ async fn run_worker_cli(run: WorkerCliRun<'_>) -> Result<()> {
   let system_prompt = prompts::compose_system_prompt("");
   let session_id = session::generate_session_id();
   let messages = prompts::build_initial_messages(&system_prompt, run.task, &session_id);
-  let compact = if run.autocompact >= 0 {
-    CompactState::new(f64::from(run.autocompact) / 100.0, run.context_limit)
-  } else {
-    CompactState::disabled()
-  };
-  let meta = session::SessionMeta {
-    session_id: session_id.clone(),
-    parent_session: None,
-    title: None,
-    profile: run.profile_name.to_string(),
-    mode: "worker".to_string(),
-    flags: session::SessionFlags {
-      steer: false,
-      worker: true,
-      autocompact: run.autocompact,
-      resume: false,
-      temp: true,
-    },
-    usage: session::SessionUsage { total_tokens: 0 },
-    draft_input: None,
-    start_ts: Some(session::timestamp_ms()),
-    end_ts: None,
-  };
   let mut agent = Agent::new(
     run.workspace,
     run.client,
     messages,
     tools::configured_worker_tools(),
-    compact,
-    meta,
-    None,
-    Some("worker".to_string()),
+    session_id,
+    true, // temp
   );
   agent.set_output_sink(Some(agent::cli_output_sink()));
   agent.dirty = true;

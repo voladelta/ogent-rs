@@ -67,8 +67,6 @@ where
 
 #[derive(Debug, thiserror::Error)]
 pub enum SseError {
-  #[error("chat aborted by context cancellation")]
-  Aborted { resp: ChatResponse },
   #[error("sse stream read failed")]
   Read(#[source] reqwest::Error),
 }
@@ -170,7 +168,6 @@ async fn send_event(tx: &mut Option<tokio::sync::mpsc::Sender<StreamEvent>>, ev:
 
 pub async fn parse_sse_response(
   resp: reqwest::Response,
-  cancel: Option<&tokio_util::sync::CancellationToken>,
   mut stream_tx: Option<tokio::sync::mpsc::Sender<StreamEvent>>,
 ) -> Result<ChatResponse, SseError> {
   let mut result = ChatResponse::default();
@@ -181,10 +178,6 @@ pub async fn parse_sse_response(
   let mut consumed = 0;
 
   while let Some(item) = stream.next().await {
-    if cancel.is_some_and(tokio_util::sync::CancellationToken::is_cancelled) {
-      flush_tool_calls(&mut acc, &mut result);
-      return Err(SseError::Aborted { resp: result });
-    }
     let bytes = item.map_err(SseError::Read)?;
     buf.push_str(&String::from_utf8_lossy(&bytes));
     while let Some(pos) = buf[consumed..].find('\n') {

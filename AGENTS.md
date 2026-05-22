@@ -6,7 +6,7 @@
 
 - Make the smallest correct change.
 - Use `colgrep` first for behavior/intent search. Use `rg` for exact text.
-- Do not edit runtime artifacts (`.ogent/sessions/`, `.ogent/journal.md`, `target/`) unless requested.
+- Do not edit runtime artifacts (`.ogent/sessions/`, `target/`) unless requested.
 - Update docs when behavior changes.
 - In final handoff: list changed files, verification, and doc updates.
 
@@ -24,11 +24,11 @@ CLI
 ```
 
 - `src/main.rs`: CLI parsing and worker runtime launch.
-- `src/agent.rs`: worker turn loop, tool-call execution, compaction reminders, Agent-owned `Workspace`.
+- `src/agent.rs`: worker turn loop, tool-call execution, Agent-owned `Workspace`.
 - `src/workspace.rs`: explicit workspace root and path resolution.
 - `src/client.rs`, `src/providers.rs`, `src/sse.rs`: provider request construction, HTTP client, and SSE response parsing.
 - `src/tools.rs`: worker tool schemas and execution (`read_file`, `write_file`, `bash`, `repo_map`, `code_map`, web tools, `state`, hashline editing).
-- `src/session.rs`: workspace-scoped session meta/messages/state paths and persistence.
+- `src/session.rs`: workspace-scoped session messages/state paths and persistence.
 - `src/prompts.rs`: built-in worker prompts and skill discovery/injection.
 - `src/symbol_tree.rs`: tree-sitter based symbol extraction for `code_map` (Rust and Go).
 
@@ -44,7 +44,7 @@ Removed legacy surfaces:
 | Request area | Start here | Also check |
 | --- | --- | --- |
 | CLI flags and worker launch | `src/main.rs` | `docs/reference.md`, `README.md` |
-| Worker loop / exit / compaction reminders | `src/agent.rs` | `docs/agent-guide.md`, `ARCHITECTURE.md` |
+| Worker loop / exit | `src/agent.rs` | `docs/agent-guide.md`, `ARCHITECTURE.md` |
 | Tool schema/behavior | `src/tools.rs` | `docs/reference.md` |
 | System prompt / initial messages | `src/prompts.rs` | `SYSTEM_PROMPT.md` |
 | Session/state pathing | `src/session.rs` | `src/workspace.rs`, `src/tools.rs` |
@@ -61,15 +61,13 @@ Session persistence paths:
 {workspace_root}/.ogent/
   sessions/
     {session_id}/
-      meta.json
       messages.jsonl
       states.json
 ```
 
-- Direct CLI runs set `temp: true`, so `meta.json` and `messages.jsonl` are not persisted by `persist_if_dirty`.
+- Direct CLI runs set `temp: true`, so `messages.jsonl` is not persisted by `persist_if_dirty`.
 - The `state` tool can still write `states.json`, including `progress/current` when a task spans multiple tool calls.
-- Non-temp or embedded runs can persist `meta.json` and `messages.jsonl`.
-- Embedded worker scopes can still persist under `{parent_session}/workers/{worker_id}/`, but the active CLI launches one direct worker and does not expose worker-dispatch tools.
+- Non-temp or embedded runs can persist `messages.jsonl`.
 
 ## Key Invariants
 
@@ -79,7 +77,6 @@ Session persistence paths:
 - Every Agent owns one immutable `Workspace`; CLI uses the process current directory.
 - Tool execution, bash current directory, state paths, and session files must use the Agent workspace, not process-global mutable cwd.
 - Worker file edits happen through worker tools (`write_file`, `edit_hash_anchors`).
-- Workers do not dispatch workers.
 - A run ends when the worker sends a final assistant message with no tool calls.
 - `load_skill` tool and startup skill injection stay enabled.
 - The final worker answer must use the Markdown result sections defined in `SYSTEM_PROMPT.md`.

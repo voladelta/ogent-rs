@@ -587,14 +587,7 @@ struct StateArgs {
 fn state(agent: &mut Agent, args: &str) -> Result<String> {
   let args: StateArgs = parse_args(args)?;
   require_nonempty(&args.action, "action")?;
-  let scope_path = if let (Some(parent_session_id), Some(worker_id)) = (
-    agent.worker_parent_session_id.as_deref(),
-    agent.worker_id.as_deref(),
-  ) {
-    crate::session::worker_state_path_in(&agent.workspace, parent_session_id, worker_id)
-  } else {
-    crate::session::state_path_in(&agent.workspace, &agent.meta.session_id)
-  };
+  let scope_path = crate::session::state_path_in(&agent.workspace, &agent.session_id);
 
   let mut map = read_state_map(&scope_path)?;
   match args.action.as_str() {
@@ -685,42 +678,15 @@ mod tests {
     .unwrap()
   }
 
-  fn dummy_agent(worker_scope: Option<(&str, &str)>) -> Agent {
+  fn dummy_agent() -> Agent {
     let id = TEST_COUNTER.fetch_add(1, Ordering::SeqCst);
-    let (worker_parent_session_id, worker_id) = worker_scope
-      .map(|(p, w)| (Some(p.to_string()), Some(w.to_string())))
-      .unwrap_or((None, None));
-    let meta = crate::session::SessionMeta {
-      session_id: format!("tools-test-session-{id}"),
-      parent_session: None,
-      title: None,
-      profile: "test".into(),
-      mode: if worker_scope.is_some() {
-        "worker".into()
-      } else {
-        "default".into()
-      },
-      flags: crate::session::SessionFlags {
-        steer: false,
-        worker: worker_scope.is_some(),
-        autocompact: -1,
-        resume: false,
-        temp: true,
-      },
-      usage: crate::session::SessionUsage { total_tokens: 0 },
-      draft_input: None,
-      start_ts: None,
-      end_ts: None,
-    };
     Agent::new(
       crate::workspace::Workspace::from_current_dir(),
       dummy_client(),
       crate::prompts::build_messages(""),
       configured_worker_tools(),
-      crate::agent::CompactState::disabled(),
-      meta,
-      worker_parent_session_id,
-      worker_id,
+      format!("tools-test-session-{id}"),
+      true, // temp
     )
   }
 
@@ -757,7 +723,7 @@ mod tests {
 
   #[test]
   fn state_round_trip_write_read_list_append() {
-    let mut agent = dummy_agent(None);
+    let mut agent = dummy_agent();
     let key = "foo/bar";
 
     state(
@@ -790,39 +756,13 @@ mod tests {
 
   #[test]
   fn state_write_and_append_require_content() {
-    let mut agent = dummy_agent(None);
+    let mut agent = dummy_agent();
 
     let write_err = state(&mut agent, r#"{"action":"write","path":"goal"}"#).unwrap_err();
     assert!(write_err.to_string().contains("content is required"));
 
     let append_err = state(&mut agent, r#"{"action":"append","path":"goal"}"#).unwrap_err();
     assert!(append_err.to_string().contains("content is required"));
-  }
-
-  #[test]
-  fn state_scope_uses_director_and_worker_paths() {
-    let mut director = dummy_agent(None);
-    state(
-      &mut director,
-      r#"{"action":"write","path":"status","content":"director"}"#,
-    )
-    .unwrap();
-    let director_path =
-      crate::session::state_path_in(&director.workspace, &director.meta.session_id);
-    assert!(director_path.exists());
-
-    let mut worker = dummy_agent(Some((&director.meta.session_id, "worker-test-1")));
-    state(
-      &mut worker,
-      r#"{"action":"write","path":"status","content":"worker"}"#,
-    )
-    .unwrap();
-    let worker_path = crate::session::worker_state_path_in(
-      &worker.workspace,
-      &director.meta.session_id,
-      "worker-test-1",
-    );
-    assert!(worker_path.exists());
   }
 
   #[tokio::test]

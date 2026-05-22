@@ -17,33 +17,6 @@ pub enum AgentError {
   Other(#[from] anyhow::Error),
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct CompactState {
-  enabled: bool,
-  #[allow(dead_code)]
-  threshold: f64,
-  #[allow(dead_code)]
-  context_limit: usize,
-}
-
-impl CompactState {
-  pub fn new(threshold: f64, context_limit: usize) -> Self {
-    Self {
-      enabled: true,
-      threshold,
-      context_limit,
-    }
-  }
-
-  pub fn disabled() -> Self {
-    Self {
-      enabled: false,
-      threshold: 1.0,
-      context_limit: 0,
-    }
-  }
-}
-
 pub trait AgentOutputSink: Send + Sync {
   fn message(&self, source: &str, message: &Message);
 
@@ -114,36 +87,29 @@ pub struct Agent {
   pub client: Client,
   pub messages: Vec<Message>,
   pub tools: Vec<Tool>,
-  pub compact: CompactState,
-  pub meta: session::SessionMeta,
-  pub worker_parent_session_id: Option<String>,
-  pub worker_id: Option<String>,
+  pub session_id: String,
+  pub temp: bool,
   pub progress_sink: Option<Arc<Mutex<String>>>,
   pub dirty: bool,
   output_sink: Option<Arc<dyn AgentOutputSink>>,
 }
 
 impl Agent {
-  #[allow(clippy::too_many_arguments)]
   pub fn new(
     workspace: Workspace,
     client: Client,
     messages: Vec<Message>,
     tools: Vec<Tool>,
-    compact: CompactState,
-    meta: session::SessionMeta,
-    worker_parent_session_id: Option<String>,
-    worker_id: Option<String>,
+    session_id: String,
+    temp: bool,
   ) -> Self {
     Self {
       workspace,
       client,
       messages,
       tools,
-      compact,
-      meta,
-      worker_parent_session_id,
-      worker_id,
+      session_id,
+      temp,
       progress_sink: None,
       dirty: false,
       output_sink: None,
@@ -190,7 +156,7 @@ impl Agent {
   }
 
   fn source_label(&self) -> &str {
-    self.worker_id.as_deref().unwrap_or("worker")
+    "worker"
   }
 
   pub async fn run_loop(&mut self) -> Result<(), AgentError> {
@@ -203,17 +169,11 @@ impl Agent {
       };
       let resp = self
         .client
-        .chat(&self.messages, &self.tools, None, stream_tx)
+        .chat(&self.messages, &self.tools, stream_tx)
         .await?;
       if let Some(handle) = stream_handle {
         let _ = handle.await;
       }
-
-      self.meta.usage.total_tokens = self
-        .meta
-        .usage
-        .total_tokens
-        .saturating_add(resp.usage.total_tokens.max(0) as u64);
 
       let assistant = Message {
         role: "assistant".to_string(),
@@ -266,20 +226,14 @@ impl Agent {
       self.dirty = true;
     }
 
-    let _ = self.compact.enabled;
     Ok(())
   }
 
   pub fn persist_if_dirty(&self) -> Result<()> {
-    if !self.dirty || self.meta.flags.temp {
+    if !self.dirty || self.temp {
       return Ok(());
     }
-    session::write_meta_in(&self.workspace, &self.meta)?;
-    if let (Some(parent), Some(worker_id)) = (&self.worker_parent_session_id, &self.worker_id) {
-      session::persist_worker_session_in(&self.workspace, &self.messages, parent, worker_id)
-    } else {
-      session::persist_session_in(&self.workspace, &self.messages, &self.meta.session_id)
-    }
+    session::persist_session_in(&self.workspace, &self.messages, &self.session_id)
   }
 }
 

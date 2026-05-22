@@ -1,11 +1,10 @@
 # Reference
 
-## CLI Flags
+## CLI Flag
 
 | Flag | Meaning |
 | --- | --- |
 | `--profile <name>` | Model/profile selection, overriding `config.yaml` |
-| `--autocompact <percent>` | Auto-compaction threshold; `-1` disables it |
 
 ## Worker Run
 
@@ -20,7 +19,7 @@ Worker runs:
 
 - use the root `SYSTEM_PROMPT.md`
 - expose the full worker toolset
-- run in temporary mode, so transcript and metadata are not persisted by `persist_if_dirty`
+- run in temporary mode, so transcript messages are not persisted by `persist_if_dirty`
 - write state under `.ogent/sessions/{session_id}/states.json` when the `state` tool is used
 - exit when the model sends a final assistant message with no tool calls
 
@@ -52,9 +51,8 @@ Director orchestration tools such as `dispatch_workers`, `wait_workers`, `inspec
 {workspace_root}/.ogent/
   sessions/
     {session_id}/
-      meta.json
       messages.jsonl
       states.json
 ```
 
-Direct CLI runs do not persist `messages.jsonl` or `meta.json`. `states.json` is worker-owned runtime state, including `progress/current` when the worker reports progress.
+Direct CLI runs do not persist `messages.jsonl`. `states.json` is worker-owned runtime state, including `progress/current` when the worker reports progress.

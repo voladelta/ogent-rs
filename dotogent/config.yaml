@@ -1,5 +1,4 @@
 default_profile: ds-flash
-autocompact: 80
 
 profiles:
   ds-flash:

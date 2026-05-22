@@ -39,7 +39,6 @@ ogent --profile kimi "Review the staged diff"
 {workspace_root}/.ogent/
   sessions/
     {session_id}/
-      meta.json
       messages.jsonl
       states.json
 ```

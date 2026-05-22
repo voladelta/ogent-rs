@@ -132,5 +132,5 @@ If status is `question`, answer the missing question yourself if possible, then 
 - Check `git status` before and after delegated edit tasks.
 - Keep delegation scoped; request broad refactors only when the user requested them.
 - Ask `ogent` to preserve tests, surface failures, keep acceptance criteria stable, and leave destructive operations to explicit user requests.
-- Treat `.ogent/sessions/`, `.ogent/journal.md`, and build outputs as runtime artifacts; read them only when needed and edit them only when requested.
+- Treat `.ogent/sessions/` and build outputs as runtime artifacts; read them only when needed and edit them only when requested.
 - Claim `ogent` ran checks or changed files only after you observed the output or inspected the repository state.
