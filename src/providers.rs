@@ -66,8 +66,8 @@ struct ProviderMessage<'a> {
   content: &'a str,
   #[serde(skip_serializing_if = "str::is_empty")]
   reasoning_content: &'a str,
-  #[serde(skip_serializing_if = "Vec::is_empty")]
-  tool_calls: &'a Vec<ToolCall>,
+  #[serde(skip_serializing_if = "<[ToolCall]>::is_empty")]
+  tool_calls: &'a [ToolCall],
   #[serde(skip_serializing_if = "str::is_empty")]
   tool_call_id: &'a str,
 }

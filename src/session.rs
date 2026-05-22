@@ -3,7 +3,7 @@ use crate::workspace::Workspace;
 use anyhow::{Context, Result};
 use std::fs;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -120,7 +120,7 @@ pub fn persist_session_in(
   persist_messages(messages, &path)
 }
 
-fn persist_messages(messages: &[Message], path: &PathBuf) -> Result<()> {
+fn persist_messages(messages: &[Message], path: &Path) -> Result<()> {
   if messages.is_empty() {
     return Ok(());
   }

@@ -93,11 +93,11 @@ async fn run_worker_cli(
 }
 
 fn parse_args() -> Args {
-  let mut raw: Vec<String> = env::args().collect();
-  parse_args_from(&mut raw)
+  let raw: Vec<String> = env::args().collect();
+  parse_args_from(&raw)
 }
 
-fn parse_args_from(raw: &mut [String]) -> Args {
+fn parse_args_from(raw: &[String]) -> Args {
   Args::parse_from(raw.iter())
 }
 
@@ -106,8 +106,8 @@ mod tests {
   use super::*;
 
   fn parse_test_args(raw: &[&str]) -> Args {
-    let mut raw = raw.iter().map(|arg| arg.to_string()).collect::<Vec<_>>();
-    parse_args_from(&mut raw)
+    let raw = raw.iter().map(|arg| arg.to_string()).collect::<Vec<_>>();
+    parse_args_from(&raw)
   }
 
   #[test]

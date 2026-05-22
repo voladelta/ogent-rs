@@ -168,8 +168,7 @@ fn exa_client() -> Result<&'static reqwest::Client> {
     .timeout(Duration::from_secs(60))
     .build()
     .context("build exa client")?;
-  let _ = CLIENT.set(client);
-  CLIENT.get().context("exa client unavailable")
+  Ok(CLIENT.get_or_init(|| client))
 }
 
 #[derive(Deserialize)]
@@ -657,12 +656,12 @@ fn state(agent: &mut Agent, args: &str) -> Result<String> {
         .content
         .context("content is required for state write")?;
       let is_progress = args.path == "progress/current";
-      map.insert(args.path, content.clone());
-      write_state_map(&scope_path, &map)?;
       if is_progress && let Some(ref sink) = agent.progress_sink {
         let mut guard = sink.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        *guard = content;
+        *guard = content.clone();
       }
+      map.insert(args.path, content);
+      write_state_map(&scope_path, &map)?;
       Ok("ok".to_string())
     }
     "append" => {

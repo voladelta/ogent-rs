@@ -84,14 +84,10 @@ impl Client {
         Err(err) => last_err = Some(err),
       }
     }
-    if let Some(err) = last_err {
-      Err(err)
-    } else {
-      Err(ClientError::ApiError {
-        status: 0,
-        body: "retry loop exhausted without an error".to_string(),
-      })
-    }
+    Err(last_err.unwrap_or_else(|| ClientError::ApiError {
+      status: 0,
+      body: "retry loop exhausted without an error".to_string(),
+    }))
   }
 
   async fn chat_once(
