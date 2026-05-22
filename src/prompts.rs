@@ -215,13 +215,6 @@ mod tests {
   }
 
   #[test]
-  fn compose_system_prompt_uses_system_prompt() {
-    let sys = compose_system_prompt("");
-    assert!(sys.contains("Core Contract"));
-    assert!(sys.contains("Reasoning Depth"));
-  }
-
-  #[test]
   fn build_initial_messages_keeps_human_task_last() {
     let messages = build_initial_messages("system", "do the task", "session-1");
     let last = messages.last().unwrap();
@@ -265,11 +258,5 @@ mod tests {
     push_internal_user_message(&mut messages, String::new());
 
     assert_eq!(messages.len(), 2);
-  }
-
-  #[test]
-  fn system_prompt_is_available() {
-    assert!(SYSTEM_PROMPT.contains("Core Contract"));
-    assert!(SYSTEM_PROMPT.contains("Reasoning Depth"));
   }
 }

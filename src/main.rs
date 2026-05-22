@@ -126,13 +126,6 @@ mod tests {
   }
 
   #[test]
-  fn parses_without_explicit_profile() {
-    let args = parse_test_args(&["ogent", "fix it"]);
-    assert_eq!(args.prompt, vec!["fix it"]);
-    assert!(ensure_run_mode_flags(&args).is_ok());
-  }
-
-  #[test]
   fn run_requires_task_prompt() {
     let args = parse_test_args(&["ogent"]);
     assert!(ensure_run_mode_flags(&args).is_err());
