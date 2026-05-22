@@ -241,7 +241,7 @@ fn rust_node_to_symbol(source: &str, node: Node) -> Option<Symbol> {
       let type_node = child_by_field(node, "type")?;
       let type_name = type_node.utf8_text(source.as_bytes()).ok()?.to_string();
       let trait_name = child_by_field(node, "trait")
-        .and_then(|n| Some(n.utf8_text(source.as_bytes()).ok()?.to_string()));
+        .and_then(|n| n.utf8_text(source.as_bytes()).ok().map(|s| s.to_string()));
       let name = if let Some(t) = trait_name {
         format!("{} for {}", t, type_name)
       } else {

@@ -245,7 +245,6 @@ fn first_line(s: &str) -> &str {
 mod tests {
   use super::*;
   use crate::client::Client;
-  use std::path::PathBuf;
 
   #[test]
   fn tool_result_content_reports_errors_to_model() {
@@ -295,6 +294,6 @@ mod tests {
     assert!(path.exists());
     let data = std::fs::read_to_string(&path).unwrap();
     assert!(data.contains("\"content\":\"hello\""));
-    let _ = std::fs::remove_dir_all(PathBuf::from(root));
+    let _ = std::fs::remove_dir_all(root);
   }
 }

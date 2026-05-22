@@ -56,12 +56,7 @@ async fn main() -> Result<()> {
     .provider_for(profile)
     .context("missing provider config for profile")?;
   let client = providers::new_client(profile, provider)?;
-  run_worker_cli(WorkerCliRun {
-    workspace,
-    client,
-    task: &args.prompt.join(" "),
-  })
-  .await
+  run_worker_cli(workspace, client, &args.prompt.join(" ")).await
 }
 
 fn ensure_run_mode_flags(args: &Args) -> Result<()> {
@@ -71,19 +66,17 @@ fn ensure_run_mode_flags(args: &Args) -> Result<()> {
   Ok(())
 }
 
-struct WorkerCliRun<'a> {
+async fn run_worker_cli(
   workspace: crate::workspace::Workspace,
   client: crate::client::Client,
-  task: &'a str,
-}
-
-async fn run_worker_cli(run: WorkerCliRun<'_>) -> Result<()> {
+  task: &str,
+) -> Result<()> {
   let system_prompt = prompts::compose_system_prompt("");
   let session_id = session::generate_session_id();
-  let messages = prompts::build_initial_messages(&system_prompt, run.task, &session_id);
+  let messages = prompts::build_initial_messages(&system_prompt, task, &session_id);
   let mut agent = Agent::new(
-    run.workspace,
-    run.client,
+    workspace,
+    client,
     messages,
     tools::configured_worker_tools(),
     session_id,
