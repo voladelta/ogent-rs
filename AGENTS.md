@@ -20,7 +20,7 @@ CLI
   -> src/agent.rs
   -> src/workspace.rs
   -> src/client.rs + src/providers.rs + src/sse.rs
-  -> src/tools.rs + src/workers.rs + src/session.rs
+  -> src/tools.rs + src/session.rs
 ```
 
 - `src/main.rs`: CLI parsing and worker runtime launch.
@@ -28,7 +28,6 @@ CLI
 - `src/workspace.rs`: explicit workspace root and path resolution.
 - `src/client.rs`, `src/providers.rs`, `src/sse.rs`: provider request construction, HTTP client, and SSE response parsing.
 - `src/tools.rs`: worker tool schemas and execution (`read_file`, `write_file`, `bash`, `repo_map`, `code_map`, web tools, `state`, hashline editing).
-- `src/workers.rs`: worker prompt resolution.
 - `src/session.rs`: workspace-scoped session meta/messages/state paths and persistence.
 - `src/prompts.rs`: built-in worker prompts and skill discovery/injection.
 - `src/symbol_tree.rs`: tree-sitter based symbol extraction for `code_map` (Rust and Go).
@@ -46,8 +45,8 @@ Removed legacy surfaces:
 | --- | --- | --- |
 | CLI flags and worker launch | `src/main.rs` | `docs/reference.md`, `README.md` |
 | Worker loop / exit / compaction reminders | `src/agent.rs` | `docs/agent-guide.md`, `ARCHITECTURE.md` |
-| Tool schema/behavior | `src/tools.rs` | `src/workers.rs`, `docs/reference.md` |
-| Worker prompt resolution | `src/workers.rs` | `SYSTEM_PROMPT.md` |
+| Tool schema/behavior | `src/tools.rs` | `docs/reference.md` |
+| System prompt / initial messages | `src/prompts.rs` | `SYSTEM_PROMPT.md` |
 | Session/state pathing | `src/session.rs` | `src/workspace.rs`, `src/tools.rs` |
 | Prompt loading and built-ins | `src/prompts.rs` | `SYSTEM_PROMPT.md`, `docs/agent-guide.md` |
 | Anchored editing | `src/hashline.rs` | `src/tools.rs`, `docs/reference.md` |

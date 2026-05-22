@@ -12,7 +12,6 @@ main.rs
     -> client.rs / providers.rs / sse.rs
     -> tools.rs
       -> session.rs
-  -> workers.rs
 ```
 
 ## Module Ownership
@@ -32,8 +31,6 @@ main.rs
   - Tool schemas and implementations.
   - Full worker toolset used by CLI runtime.
   - Executes filesystem and shell tools against the active `Workspace`.
-- `src/workers.rs`
-  - Worker prompt resolution.
 - `src/session.rs`
   - Session meta/messages persistence.
   - Workspace-scoped state and transcript paths.

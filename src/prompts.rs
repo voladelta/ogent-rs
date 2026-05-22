@@ -6,6 +6,42 @@ use crate::types::{Message, MessageOrigin};
 
 pub const SYSTEM_PROMPT: &str = include_str!("../SYSTEM_PROMPT.md");
 
+pub fn compose_system_prompt(context: &str) -> String {
+  let context_section = format!("## Context\n\n{}", context.trim());
+  compose_prompt_sections(SYSTEM_PROMPT, Some(&context_section))
+}
+
+fn compose_prompt_sections(base_prompt: &str, extra_section: Option<&str>) -> String {
+  let mut sections = vec![base_prompt.trim().to_string()];
+  if let Some(extra) = extra_section
+    && !extra.trim().is_empty()
+  {
+    sections.push(extra.trim().to_string());
+  }
+  sections.join("\n\n")
+}
+
+pub(crate) fn build_initial_messages(
+  system_prompt: &str,
+  task_prompt: &str,
+  session_id: &str,
+) -> Vec<Message> {
+  let mut messages = vec![Message {
+    role: "system".into(),
+    content: system_prompt.to_string(),
+    origin: MessageOrigin::Internal,
+    ..Default::default()
+  }];
+  enrich_initial_messages(&mut messages);
+  messages.push(Message {
+    role: "user".into(),
+    content: format!("[session: {session_id}]\n\n{}", task_prompt.trim()),
+    origin: MessageOrigin::Human,
+    ..Default::default()
+  });
+  messages
+}
+
 pub fn skill_roots() -> Vec<PathBuf> {
   let mut dirs = vec![PathBuf::from(".ogent/skills")];
   if let Some(home) = std::env::var_os("HOME") {
@@ -168,6 +204,31 @@ fn push_internal_user_message(messages: &mut Vec<Message>, content: String) {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn compose_system_prompt_includes_context() {
+    let sys = compose_system_prompt("## Write Scope\n- src/lib.rs");
+    assert!(sys.contains("Core Contract"));
+    assert!(sys.contains("## Context"));
+    assert!(sys.contains("src/lib.rs"));
+    assert!(sys.contains("## Progress Reporting"));
+    assert!(sys.contains("# Status"));
+  }
+
+  #[test]
+  fn compose_system_prompt_uses_system_prompt() {
+    let sys = compose_system_prompt("");
+    assert!(sys.contains("Core Contract"));
+    assert!(sys.contains("Reasoning Depth"));
+  }
+
+  #[test]
+  fn build_initial_messages_keeps_human_task_last() {
+    let messages = build_initial_messages("system", "do the task", "session-1");
+    let last = messages.last().unwrap();
+    assert_eq!(last.origin, MessageOrigin::Human);
+    assert_eq!(last.content, "[session: session-1]\n\ndo the task");
+  }
 
   #[test]
   fn push_internal_user_message_preserves_human_message() {

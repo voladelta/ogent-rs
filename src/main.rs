@@ -9,7 +9,6 @@ mod sse;
 mod symbol_tree;
 mod tools;
 mod types;
-mod workers;
 mod workspace;
 
 use anyhow::{Context, Result, bail};
@@ -89,9 +88,9 @@ struct WorkerCliRun<'a> {
 }
 
 async fn run_worker_cli(run: WorkerCliRun<'_>) -> Result<()> {
-  let (system_prompt, task_prompt) = workers::resolve_worker_prompt(run.task, "");
+  let system_prompt = prompts::compose_system_prompt("");
   let session_id = session::generate_session_id();
-  let messages = workers::build_worker_messages(&system_prompt, &task_prompt, &session_id);
+  let messages = prompts::build_initial_messages(&system_prompt, run.task, &session_id);
   let compact = if run.autocompact >= 0 {
     CompactState::new(f64::from(run.autocompact) / 100.0, run.context_limit)
   } else {
