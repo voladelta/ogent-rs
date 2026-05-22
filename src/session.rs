@@ -25,10 +25,6 @@ pub fn session_dir_in(workspace: &Workspace, session_id: &str) -> PathBuf {
   workspace.root().join(".ogent/sessions").join(session_id)
 }
 
-pub fn state_path_in(workspace: &Workspace, session_id: &str) -> PathBuf {
-  session_dir_in(workspace, session_id).join("states.json")
-}
-
 #[cfg(test)]
 pub struct SessionLock {
   path: PathBuf,

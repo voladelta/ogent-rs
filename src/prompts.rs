@@ -211,7 +211,6 @@ mod tests {
     assert!(sys.contains("Core Contract"));
     assert!(sys.contains("## Context"));
     assert!(sys.contains("src/lib.rs"));
-    assert!(sys.contains("## Progress Reporting"));
     assert!(sys.contains("# Status"));
   }
 

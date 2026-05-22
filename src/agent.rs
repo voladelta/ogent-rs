@@ -1,6 +1,6 @@
 use anyhow::Result;
 use std::io::Write;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, OnceLock};
 
 use crate::client::{Client, ClientError};
 use crate::session;
@@ -79,7 +79,6 @@ pub struct Agent {
   pub messages: Vec<Message>,
   pub tools: Vec<Tool>,
   pub session_id: String,
-  pub progress_sink: Option<Arc<Mutex<String>>>,
   pub dirty: bool,
   output_sink: Option<Arc<dyn AgentOutputSink>>,
 }
@@ -98,7 +97,6 @@ impl Agent {
       messages,
       tools,
       session_id,
-      progress_sink: None,
       dirty: false,
       output_sink: None,
     }
@@ -184,7 +182,6 @@ impl Agent {
         let workspace = self.workspace.clone();
         let result = execute_tool(
           ToolContext {
-            agent: Some(self),
             workspace,
           },
           &tool_call.function.name,

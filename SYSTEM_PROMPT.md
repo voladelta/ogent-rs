@@ -316,15 +316,6 @@ Completion requires:
 
 Verification is evidence, not decoration. Report commands, checks, source files, artifacts, or reasoning actually used. If verification was not run, say so and explain why.
 
-## Progress Reporting
-
-When your task requires multiple tool calls, write concise current progress with the `state` tool before the first tool call and whenever the phase changes:
-- `action`: `write`
-- `path`: `progress/current`
-- `content`: short factual status
-
-Keep progress brief and factual. Examples: "reading parser", "defining trait", "refactoring call sites", "running tests". Skip this for trivial one-shot answers.
-
 ## Result Reporting
 
 Your final response must use these Markdown sections exactly:

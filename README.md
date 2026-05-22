@@ -40,7 +40,7 @@ ogent --profile kimi "Review the staged diff"
 
 - **Worker Mode**: Invocations execute in worker mode.
 - **System Prompt**: It relies on [SYSTEM_PROMPT.md](SYSTEM_PROMPT.md) for its prompt loop, state, and result formatting guidelines.
-- **Session Persistence**: CLI runs persist conversation transcripts to `.ogent/sessions/{session_id}/messages.jsonl` and write `states.json` in the same directory when the `state` tool is used.
+- **Session Persistence**: CLI runs persist conversation transcripts to `.ogent/sessions/{session_id}/messages.jsonl` on exit.
 - **Run Completion**: A run terminates when the agent returns a final message without calling any more tools.
 
 ---
@@ -62,9 +62,8 @@ Every worker run receives the full worker toolset:
   - `web_search`: Queries the web for excerpts via Exa.
   - `web_read`: Reads key highlights or raw text from web URLs.
   - `web_code_context`: Searches real-world code for syntax/API context.
-* **Utilities & State**:
+* **Utilities**:
   - `load_skill`: Dynamically loads pre-configured skill prompt/resources.
-  - `state`: Persists and queries key-value states in `.ogent/sessions/{session_id}/states.json`.
 
 ---
 

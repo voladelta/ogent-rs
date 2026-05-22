@@ -1,7 +1,6 @@
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 use serde_json::{Value, json};
-use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -9,17 +8,15 @@ use std::sync::OnceLock;
 use tokio::process::Command;
 use tokio::time::{Duration, timeout};
 
-use crate::agent::Agent;
 use crate::hashline::{EditOp, apply_anchor_edits, render_hashlines};
 use crate::types::{Tool, ToolFunction};
 use crate::workspace::Workspace;
 
-pub struct ToolContext<'a> {
-  pub agent: Option<&'a mut Agent>,
+pub struct ToolContext {
   pub workspace: Workspace,
 }
 
-pub async fn execute_tool(mut ctx: ToolContext<'_>, name: &str, args: &str) -> Result<String> {
+pub async fn execute_tool(ctx: ToolContext, name: &str, args: &str) -> Result<String> {
   match name {
     "read_file" => read_file(&ctx.workspace, args),
     "write_file" => write_file(&ctx.workspace, args),
@@ -32,13 +29,6 @@ pub async fn execute_tool(mut ctx: ToolContext<'_>, name: &str, args: &str) -> R
     "web_read" => web_read(args).await,
     "web_code_context" => web_code_context(args).await,
     "load_skill" => load_skill(args),
-    "state" => {
-      let agent = ctx
-        .agent
-        .as_deref_mut()
-        .context("state requires an active agent")?;
-      state(agent, args)
-    }
     _ => bail!("unknown tool: {name}"),
   }
 }
@@ -49,28 +39,6 @@ pub fn configured_worker_tools() -> Vec<Tool> {
   WORKER_TOOLS.get_or_init(build_worker_tools).clone()
 }
 
-fn state_schema_parameters() -> Value {
-  json!({
-    "type": "object",
-    "properties": {
-      "action": {"type": "string", "enum": ["read", "write", "append", "list"]},
-      "path": {"type": "string"},
-      "content": {"type": "string"}
-    },
-    "required": ["action"],
-    "allOf": [
-      {
-        "if": {"properties": {"action": {"const": "read"}}, "required": ["action"]},
-        "then": {"required": ["path"]}
-      },
-      {
-        "if": {"properties": {"action": {"enum": ["write", "append"]}}, "required": ["action"]},
-        "then": {"required": ["path", "content"]}
-      }
-    ],
-    "additionalProperties": false
-  })
-}
 
 fn build_worker_tools() -> Vec<Tool> {
   vec![
@@ -128,11 +96,6 @@ fn build_worker_tools() -> Vec<Tool> {
       "load_skill",
       "Load a skill from .ogent/skills/ or ~/.ogent/skills/.",
       json!({"type":"object","properties":{"name":{"type":"string"}},"required":["name"],"additionalProperties":false}),
-    ),
-    schema(
-      "state",
-      "Read/write/list scoped runtime state in states.json. list accepts an empty path. read requires path. write/append require path and content.",
-      state_schema_parameters(),
     ),
   ]
 }
@@ -618,119 +581,12 @@ fn load_skill(args: &str) -> Result<String> {
   ))
 }
 
-#[derive(Deserialize)]
-struct StateArgs {
-  action: String,
-  #[serde(default)]
-  path: String,
-  content: Option<String>,
-}
 
-fn state(agent: &mut Agent, args: &str) -> Result<String> {
-  let args: StateArgs = parse_args(args)?;
-  require_nonempty(&args.action, "action")?;
-  let scope_path = crate::session::state_path_in(&agent.workspace, &agent.session_id);
-
-  let mut map = read_state_map(&scope_path)?;
-  match args.action.as_str() {
-    "read" => {
-      require_nonempty(&args.path, "path")?;
-      Ok(serde_json::to_string(&map.get(&args.path).cloned())?)
-    }
-    "list" => {
-      let prefix = args.path.trim();
-      let keys: Vec<String> = if prefix.is_empty() {
-        map.keys().cloned().collect()
-      } else {
-        map
-          .keys()
-          .filter(|k| k.starts_with(prefix))
-          .cloned()
-          .collect()
-      };
-      Ok(serde_json::to_string(&keys)?)
-    }
-    "write" => {
-      require_nonempty(&args.path, "path")?;
-      let content = args
-        .content
-        .context("content is required for state write")?;
-      let is_progress = args.path == "progress/current";
-      if is_progress && let Some(ref sink) = agent.progress_sink {
-        let mut guard = sink.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        *guard = content.clone();
-      }
-      map.insert(args.path, content);
-      write_state_map(&scope_path, &map)?;
-      Ok("ok".to_string())
-    }
-    "append" => {
-      require_nonempty(&args.path, "path")?;
-      let content = args
-        .content
-        .context("content is required for state append")?;
-      let is_progress = args.path == "progress/current";
-      let entry = map.entry(args.path).or_default();
-      entry.push_str(&content);
-      if is_progress && let Some(ref sink) = agent.progress_sink {
-        let mut guard = sink.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        *guard = entry.clone();
-      }
-      write_state_map(&scope_path, &map)?;
-      Ok("ok".to_string())
-    }
-    _ => bail!("action must be one of: read, write, append, list"),
-  }
-}
-
-fn read_state_map(path: &Path) -> Result<BTreeMap<String, String>> {
-  if !path.exists() {
-    return Ok(BTreeMap::new());
-  }
-  let data = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
-  if data.trim().is_empty() {
-    return Ok(BTreeMap::new());
-  }
-  serde_json::from_str(&data).with_context(|| format!("parse {}", path.display()))
-}
-
-fn write_state_map(path: &Path, map: &BTreeMap<String, String>) -> Result<()> {
-  if let Some(parent) = path.parent() {
-    fs::create_dir_all(parent).with_context(|| format!("mkdir {}", parent.display()))?;
-  }
-  let data = serde_json::to_string_pretty(map)?;
-  fs::write(path, data).with_context(|| format!("write {}", path.display()))
-}
 
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::client::Client;
   use std::path::PathBuf;
-  use std::sync::atomic::{AtomicU64, Ordering};
-
-  static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
-
-  fn dummy_client() -> Client {
-    Client::new(
-      "http://localhost",
-      "dummy".into(),
-      |_, _| Ok(serde_json::Value::Null),
-      30,
-    )
-    .unwrap()
-  }
-
-  fn dummy_agent() -> Agent {
-    let id = TEST_COUNTER.fetch_add(1, Ordering::SeqCst);
-    Agent::new(
-      crate::workspace::Workspace::from_current_dir(),
-      dummy_client(),
-      crate::prompts::build_messages(""),
-      configured_worker_tools(),
-      format!("tools-test-session-{id}"),
-    )
-  }
 
   fn test_workspace(root: &str) -> Workspace {
     Workspace::from_root(PathBuf::from(root))
@@ -777,58 +633,13 @@ mod tests {
     assert!(names.contains(&"read_hash_anchors"));
     assert!(names.contains(&"code_map"));
     assert!(names.contains(&"edit_hash_anchors"));
-    assert!(names.contains(&"state"));
   }
 
-  #[test]
-  fn state_round_trip_write_read_list_append() {
-    let mut agent = dummy_agent();
-    let key = "foo/bar";
-
-    state(
-      &mut agent,
-      &format!(r#"{{"action":"write","path":"{key}","content":"hello"}}"#),
-    )
-    .unwrap();
-    let read = state(
-      &mut agent,
-      &format!(r#"{{"action":"read","path":"{key}"}}"#),
-    )
-    .unwrap();
-    assert_eq!(read, "\"hello\"");
-
-    state(
-      &mut agent,
-      &format!(r#"{{"action":"append","path":"{key}","content":" world"}}"#),
-    )
-    .unwrap();
-    let read_after_append = state(
-      &mut agent,
-      &format!(r#"{{"action":"read","path":"{key}"}}"#),
-    )
-    .unwrap();
-    assert_eq!(read_after_append, "\"hello world\"");
-
-    let list = state(&mut agent, r#"{"action":"list","path":"foo"}"#).unwrap();
-    assert!(list.contains(key));
-  }
-
-  #[test]
-  fn state_write_and_append_require_content() {
-    let mut agent = dummy_agent();
-
-    let write_err = state(&mut agent, r#"{"action":"write","path":"goal"}"#).unwrap_err();
-    assert!(write_err.to_string().contains("content is required"));
-
-    let append_err = state(&mut agent, r#"{"action":"append","path":"goal"}"#).unwrap_err();
-    assert!(append_err.to_string().contains("content is required"));
-  }
 
   #[tokio::test]
   async fn execute_tool_unknown_returns_error() {
     let result = execute_tool(
       ToolContext {
-        agent: None,
         workspace: crate::workspace::Workspace::from_current_dir(),
       },
       "nonexistent_tool",

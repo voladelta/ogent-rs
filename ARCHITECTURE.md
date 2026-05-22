@@ -51,7 +51,7 @@ Use this map to locate source files for specific request areas:
 | Worker loop and execution | [src/agent.rs](file:///Users/mbp/Codehub/ogent-rs/src/agent.rs) | [SYSTEM_PROMPT.md](file:///Users/mbp/Codehub/ogent-rs/SYSTEM_PROMPT.md) |
 | Tool schemas and behavior | [src/tools.rs](file:///Users/mbp/Codehub/ogent-rs/src/tools.rs) | [src/hashline.rs](file:///Users/mbp/Codehub/ogent-rs/src/hashline.rs) |
 | System prompt and initial messages | [src/prompts.rs](file:///Users/mbp/Codehub/ogent-rs/src/prompts.rs) | [SYSTEM_PROMPT.md](file:///Users/mbp/Codehub/ogent-rs/SYSTEM_PROMPT.md) |
-| Session & state routing | [src/session.rs](file:///Users/mbp/Codehub/ogent-rs/src/session.rs) | [src/workspace.rs](file:///Users/mbp/Codehub/ogent-rs/src/workspace.rs) |
+| Session routing | [src/session.rs](file:///Users/mbp/Codehub/ogent-rs/src/session.rs) | [src/workspace.rs](file:///Users/mbp/Codehub/ogent-rs/src/workspace.rs) |
 | Workspace path validation | [src/workspace.rs](file:///Users/mbp/Codehub/ogent-rs/src/workspace.rs) | [src/tools.rs](file:///Users/mbp/Codehub/ogent-rs/src/tools.rs) |
 | Anchored editing mechanics | [src/hashline.rs](file:///Users/mbp/Codehub/ogent-rs/src/hashline.rs) | [src/tools.rs](file:///Users/mbp/Codehub/ogent-rs/src/tools.rs) |
 | Symbol mapping & AST parsing | [src/symbol_tree.rs](file:///Users/mbp/Codehub/ogent-rs/src/symbol_tree.rs) | [src/tools.rs](file:///Users/mbp/Codehub/ogent-rs/src/tools.rs) |
@@ -63,24 +63,22 @@ Use this map to locate source files for specific request areas:
 1. **Single CLI Worker**: CLI launches exactly one worker-mode agent.
 2. **Worker Prompt & Tool Scope**: Worker runs use only worker prompts and the full worker toolset.
 3. **Immutable Workspace**: Every Agent owns a single, immutable `Workspace` root derived from the process's current directory at startup.
-4. **Workspace Sandboxing**: Tool executions, bash directories, state files, and session file operations must resolve strictly within the active `Workspace` root.
+4. **Workspace Sandboxing**: Tool executions, bash directories, and session file operations must resolve strictly within the active `Workspace` root.
 5. **Worker-Only Edits**: All worker file modifications must occur via the `write_file` or `edit_hash_anchors` tools.
 6. **Graceful Exit**: An agent run terminates once the model emits a final text response with no pending tool calls.
 7. **Skill Injection**: Startup skill discovery and injection remain fully enabled.
 
 ---
 
-## State Layout
+## Session Layout
 
-Session and progress state is stored at the repository level:
+Session transcripts are stored at the repository level:
 
 ```txt
 {workspace_root}/.ogent/
   sessions/
     {session_id}/
       messages.jsonl
-      states.json
 ```
 
 - **Transcript Persistence**: Direct CLI invocations write the conversation transcript to `messages.jsonl` on exit.
-- **State Persistence**: The `state` tool writes key-value pairs, including progress tracking keys like `progress/current`, to `states.json`.
