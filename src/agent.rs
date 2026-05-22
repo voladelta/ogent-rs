@@ -226,6 +226,7 @@ fn first_line(s: &str) -> &str {
 mod tests {
   use super::*;
   use crate::client::Client;
+  use crate::types::MessageOrigin;
 
   #[test]
   fn tool_result_content_reports_errors_to_model() {

@@ -23,23 +23,22 @@ pub enum Capability {
   Network,
 }
 
+pub type AsyncHandler = Box<
+  dyn Fn(ToolContext, &str) -> Pin<Box<dyn Future<Output = Result<String>> + Send>> + Send + Sync,
+>;
+
 pub struct ToolDef {
   pub name: &'static str,
   pub description: &'static str,
   pub parameters: Value,
   pub handler: Handler,
+  #[allow(dead_code)]
   pub capability: Capability,
 }
 
 pub enum Handler {
   Sync(fn(ToolContext, &str) -> Result<String>),
-  Async(
-    Box<
-      dyn Fn(ToolContext, &str) -> Pin<Box<dyn Future<Output = Result<String>> + Send>>
-        + Send
-        + Sync,
-    >,
-  ),
+  Async(AsyncHandler),
 }
 
 impl ToolDef {
