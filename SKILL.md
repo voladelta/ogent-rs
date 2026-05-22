@@ -7,46 +7,36 @@ description: Use ogent as an external coding co-worker for focused software engi
 
 Use `ogent` when an independent coding co-worker would help make concrete progress in the current repository.
 
-`ogent` is best for focused, bounded work: implementing a scoped change, debugging a failure, reviewing or critiquing an artifact, gathering evidence, validating claims, or summarizing run state.
-
 Run `ogent` from the repository root or the intended workspace. Its workspace is the process current directory.
-
-## When to Use
-
-Use this skill when:
-- the user explicitly asks to use `ogent`
-- a focused task can be delegated with a clear contract
-- a second pass would improve confidence: review, verification, debugging, or research
-
-Use direct conversation for tiny one-shot answers. Ask the user to narrow broad ambiguous goals before delegation. Keep destructive operations, credential discovery, and work outside the current repository out of scope unless the user explicitly asks.
 
 ## Task Contract
 
-Give `ogent` a complete, compact task prompt. Open with the destination, then give the worker the path to evidence and the stopping condition.
+Write the prompt sent to `ogent` in this field order. Fill every field with task-specific content. Keep the contract compact, concrete, and self-contained.
 
 ```text
-Goal: <one sentence>
+Goal:
+<one sentence naming the desired outcome for ogent>
 
 Success means:
 - <observable result>
+- <acceptance criteria>
 - <required evidence>
 - <required verification or inspection>
-- <required output format>
 
 Context:
-<only the facts needed for this run>
+<facts already known; include user intent, prior findings, relevant files, and branch state when useful>
 
 Scope:
-<files, directories, commands, or topics in bounds>
+<files, directories, commands, topics, and allowed change area>
 
 Constraints:
-<hard boundaries: edit permission, runtime limits, safety, secrets, destructive actions>
+<edit permission, public API boundaries, safety boundaries, secrets/destructive-action limits, and runtime limits>
 
 Stop when:
-<exact condition that ends the run>
+<exact condition that ends ogent's run>
 
 Evidence required:
-<commands, files, traces, diffs, logs, or reasoning that must appear in the final answer>
+<commands, files, diffs, logs, traces, or reasoning ogent must report>
 
 Expected output:
 Use exactly these top-level sections: # Status, # Summary, # Changed Files, # Verification, # Evidence, # Risks, # Question, # Next Action.
@@ -55,7 +45,16 @@ Claim standard:
 For security, sandbox, parser, validation, or correctness claims, give one concrete input, trace the validation/check path, trace the runtime/effect path, and name the invariant satisfied or violated before classifying the issue.
 ```
 
-Strong contracts name the target state, files, commands, acceptance criteria, risk boundaries, edit permission, and verification evidence. Use relative paths. Put tool workflow details in the repo system prompt; put task-specific outcomes and evidence rules in the contract.
+Strong contracts name the target state, acceptance criteria, relevant paths, permitted changes, constraints, evidence, and stop condition. Use relative paths. Keep the `task` argument focused on task-specific outcomes and evidence requirements.
+
+Before invoking `ogent`, check the contract:
+- Goal names one outcome.
+- Success criteria are observable.
+- Context gives enough facts for an independent run.
+- Scope names the relevant files, directories, commands, or topics.
+- Constraints state edit permission and hard boundaries.
+- Stop condition tells `ogent` when to finish.
+- Evidence requirements are inspectable by you after the run.
 
 ## Invocation Patterns
 
@@ -81,30 +80,31 @@ Goal:
 Find the root cause of the failing parser test.
 
 Success means:
-- The failing behavior is reproduced or the blocker is reported.
+- The failing behavior is reproduced or a specific blocker is reported.
 - The root cause is supported by source or test evidence.
 - The smallest justified next step is identified.
+- Verification evidence or the reason verification is unavailable is reported.
 
 Context:
 The failure appears after changing token normalization.
 
 Scope:
-src/parser.rs, src/lexer.rs, parser tests.
+src/parser.rs, src/lexer.rs, parser tests, and commands needed to reproduce the parser failure.
 
 Constraints:
-Treat tests as intended-behavior evidence. Edit source only after identifying the root cause. Edit tests when the evidence shows the test encodes stale behavior.
-
-Boundaries:
-Keep parser public APIs unchanged.
+Treat tests as intended-behavior evidence. Edit source only after identifying the root cause. Edit tests when evidence shows the test encodes stale behavior. Keep parser public APIs unchanged.
 
 Stop when:
 The root cause and smallest justified next step are clear, or the run reaches a specific blocker.
 
 Evidence required:
-Reproduction command, root-cause evidence, and minimal fix path.
+Reproduction command, relevant failing output, source/test trace, root-cause evidence, and minimal fix path.
 
 Expected output:
 Use exactly these top-level sections: # Status, # Summary, # Changed Files, # Verification, # Evidence, # Risks, # Question, # Next Action.
+
+Claim standard:
+For security, sandbox, parser, validation, or correctness claims, give one concrete input, trace the validation/check path, trace the runtime/effect path, and name the invariant satisfied or violated before classifying the issue.
 TASK
 )
 
