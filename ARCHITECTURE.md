@@ -30,7 +30,7 @@ main.rs
   - Provides current-dir compatibility wrappers for CLI paths.
 - `src/tools.rs`
   - Tool schemas and implementations.
-  - Worker toolset used by CLI runtime.
+  - Role-scoped worker tool groups used by CLI runtime.
   - Executes filesystem and shell tools against the active `Workspace`.
 - `src/workers.rs`
   - Worker prompt resolution.

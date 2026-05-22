@@ -49,6 +49,8 @@ Default to `ogent` for general software engineering. Use a specialist role when 
 | `writer` | drafting, rewriting prose, and StackOverflow-style technical answers |
 | `summarizer` | compressing transcript or run history into continuation state |
 
+Specialist roles receive scoped tool groups. Choose `ogent` when the task genuinely needs the full worker toolset. Choose `writer` or `summarizer` when the task may create a requested file but does not need shell commands or anchored code edits.
+
 ## Task Contract
 
 Give `ogent` a complete but compact contract. Include only what changes behavior:

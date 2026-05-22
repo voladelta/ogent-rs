@@ -125,7 +125,7 @@ async fn run_worker_cli(run: WorkerCliRun<'_>) -> Result<()> {
     run.workspace,
     run.client,
     messages,
-    tools::configured_worker_tools(),
+    tools::configured_worker_tools_for_role(run.role),
     compact,
     meta,
     None,

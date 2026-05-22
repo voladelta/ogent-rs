@@ -10,7 +10,7 @@
 Direct worker runs:
 
 - resolve `<role>` through the normal worker prompt resolver
-- use the worker toolset only
+- use the role's scoped worker tool group
 - do not expose Director worker-management tools (`dispatch_workers`, `wait_workers`, `inspect_worker`, `cancel_workers`, `set_title`)
 - use the configured default profile unless `--profile` is passed
 - use the configured autocompact default
@@ -41,27 +41,23 @@ Direct CLI worker runs set `temp: true`, so transcript and metadata files are no
 
 A run ends when the worker sends a final assistant message (no tool calls).
 
-## Tool Split
+## Tool Groups
 
-Worker-only edits:
+Worker tools are grouped by role to keep prompts smaller and reduce accidental tool use. `ogent` receives the full worker toolset.
 
-- `write_file`
-- `read_hash_anchors`
-- `edit_hash_anchors`
+| Group | Roles | Tools |
+| --- | --- | --- |
+| generalist | `ogent` | all worker tools |
+| coder | `implementer` | `state`, `load_skill`, repo/code read tools, file write/edit tools, `bash`, `web_code_context` |
+| diagnostic | `debugger` | `state`, `load_skill`, repo/code read tools, `bash`, `web_code_context` |
+| review | `reviewer` | `state`, `load_skill`, repo/code read tools, `bash` |
+| evidence | `verifier` | `state`, `load_skill`, repo/code read tools, `bash`, `web_search`, `web_read` |
+| research | `researcher` | `state`, `load_skill`, `read_file`, `write_file`, web tools |
+| writing | `writer`, `visual_designer` | `state`, `load_skill`, `read_file`, `write_file`, `web_search`, `web_read` |
+| architecture | `system_architect`, `database_architect` | `state`, `load_skill`, repo/code read tools, `write_file` |
+| summary | `summarizer` | `state`, `load_skill`, `read_file`, `write_file` |
 
-Shared:
-
-- `repo_map`
-- `code_map`
-- `load_skill`
-- `state`
-
-Worker-only context gathering:
-
-- `read_file`
-- `web_search`
-- `web_read`
-- `web_code_context`
+Every specialist group includes `state` for progress reporting and `load_skill` for task-specific guidance. Writing and summary roles can create requested files with `write_file`; code-editing anchors stay with the coder/generalist groups.
 
 ## Purge Note
 

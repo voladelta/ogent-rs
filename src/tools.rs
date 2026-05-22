@@ -49,6 +49,117 @@ pub fn configured_worker_tools() -> Vec<Tool> {
   WORKER_TOOLS.get_or_init(build_worker_tools).clone()
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ToolGroup {
+  Generalist,
+  Coder,
+  Diagnostic,
+  Review,
+  Evidence,
+  Research,
+  Writing,
+  Architecture,
+  Summary,
+}
+
+pub fn configured_worker_tools_for_role(role: &str) -> Vec<Tool> {
+  let group = tool_group_for_role(role);
+  if group == ToolGroup::Generalist {
+    return configured_worker_tools();
+  }
+  let allowed = tool_names_for_group(group);
+  configured_worker_tools()
+    .into_iter()
+    .filter(|tool| allowed.contains(&tool.function.name.as_str()))
+    .collect()
+}
+
+fn tool_group_for_role(role: &str) -> ToolGroup {
+  match role.trim() {
+    "" | "ogent" => ToolGroup::Generalist,
+    "implementer" => ToolGroup::Coder,
+    "debugger" => ToolGroup::Diagnostic,
+    "reviewer" => ToolGroup::Review,
+    "verifier" => ToolGroup::Evidence,
+    "researcher" => ToolGroup::Research,
+    "writer" | "visual_designer" => ToolGroup::Writing,
+    "system_architect" | "database_architect" => ToolGroup::Architecture,
+    "summarizer" => ToolGroup::Summary,
+    _ => ToolGroup::Generalist,
+  }
+}
+
+fn tool_names_for_group(group: ToolGroup) -> &'static [&'static str] {
+  match group {
+    ToolGroup::Generalist => &[],
+    ToolGroup::Coder => &[
+      "state",
+      "load_skill",
+      "repo_map",
+      "code_map",
+      "read_file",
+      "write_file",
+      "read_hash_anchors",
+      "edit_hash_anchors",
+      "bash",
+      "web_code_context",
+    ],
+    ToolGroup::Diagnostic => &[
+      "state",
+      "load_skill",
+      "repo_map",
+      "code_map",
+      "read_file",
+      "bash",
+      "web_code_context",
+    ],
+    ToolGroup::Review => &[
+      "state",
+      "load_skill",
+      "repo_map",
+      "code_map",
+      "read_file",
+      "bash",
+    ],
+    ToolGroup::Evidence => &[
+      "state",
+      "load_skill",
+      "repo_map",
+      "code_map",
+      "read_file",
+      "bash",
+      "web_search",
+      "web_read",
+    ],
+    ToolGroup::Research => &[
+      "state",
+      "load_skill",
+      "read_file",
+      "write_file",
+      "web_search",
+      "web_read",
+      "web_code_context",
+    ],
+    ToolGroup::Writing => &[
+      "state",
+      "load_skill",
+      "read_file",
+      "write_file",
+      "web_search",
+      "web_read",
+    ],
+    ToolGroup::Architecture => &[
+      "state",
+      "load_skill",
+      "repo_map",
+      "code_map",
+      "read_file",
+      "write_file",
+    ],
+    ToolGroup::Summary => &["state", "load_skill", "read_file", "write_file"],
+  }
+}
+
 fn state_schema_parameters() -> Value {
   json!({
     "type": "object",
@@ -675,6 +786,13 @@ mod tests {
 
   static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
 
+  fn tool_names(tools: Vec<Tool>) -> Vec<String> {
+    tools
+      .iter()
+      .map(|tool| tool.function.name.clone())
+      .collect()
+  }
+
   fn dummy_client() -> Client {
     Client::new(
       "http://localhost",
@@ -753,6 +871,78 @@ mod tests {
     assert!(!names.contains(&"set_title"));
     assert!(!names.contains(&"dispatch_workers"));
     assert!(!names.contains(&"wait_workers"));
+  }
+
+  #[test]
+  fn ogent_role_gets_all_worker_tools() {
+    let all = tool_names(configured_worker_tools());
+    let ogent = tool_names(configured_worker_tools_for_role("ogent"));
+    assert_eq!(ogent, all);
+  }
+
+  #[test]
+  fn implementer_tools_include_code_editing_without_broad_web() {
+    let names = tool_names(configured_worker_tools_for_role("implementer"));
+    assert!(names.contains(&"state".to_string()));
+    assert!(names.contains(&"write_file".to_string()));
+    assert!(names.contains(&"read_hash_anchors".to_string()));
+    assert!(names.contains(&"edit_hash_anchors".to_string()));
+    assert!(names.contains(&"bash".to_string()));
+    assert!(names.contains(&"web_code_context".to_string()));
+    assert!(!names.contains(&"web_search".to_string()));
+    assert!(!names.contains(&"web_read".to_string()));
+  }
+
+  #[test]
+  fn reviewer_tools_are_read_and_check_only() {
+    let names = tool_names(configured_worker_tools_for_role("reviewer"));
+    assert!(names.contains(&"state".to_string()));
+    assert!(names.contains(&"read_file".to_string()));
+    assert!(names.contains(&"repo_map".to_string()));
+    assert!(names.contains(&"code_map".to_string()));
+    assert!(names.contains(&"bash".to_string()));
+    assert!(!names.contains(&"write_file".to_string()));
+    assert!(!names.contains(&"edit_hash_anchors".to_string()));
+    assert!(!names.contains(&"web_search".to_string()));
+  }
+
+  #[test]
+  fn writer_and_summarizer_can_write_files_without_shell() {
+    for role in ["writer", "summarizer"] {
+      let names = tool_names(configured_worker_tools_for_role(role));
+      assert!(names.contains(&"state".to_string()), "role: {role}");
+      assert!(names.contains(&"read_file".to_string()), "role: {role}");
+      assert!(names.contains(&"write_file".to_string()), "role: {role}");
+      assert!(!names.contains(&"bash".to_string()), "role: {role}");
+      assert!(
+        !names.contains(&"web_code_context".to_string()),
+        "role: {role}"
+      );
+      assert!(
+        !names.contains(&"edit_hash_anchors".to_string()),
+        "role: {role}"
+      );
+    }
+  }
+
+  #[test]
+  fn every_specialist_tool_group_has_progress_state() {
+    for role in [
+      "implementer",
+      "debugger",
+      "reviewer",
+      "verifier",
+      "researcher",
+      "writer",
+      "visual_designer",
+      "system_architect",
+      "database_architect",
+      "summarizer",
+    ] {
+      let names = tool_names(configured_worker_tools_for_role(role));
+      assert!(names.contains(&"state".to_string()), "role: {role}");
+      assert!(names.contains(&"load_skill".to_string()), "role: {role}");
+    }
   }
 
   #[test]

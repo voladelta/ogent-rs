@@ -20,12 +20,25 @@ ogent --role reviewer --profile kimi "Review the staged diff"
 Worker runs:
 
 - resolve the requested role through built-in worker prompts
-- expose worker tools only
+- expose the role's scoped worker tool group
 - run in temporary mode, so transcript and metadata are not persisted by `persist_if_dirty`
 - write state under `.ogent/sessions/{session_id}/states.json` when the `state` tool is used
 - exit when the model sends a final assistant message with no tool calls
 
-## Worker Tools
+## Worker Tool Groups
+
+`ogent` receives all worker tools. Specialist roles receive smaller capability groups:
+
+- `implementer`: repo/code read tools, file write/edit tools, `bash`, `web_code_context`, `state`, `load_skill`
+- `debugger`: repo/code read tools, `bash`, `web_code_context`, `state`, `load_skill`
+- `reviewer`: repo/code read tools, `bash`, `state`, `load_skill`
+- `verifier`: repo/code read tools, `bash`, web read/search tools, `state`, `load_skill`
+- `researcher`: `read_file`, `write_file`, web tools, `state`, `load_skill`
+- `writer`, `visual_designer`: `read_file`, `write_file`, web read/search tools, `state`, `load_skill`
+- `system_architect`, `database_architect`: repo/code read tools, `write_file`, `state`, `load_skill`
+- `summarizer`: `read_file`, `write_file`, `state`, `load_skill`
+
+Available worker tools are:
 
 - `read_file`
 - `write_file`
