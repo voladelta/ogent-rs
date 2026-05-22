@@ -5,7 +5,7 @@
 ## Operating Rules
 
 - Make the smallest correct change.
-- Use `colgrep` first for behavior/intent search. Use `rg` for exact text.
+- Use `colgrep` first for behavior/intent search. Use `rg` for exact text. Use `ast-grep` for structural code search.
 - Do not edit runtime artifacts (`.ogent/sessions/`, `target/`) unless requested.
 - Update docs when behavior changes.
 - In final handoff: list changed files, verification, and doc updates.
