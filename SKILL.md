@@ -47,6 +47,41 @@ For security, sandbox, parser, validation, or correctness claims, give one concr
 
 Strong contracts name the target state, acceptance criteria, relevant paths, permitted changes, constraints, evidence, and stop condition. Use relative paths. Keep the `task` argument focused on task-specific outcomes and evidence requirements.
 
+### Optional Precision Blocks
+
+Add these blocks when the task is subtle, review-like, or likely to produce adjacent findings.
+
+```text
+Role:
+<one sentence naming the lens ogent should use, such as Rust parser reviewer, security reviewer, implementation worker, or verification worker>
+
+Procedure:
+1. <first concrete inspection or action>
+2. <second concrete inspection or action>
+3. <candidate filter or decision rule>
+4. <keep, move-to-risks, or stop rule>
+
+Candidate filter:
+Keep a finding only when <specific condition>. Move adjacent, duplicate, speculative, or downstream-only observations to # Risks.
+
+Finding template:
+- Input:
+- Check/parser path:
+- Runtime/effect path:
+- Invariant:
+- Classification:
+- Confidence:
+- File refs:
+
+Classification labels:
+Use one of: bug, limitation, contract mismatch, non-issue.
+
+Validation note:
+For claims about parsing, repair, escaping, serialization, security, or execution, name the exact before/after value and whether the relevant parser/check accepts it.
+```
+
+Use the precision blocks to reduce guessing. Prefer them when the task asks for bounded findings, compares models, reviews parser/security behavior, or depends on a narrow definition of what counts as in scope.
+
 Before invoking `ogent`, check the contract:
 - Goal names one outcome.
 - Success criteria are observable.
@@ -55,6 +90,8 @@ Before invoking `ogent`, check the contract:
 - Constraints state edit permission and hard boundaries.
 - Stop condition tells `ogent` when to finish.
 - Evidence requirements are inspectable by you after the run.
+- Review or investigation tasks include a candidate filter that defines what counts as an in-scope finding.
+- Parser, repair, escaping, serialization, security, or execution tasks include exact value validation when a claim depends on transformation correctness.
 
 ## Invocation Patterns
 
