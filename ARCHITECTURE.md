@@ -30,16 +30,15 @@ main.rs
   - Provides current-dir compatibility wrappers for CLI paths.
 - `src/tools.rs`
   - Tool schemas and implementations.
-  - Role-scoped worker tool groups used by CLI runtime.
+  - Full worker toolset used by CLI runtime.
   - Executes filesystem and shell tools against the active `Workspace`.
 - `src/workers.rs`
   - Worker prompt resolution.
-  - Shared worker progress prompt injection.
 - `src/session.rs`
   - Session meta/messages persistence.
   - Workspace-scoped state and transcript paths.
 - `src/prompts.rs`
-  - Top-level `workers/*.md` preset prompts and skill injection.
+  - Built-in `SYSTEM_PROMPT.md` prompt and skill injection.
 
 ## State Layout
 

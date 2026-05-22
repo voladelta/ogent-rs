@@ -6,7 +6,6 @@
 | --- | --- |
 | `--profile <name>` | Model/profile selection, overriding `config.yaml` |
 | `--autocompact <percent>` | Auto-compaction threshold; `-1` disables it |
-| `--role <role>` | Run with an explicit worker role; default is `ogent` |
 
 ## Worker Run
 
@@ -14,29 +13,20 @@
 
 ```bash
 ogent "Fix the failing parser test"
-ogent --role reviewer --profile kimi "Review the staged diff"
+ogent --profile kimi "Review the staged diff"
 ```
 
 Worker runs:
 
-- resolve the requested role through built-in worker prompts
-- expose the role's scoped worker tool group
+- use the root `SYSTEM_PROMPT.md`
+- expose the full worker toolset
 - run in temporary mode, so transcript and metadata are not persisted by `persist_if_dirty`
 - write state under `.ogent/sessions/{session_id}/states.json` when the `state` tool is used
 - exit when the model sends a final assistant message with no tool calls
 
-## Worker Tool Groups
+## Worker Tools
 
-`ogent` receives all worker tools. Specialist roles receive smaller capability groups:
-
-- `implementer`: repo/code read tools, file write/edit tools, `bash`, `web_code_context`, `state`, `load_skill`
-- `debugger`: repo/code read tools, `bash`, `web_code_context`, `state`, `load_skill`
-- `reviewer`: repo/code read tools, `bash`, `state`, `load_skill`
-- `verifier`: repo/code read tools, `bash`, web read/search tools, `state`, `load_skill`
-- `researcher`: `read_file`, `write_file`, web tools, `state`, `load_skill`
-- `writer`, `visual_designer`: `read_file`, `write_file`, web read/search tools, `state`, `load_skill`
-- `system_architect`, `database_architect`: repo/code read tools, `write_file`, `state`, `load_skill`
-- `summarizer`: `read_file`, `write_file`, `state`, `load_skill`
+Every worker run receives the same full worker toolset:
 
 Available worker tools are:
 

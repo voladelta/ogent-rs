@@ -4,34 +4,7 @@ use std::path::PathBuf;
 
 use crate::types::{Message, MessageOrigin};
 
-pub const WORKER_PROMPT_OGENT: &str = include_str!("../workers/ogent.md");
-pub const WORKER_PROMPT_IMPLEMENTER: &str = include_str!("../workers/implementer.md");
-pub const WORKER_PROMPT_VERIFIER: &str = include_str!("../workers/verifier.md");
-pub const WORKER_PROMPT_DEBUGGER: &str = include_str!("../workers/debugger.md");
-pub const WORKER_PROMPT_RESEARCHER: &str = include_str!("../workers/researcher.md");
-pub const WORKER_PROMPT_WRITER: &str = include_str!("../workers/writer.md");
-pub const WORKER_PROMPT_VISUAL_DESIGNER: &str = include_str!("../workers/visual_designer.md");
-pub const WORKER_PROMPT_DATABASE_ARCHITECT: &str = include_str!("../workers/database_architect.md");
-pub const WORKER_PROMPT_SYSTEM_ARCHITECT: &str = include_str!("../workers/system_architect.md");
-pub const WORKER_PROMPT_SUMMARIZER: &str = include_str!("../workers/summarizer.md");
-pub const WORKER_PROMPT_REVIEWER: &str = include_str!("../workers/reviewer.md");
-
-pub fn get_builtin_worker_prompt(name: &str) -> Option<&'static str> {
-  match name {
-    "ogent" => Some(WORKER_PROMPT_OGENT),
-    "implementer" => Some(WORKER_PROMPT_IMPLEMENTER),
-    "verifier" => Some(WORKER_PROMPT_VERIFIER),
-    "debugger" => Some(WORKER_PROMPT_DEBUGGER),
-    "researcher" => Some(WORKER_PROMPT_RESEARCHER),
-    "writer" => Some(WORKER_PROMPT_WRITER),
-    "visual_designer" => Some(WORKER_PROMPT_VISUAL_DESIGNER),
-    "database_architect" => Some(WORKER_PROMPT_DATABASE_ARCHITECT),
-    "system_architect" => Some(WORKER_PROMPT_SYSTEM_ARCHITECT),
-    "summarizer" => Some(WORKER_PROMPT_SUMMARIZER),
-    "reviewer" => Some(WORKER_PROMPT_REVIEWER),
-    _ => None,
-  }
-}
+pub const SYSTEM_PROMPT: &str = include_str!("../SYSTEM_PROMPT.md");
 
 pub fn skill_roots() -> Vec<PathBuf> {
   let mut dirs = vec![PathBuf::from(".ogent/skills")];
@@ -155,7 +128,7 @@ fn xml_escape(s: &str) -> String {
 pub fn build_messages(prompt: &str) -> Vec<Message> {
   let mut messages = vec![Message {
     role: "system".into(),
-    content: WORKER_PROMPT_OGENT.to_string(),
+    content: SYSTEM_PROMPT.to_string(),
     origin: MessageOrigin::Internal,
     ..Default::default()
   }];
@@ -235,22 +208,8 @@ mod tests {
   }
 
   #[test]
-  fn writer_handles_technical_answers() {
-    let prompt = get_builtin_worker_prompt("writer").unwrap();
-    assert!(prompt.contains("technical answer"));
-    assert!(prompt.contains("direct answer"));
-  }
-
-  #[test]
-  fn collapsed_worker_roles_are_not_builtins() {
-    assert!(get_builtin_worker_prompt("critic").is_none());
-    assert!(get_builtin_worker_prompt("qa_writer").is_none());
-  }
-
-  #[test]
-  fn ogent_is_builtin_worker_prompt() {
-    let prompt = get_builtin_worker_prompt("ogent").unwrap();
-    assert!(prompt.contains("Core Contract"));
-    assert!(prompt.contains("Reasoning Depth"));
+  fn system_prompt_is_available() {
+    assert!(SYSTEM_PROMPT.contains("Core Contract"));
+    assert!(SYSTEM_PROMPT.contains("Reasoning Depth"));
   }
 }

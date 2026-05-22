@@ -27,8 +27,6 @@ struct Args {
   profile: Option<String>,
   #[arg(long)]
   autocompact: Option<i32>,
-  #[arg(long)]
-  role: Option<String>,
   prompt: Vec<String>,
 }
 
@@ -63,14 +61,12 @@ async fn main() -> Result<()> {
     .context("missing provider config for profile")?;
   let context_limit = profile.context_limit;
   let client = providers::new_client(profile, provider)?;
-  let role = args.role.as_deref().unwrap_or("ogent");
   run_worker_cli(WorkerCliRun {
     workspace,
     client,
     profile_name: &profile_name,
     context_limit,
     autocompact,
-    role,
     task: &args.prompt.join(" "),
   })
   .await
@@ -89,13 +85,11 @@ struct WorkerCliRun<'a> {
   profile_name: &'a str,
   context_limit: usize,
   autocompact: i32,
-  role: &'a str,
   task: &'a str,
 }
 
 async fn run_worker_cli(run: WorkerCliRun<'_>) -> Result<()> {
-  let (system_prompt, task_prompt) =
-    workers::resolve_worker_prompts(run.role, run.task, "").await?;
+  let (system_prompt, task_prompt) = workers::resolve_worker_prompt(run.task, "");
   let session_id = session::generate_session_id();
   let messages = workers::build_worker_messages(&system_prompt, &task_prompt, &session_id);
   let compact = if run.autocompact >= 0 {
@@ -125,7 +119,7 @@ async fn run_worker_cli(run: WorkerCliRun<'_>) -> Result<()> {
     run.workspace,
     run.client,
     messages,
-    tools::configured_worker_tools_for_role(run.role),
+    tools::configured_worker_tools(),
     compact,
     meta,
     None,
@@ -161,40 +155,30 @@ mod tests {
   }
 
   #[test]
-  fn parses_run_role_and_task() {
-    let args = parse_test_args(&["ogent", "--role", "implementer", "fix the parser"]);
-    assert_eq!(args.role.as_deref(), Some("implementer"));
+  fn parses_run_task() {
+    let args = parse_test_args(&["ogent", "fix the parser"]);
     assert_eq!(args.prompt, vec!["fix the parser"]);
     assert!(ensure_run_mode_flags(&args).is_ok());
   }
 
   #[test]
   fn parses_run_with_profile_override() {
-    let args = parse_test_args(&[
-      "ogent",
-      "--role",
-      "reviewer",
-      "--profile",
-      "kimi",
-      "review it",
-    ]);
-    assert_eq!(args.role.as_deref(), Some("reviewer"));
+    let args = parse_test_args(&["ogent", "--profile", "kimi", "review it"]);
     assert_eq!(args.profile.as_deref(), Some("kimi"));
     assert_eq!(args.prompt, vec!["review it"]);
     assert!(ensure_run_mode_flags(&args).is_ok());
   }
 
   #[test]
-  fn defaults_to_ogent_without_explicit_role() {
+  fn parses_without_explicit_profile() {
     let args = parse_test_args(&["ogent", "fix it"]);
-    assert_eq!(args.role, None);
     assert_eq!(args.prompt, vec!["fix it"]);
     assert!(ensure_run_mode_flags(&args).is_ok());
   }
 
   #[test]
   fn run_requires_task_prompt() {
-    let args = parse_test_args(&["ogent", "--role", "implementer"]);
+    let args = parse_test_args(&["ogent"]);
     assert!(ensure_run_mode_flags(&args).is_err());
   }
 }

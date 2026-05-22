@@ -23,12 +23,12 @@ CLI
   -> src/tools.rs + src/workers.rs + src/session.rs
 ```
 
-- `src/main.rs`: CLI parsing and worker runtime launch. `--role <role>` selects a role; omitted role defaults to `ogent`.
+- `src/main.rs`: CLI parsing and worker runtime launch.
 - `src/agent.rs`: worker turn loop, tool-call execution, compaction reminders, Agent-owned `Workspace`.
 - `src/workspace.rs`: explicit workspace root and path resolution.
 - `src/client.rs`, `src/providers.rs`, `src/sse.rs`: provider request construction, HTTP client, and SSE response parsing.
-- `src/tools.rs`: worker tool schemas, execution, and role capability groups (`read_file`, `write_file`, `bash`, `repo_map`, `code_map`, web tools, `state`, hashline editing).
-- `src/workers.rs`: worker role prompt resolution and shared worker integrity/progress/result prompt injection.
+- `src/tools.rs`: worker tool schemas and execution (`read_file`, `write_file`, `bash`, `repo_map`, `code_map`, web tools, `state`, hashline editing).
+- `src/workers.rs`: worker prompt resolution.
 - `src/session.rs`: workspace-scoped session meta/messages/state paths and persistence.
 - `src/prompts.rs`: built-in worker prompts and skill discovery/injection.
 - `src/symbol_tree.rs`: tree-sitter based symbol extraction for `code_map` (Rust and Go).
@@ -46,10 +46,10 @@ Removed legacy surfaces:
 | --- | --- | --- |
 | CLI flags and worker launch | `src/main.rs` | `docs/reference.md`, `README.md` |
 | Worker loop / exit / compaction reminders | `src/agent.rs` | `docs/agent-guide.md`, `ARCHITECTURE.md` |
-| Tool schema/behavior and role tool groups | `src/tools.rs` | `src/workers.rs`, `docs/reference.md` |
-| Role prompt resolution | `src/workers.rs` | `workers/*.md` |
+| Tool schema/behavior | `src/tools.rs` | `src/workers.rs`, `docs/reference.md` |
+| Worker prompt resolution | `src/workers.rs` | `SYSTEM_PROMPT.md` |
 | Session/state pathing | `src/session.rs` | `src/workspace.rs`, `src/tools.rs` |
-| Prompt loading and built-ins | `src/prompts.rs` | `workers/*.md`, `docs/agent-guide.md` |
+| Prompt loading and built-ins | `src/prompts.rs` | `SYSTEM_PROMPT.md`, `docs/agent-guide.md` |
 | Anchored editing | `src/hashline.rs` | `src/tools.rs`, `docs/reference.md` |
 | Workspace path validation | `src/workspace.rs` | `src/tools.rs`, `ARCHITECTURE.md` |
 | Symbol extraction / `code_map` | `src/symbol_tree.rs` | `docs/reference.md` |
@@ -76,14 +76,14 @@ Session persistence paths:
 
 - CLI launches exactly one worker-mode agent.
 - Worker-mode runs use worker prompts and worker tools only.
-- Worker roles receive scoped tool groups from `src/tools.rs`; `ogent` receives the full worker toolset.
+- Worker runs receive the full worker toolset.
 - Every Agent owns one immutable `Workspace`; CLI uses the process current directory.
 - Tool execution, bash current directory, state paths, and session files must use the Agent workspace, not process-global mutable cwd.
 - Worker file edits happen through worker tools (`write_file`, `edit_hash_anchors`).
 - Workers do not dispatch workers.
 - A run ends when the worker sends a final assistant message with no tool calls.
 - `load_skill` tool and startup skill injection stay enabled.
-- The final worker answer must use the enforced Markdown result sections from `src/workers.rs`.
+- The final worker answer must use the Markdown result sections defined in `SYSTEM_PROMPT.md`.
 
 ## Verification
 
