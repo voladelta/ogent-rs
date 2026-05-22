@@ -261,13 +261,12 @@ pub async fn parse_sse_response(
       consumed = 0;
     }
   }
-  if !buf[consumed..].is_empty() {
-    if let Some(chunk) = parse_sse_data_line(buf[consumed..].trim_end_matches('\r')) {
+  if !buf[consumed..].is_empty()
+    && let Some(chunk) = parse_sse_data_line(buf[consumed..].trim_end_matches('\r')) {
       for ev in accumulator.apply(chunk) {
         send_event(&mut stream_tx, ev).await;
       }
     }
-  }
   Ok(accumulator.finish())
 }
 

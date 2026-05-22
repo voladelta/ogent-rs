@@ -6,7 +6,7 @@ use crate::client::{Client, ClientError};
 use crate::session;
 use crate::sse::StreamEvent;
 use crate::tools::{ToolContext, execute_tool};
-use crate::types::{Message, MessageOrigin, Role, Tool, ToolCall};
+use crate::types::{Message, Role, Tool, ToolCall};
 use crate::workspace::Workspace;
 
 #[derive(Debug, thiserror::Error)]
