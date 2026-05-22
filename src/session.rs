@@ -28,92 +28,6 @@ pub fn session_file_in(workspace: &Workspace, session_id: &str) -> PathBuf {
     .join(format!("{}.jsonl", session_id))
 }
 
-#[cfg(test)]
-pub struct SessionLock {
-  path: PathBuf,
-}
-
-#[cfg(test)]
-impl Drop for SessionLock {
-  fn drop(&mut self) {
-    let _ = fs::remove_file(&self.path);
-  }
-}
-
-#[cfg(test)]
-pub fn try_acquire_session_lock_in(workspace: &Workspace, session_id: &str) -> Result<SessionLock> {
-  let lock_path = workspace
-    .root()
-    .join(".ogent/sessions")
-    .join(format!("{}.lock", session_id));
-  if let Some(parent) = lock_path.parent() {
-    fs::create_dir_all(parent)?;
-  }
-  for _ in 0..2 {
-    match std::fs::OpenOptions::new()
-      .write(true)
-      .create_new(true)
-      .open(&lock_path)
-    {
-      Ok(mut file) => {
-        writeln!(file, "pid={}", std::process::id())?;
-        writeln!(file, "ts_ms={}", timestamp_ms())?;
-        return Ok(SessionLock {
-          path: lock_path.clone(),
-        });
-      }
-      Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
-        if maybe_remove_stale_session_lock(&lock_path)? {
-          continue;
-        }
-      }
-      Err(err) => return Err(err).with_context(|| "failed to acquire session lock"),
-    }
-    break;
-  }
-  anyhow::bail!("session {session_id} is already active")
-}
-
-#[cfg(test)]
-fn maybe_remove_stale_session_lock(lock_path: &std::path::Path) -> Result<bool> {
-  let Ok(data) = fs::read_to_string(lock_path) else {
-    return Ok(false);
-  };
-  let mut pid = None;
-  for line in data.lines() {
-    if let Some(value) = line.trim().strip_prefix("pid=")
-      && let Ok(parsed) = value.trim().parse::<u32>()
-    {
-      pid = Some(parsed);
-      break;
-    }
-  }
-  if let Some(pid) = pid
-    && process_is_alive(pid)
-  {
-    return Ok(false);
-  }
-  match fs::remove_file(lock_path) {
-    Ok(()) => Ok(true),
-    Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(true),
-    Err(err) => Err(err).with_context(|| "failed to remove stale lock"),
-  }
-}
-
-#[cfg(unix)]
-#[cfg(test)]
-fn process_is_alive(pid: u32) -> bool {
-  matches!(
-    std::process::Command::new("kill")
-      .arg("-0")
-      .arg(pid.to_string())
-      .stdout(std::process::Stdio::null())
-      .stderr(std::process::Stdio::null())
-      .status(),
-    Ok(status) if status.success()
-  )
-}
-
 pub fn persist_session_in(
   workspace: &Workspace,
   messages: &[Message],
@@ -167,31 +81,6 @@ mod tests {
     let a = generate_session_id();
     let b = generate_session_id();
     assert_ne!(a, b);
-  }
-
-  #[test]
-  fn session_lock_is_exclusive() {
-    let ws = Workspace::from_current_dir();
-    let session_id = format!("lock-test-{}", timestamp_ms());
-    let lock1 = try_acquire_session_lock_in(&ws, &session_id).unwrap();
-    assert!(try_acquire_session_lock_in(&ws, &session_id).is_err());
-    drop(lock1);
-    let lock2 = try_acquire_session_lock_in(&ws, &session_id).unwrap();
-    drop(lock2);
-  }
-
-  #[test]
-  fn stale_session_lock_is_reclaimed() {
-    let ws = Workspace::from_current_dir();
-    let session_id = format!("stale-lock-test-{}", timestamp_ms());
-    let lock_path = ws
-      .root()
-      .join(".ogent/sessions")
-      .join(format!("{}.lock", &session_id));
-    std::fs::create_dir_all(lock_path.parent().unwrap()).unwrap();
-    std::fs::write(&lock_path, "pid=4294967295\nts_ms=0\n").unwrap();
-    let lock = try_acquire_session_lock_in(&ws, &session_id).unwrap();
-    drop(lock);
   }
 
   #[test]
