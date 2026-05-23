@@ -12,7 +12,7 @@ mod tools;
 mod types;
 mod workspace;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use clap::{CommandFactory, Parser};
 use std::env;
 
@@ -41,14 +41,11 @@ async fn main() -> Result<()> {
     .profile
     .clone()
     .unwrap_or_else(|| config.default_profile.clone());
-  if let Err(err) = ensure_run_mode_flags(&args) {
-    if args.prompt.is_empty() {
-      let mut cmd = Args::command();
-      cmd.print_help()?;
-      println!();
-      return Ok(());
-    }
-    return Err(err);
+  if args.prompt.is_empty() {
+    let mut cmd = Args::command();
+    cmd.print_help()?;
+    println!();
+    return Ok(());
   }
   let profile = config
     .get_profile(&profile_name)
@@ -64,13 +61,6 @@ async fn main() -> Result<()> {
     &args.prompt.join(" "),
   )
   .await
-}
-
-fn ensure_run_mode_flags(args: &Args) -> Result<()> {
-  if args.prompt.join(" ").trim().is_empty() {
-    bail!("a task prompt is required");
-  }
-  Ok(())
 }
 
 async fn run_worker_cli(
@@ -137,7 +127,6 @@ mod tests {
   fn parses_run_task() {
     let args = parse_test_args(&["ogent", "fix the parser"]);
     assert_eq!(args.prompt, vec!["fix the parser"]);
-    assert!(ensure_run_mode_flags(&args).is_ok());
   }
 
   #[test]
@@ -145,12 +134,11 @@ mod tests {
     let args = parse_test_args(&["ogent", "--profile", "kimi", "review it"]);
     assert_eq!(args.profile.as_deref(), Some("kimi"));
     assert_eq!(args.prompt, vec!["review it"]);
-    assert!(ensure_run_mode_flags(&args).is_ok());
   }
 
   #[test]
   fn run_requires_task_prompt() {
     let args = parse_test_args(&["ogent"]);
-    assert!(ensure_run_mode_flags(&args).is_err());
+    assert!(args.prompt.is_empty());
   }
 }

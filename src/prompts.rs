@@ -40,9 +40,9 @@ pub fn format_discover_skills(skills: &[crate::skills::SkillInfo]) -> String {
   let mut out = String::from("<skills>\n");
   for skill in skills {
     out.push_str("  <skill name=\"");
-    out.push_str(&xml_escape(&skill.name));
+    out.push_str(&crate::skills::xml_escape(&skill.name));
     out.push_str("\" description=\"");
-    out.push_str(&xml_escape(&skill.description));
+    out.push_str(&crate::skills::xml_escape(&skill.description));
     out.push_str("\" />\n");
   }
   out.push_str("</skills>");
@@ -50,26 +50,7 @@ pub fn format_discover_skills(skills: &[crate::skills::SkillInfo]) -> String {
 }
 
 pub fn format_loaded_skill(skill: &crate::skills::Skill) -> String {
-  format!(
-    "<skill name=\"{}\" root=\"{}\">\n{}\n</skill>",
-    skill.name,
-    skill.root.display(),
-    skill.body
-  )
-}
-
-fn xml_escape(s: &str) -> String {
-  let mut out = String::with_capacity(s.len());
-  for c in s.chars() {
-    match c {
-      '&' => out.push_str("&amp;"),
-      '"' => out.push_str("&quot;"),
-      '<' => out.push_str("&lt;"),
-      '>' => out.push_str("&gt;"),
-      _ => out.push(c),
-    }
-  }
-  out
+  crate::skills::format_loaded_skill(skill)
 }
 
 #[cfg(test)]

@@ -22,10 +22,5 @@ fn load_skill(ctx: ToolContext, args: &str) -> Result<String> {
   let args: LoadSkillArgs = parse_args(args)?;
   require_nonempty(&args.name, "name")?;
   let skill = ctx.skill_store.load_skill(&args.name)?;
-  Ok(format!(
-    "<skill name=\"{}\" root=\"{}\">\n{}\n</skill>",
-    skill.name,
-    skill.root.display(),
-    skill.body
-  ))
+  Ok(crate::skills::format_loaded_skill(&skill))
 }
