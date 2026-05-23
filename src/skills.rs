@@ -44,9 +44,8 @@ impl SkillManifest {
         let dir_name = entry.file_name().to_string_lossy().to_string();
         let key = if name.is_empty() { dir_name } else { name };
         if seen.insert(key.clone()) {
-          let resolved_name = key.clone();
           let skill = Skill {
-            name: resolved_name,
+            name: key.clone(),
             root: entry.path(),
             body: strip_frontmatter(&content),
           };
@@ -122,6 +121,7 @@ impl SkillStore {
     &self.startup_skills
   }
 }
+
 pub fn format_loaded_skill(skill: &Skill) -> String {
   format!(
     "<skill name=\"{}\" root=\"{}\">\n{}\n</skill>",

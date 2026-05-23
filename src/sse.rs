@@ -87,22 +87,12 @@ impl SseError {
   }
 }
 
-/// Low-level SSE line classification.
 enum SseLine {
-  /// Decoded JSON string from a `data:` line (not `[DONE]`).
   Data(String),
-  /// The `[DONE]` end-of-stream sentinel.
   Done,
-  /// Empty lines, comments, or any non-`data:` line — caller should skip.
   Other,
 }
 
-/// Classify a single raw SSE line (bytes up to but not including `\n`).
-///
-/// Strips a trailing `\r` so that `\r\n`-terminated streams are handled
-/// identically to `\n`-terminated ones. Returns `Err(SseError::InvalidUtf8)`
-/// if the bytes are not valid UTF-8; all other errors are structural and
-/// expressed through the `SseLine` variants.
 fn decode_sse_line(line: &[u8]) -> Result<SseLine, SseError> {
   let line = line.strip_suffix(b"\r").unwrap_or(line);
   let s = std::str::from_utf8(line).map_err(|_| SseError::InvalidUtf8)?;
@@ -267,15 +257,6 @@ where
   Ok(accumulator.finish())
 }
 
-/// Parse an OpenAI-compatible SSE response into a [`ChatResponse`].
-///
-/// The byte stream is accumulated in a `Vec<u8>` and split on `b'\n'`
-/// boundaries so that multi-byte UTF-8 characters that span network chunk
-/// boundaries are never corrupted by premature string conversion.
-///
-/// Returns [`SseError::TruncatedStream`] if the connection closes before the
-/// `[DONE]` sentinel is received, and [`SseError::JsonParse`] if a `data:`
-/// line cannot be decoded as a [`StreamChunk`].
 pub async fn parse_sse_response(
   resp: reqwest::Response,
   stream_tx: Option<tokio::sync::mpsc::Sender<StreamEvent>>,
@@ -295,8 +276,6 @@ mod tests {
     let chunk = serde_json::from_str::<StreamChunk>(&json).expect("valid JSON");
     acc.apply(chunk)
   }
-
-  // --- decode_sse_line unit tests ---
 
   #[test]
   fn decode_sse_line_emits_data() {
@@ -344,14 +323,11 @@ mod tests {
 
   #[test]
   fn decode_sse_line_rejects_invalid_utf8() {
-    // 0xFF is not valid UTF-8
     assert!(matches!(
       decode_sse_line(b"data: \xff"),
       Err(SseError::InvalidUtf8)
     ));
   }
-
-  // --- ChatAccumulator tests (use apply_data_line helper) ---
 
   #[tokio::test]
   async fn accumulator_applies_tool_call_chunks() {
@@ -434,10 +410,6 @@ mod tests {
     assert_eq!(tc.function.arguments, "");
   }
 
-  // --- parse_sse_response and byte-stream parser tests ---
-
-  /// Spawn a one-shot HTTP/1.1 server that sends `body` as the response body
-  /// after SSE headers and returns the resulting `reqwest::Response`.
   async fn sse_response(body: Vec<u8>) -> reqwest::Response {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -488,13 +460,6 @@ mod tests {
     );
   }
 
-  /// Verify that multi-byte UTF-8 characters are preserved when the character's
-  /// bytes happen to be split across two stream chunks.
-  ///
-  /// The old code called `String::from_utf8_lossy` per chunk, which would
-  /// corrupt a character whose bytes straddled a chunk boundary.  The new code
-  /// accumulates a `Vec<u8>` and decodes only on complete lines, so the split
-  /// is harmless.
   #[tokio::test]
   async fn parse_sse_byte_stream_multibyte_utf8_split_across_chunks() {
     // "café" — the é (U+00E9) is encoded as 0xC3 0xA9 (two bytes).
