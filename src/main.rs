@@ -82,7 +82,7 @@ async fn run_worker_cli(
     }
   }
 
-  let system_prompt = prompts::compose_system_prompt("");
+  let system_prompt = prompts::compose_system_prompt();
   let session_id = session::generate_session_id();
   let messages =
     prompts::build_initial_messages(&system_prompt, task, &session_id, &discovered, &loaded);

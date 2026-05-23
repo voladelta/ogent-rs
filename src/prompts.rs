@@ -2,19 +2,8 @@ use crate::types::{Message, MessageOrigin};
 
 pub const SYSTEM_PROMPT: &str = include_str!("../SYSTEM_PROMPT.md");
 
-pub fn compose_system_prompt(context: &str) -> String {
-  let context_section = format!("## Context\n\n{}", context.trim());
-  compose_prompt_sections(SYSTEM_PROMPT, Some(&context_section))
-}
-
-fn compose_prompt_sections(base_prompt: &str, extra_section: Option<&str>) -> String {
-  let mut sections = vec![base_prompt.trim().to_string()];
-  if let Some(extra) = extra_section
-    && !extra.trim().is_empty()
-  {
-    sections.push(extra.trim().to_string());
-  }
-  sections.join("\n\n")
+pub fn compose_system_prompt() -> String {
+  SYSTEM_PROMPT.trim().to_string()
 }
 
 pub(crate) fn build_initial_messages(
@@ -86,12 +75,9 @@ mod tests {
   use crate::types::Role;
 
   #[test]
-  fn compose_system_prompt_includes_context() {
-    let sys = compose_system_prompt("## Write Scope\n- src/lib.rs");
+  fn test_compose_system_prompt() {
+    let sys = compose_system_prompt();
     assert!(sys.contains("Core Contract"));
-    assert!(sys.contains("## Context"));
-    assert!(sys.contains("src/lib.rs"));
-    assert!(sys.contains("# Status"));
   }
 
   #[test]
