@@ -178,7 +178,10 @@ impl Agent {
         let workspace = self.workspace.clone();
         let skill_store = self.skill_store.clone();
         let result = execute_tool(
-          ToolContext { workspace, skill_store },
+          ToolContext {
+            workspace,
+            skill_store,
+          },
           &tool_call.function.name,
           &tool_call.function.arguments,
         )
@@ -260,7 +263,8 @@ mod tests {
       30,
     )
     .unwrap();
-    let skill_store = std::sync::Arc::new(crate::skills::SkillStore::new(workspace.root(), Vec::new()));
+    let skill_store =
+      std::sync::Arc::new(crate::skills::SkillStore::new(workspace.root(), Vec::new()));
     let mut agent = Agent::new(
       workspace.clone(),
       client,

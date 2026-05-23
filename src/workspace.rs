@@ -32,7 +32,6 @@ impl Workspace {
     self.allowed_roots.push(normalize(&path));
   }
 
-
   pub fn workspace_path(&self, path: &str) -> Result<PathBuf> {
     self.resolve_scoped_path(path, false)
   }

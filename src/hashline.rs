@@ -140,13 +140,23 @@ fn resolve_edit(lines: &[String], op: &EditOp) -> Result<ResolvedEdit> {
       if end.is_some() {
         bail!("insert edits cannot use end");
       }
-      ResolvedEdit { start_idx, end_idx: None, replacement, mode: InsertMode::Before }
+      ResolvedEdit {
+        start_idx,
+        end_idx: None,
+        replacement,
+        mode: InsertMode::Before,
+      }
     }
     "insert_after" => {
       if end.is_some() {
         bail!("insert edits cannot use end");
       }
-      ResolvedEdit { start_idx, end_idx: None, replacement, mode: InsertMode::After }
+      ResolvedEdit {
+        start_idx,
+        end_idx: None,
+        replacement,
+        mode: InsertMode::After,
+      }
     }
     "replace" => ResolvedEdit {
       start_idx,

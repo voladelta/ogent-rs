@@ -57,7 +57,13 @@ async fn main() -> Result<()> {
     .provider_for(profile)
     .context("missing provider config for profile")?;
   let client = providers::new_client(profile, provider)?;
-  run_worker_cli(workspace, client, config.startup_skills, &args.prompt.join(" ")).await
+  run_worker_cli(
+    workspace,
+    client,
+    config.startup_skills,
+    &args.prompt.join(" "),
+  )
+  .await
 }
 
 fn ensure_run_mode_flags(args: &Args) -> Result<()> {
@@ -88,7 +94,8 @@ async fn run_worker_cli(
 
   let system_prompt = prompts::compose_system_prompt("");
   let session_id = session::generate_session_id();
-  let messages = prompts::build_initial_messages(&system_prompt, task, &session_id, &discovered, &loaded);
+  let messages =
+    prompts::build_initial_messages(&system_prompt, task, &session_id, &discovered, &loaded);
   let mut agent = Agent::new(
     workspace,
     client,
