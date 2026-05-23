@@ -18,13 +18,13 @@ pub struct SkillInfo {
 }
 
 #[derive(Debug, Clone)]
-pub struct SkillManifest {
+struct SkillManifest {
   skills: HashMap<String, Skill>,
   ordered_info: Vec<SkillInfo>,
 }
 
 impl SkillManifest {
-  pub fn build(roots: &[PathBuf]) -> Self {
+  fn build(roots: &[PathBuf]) -> Self {
     let mut skills = HashMap::new();
     let mut ordered_info = Vec::new();
     let mut seen = HashSet::new();
@@ -65,11 +65,11 @@ impl SkillManifest {
     }
   }
 
-  pub fn get(&self, name: &str) -> Option<&Skill> {
+  fn get(&self, name: &str) -> Option<&Skill> {
     self.skills.get(name)
   }
 
-  pub fn infos(&self) -> &[SkillInfo] {
+  fn infos(&self) -> &[SkillInfo] {
     &self.ordered_info
   }
 }
@@ -122,26 +122,11 @@ impl SkillStore {
     &self.startup_skills
   }
 }
-
-pub fn xml_escape(s: &str) -> String {
-  let mut out = String::with_capacity(s.len());
-  for c in s.chars() {
-    match c {
-      '&' => out.push_str("&amp;"),
-      '"' => out.push_str("&quot;"),
-      '<' => out.push_str("&lt;"),
-      '>' => out.push_str("&gt;"),
-      _ => out.push(c),
-    }
-  }
-  out
-}
-
 pub fn format_loaded_skill(skill: &Skill) -> String {
   format!(
     "<skill name=\"{}\" root=\"{}\">\n{}\n</skill>",
-    xml_escape(&skill.name),
-    xml_escape(&skill.root.to_string_lossy()),
+    crate::util::xml_escape(&skill.name),
+    crate::util::xml_escape(&skill.root.to_string_lossy()),
     skill.body
   )
 }

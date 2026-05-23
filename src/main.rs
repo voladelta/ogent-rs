@@ -10,6 +10,7 @@ mod sse;
 mod symbol_tree;
 mod tools;
 mod types;
+mod util;
 mod workspace;
 
 use anyhow::{Context, Result};

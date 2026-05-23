@@ -292,7 +292,7 @@ mod tests {
       let (mut socket, _) = listener.accept().await.unwrap();
       let mut buf = [0u8; 1024];
       let _ = socket.read(&mut buf).await;
-      let response = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: keep-alive\r\n\r\n\
+      let response = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n\
                       data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\n";
       let _ = socket.write_all(response.as_bytes()).await;
     });

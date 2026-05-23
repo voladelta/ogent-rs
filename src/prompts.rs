@@ -29,9 +29,9 @@ pub fn format_discover_skills(skills: &[crate::skills::SkillInfo]) -> String {
   let mut out = String::from("<skills>\n");
   for skill in skills {
     out.push_str("  <skill name=\"");
-    out.push_str(&crate::skills::xml_escape(&skill.name));
+    out.push_str(&crate::util::xml_escape(&skill.name));
     out.push_str("\" description=\"");
-    out.push_str(&crate::skills::xml_escape(&skill.description));
+    out.push_str(&crate::util::xml_escape(&skill.description));
     out.push_str("\" />\n");
   }
   out.push_str("</skills>");
