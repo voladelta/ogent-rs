@@ -14,13 +14,7 @@ pub mod web;
 
 pub struct ToolContext {
   pub workspace: crate::workspace::Workspace,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Capability {
-  ReadOnly,
-  WorkspaceMutating,
-  Network,
+  pub skill_store: std::sync::Arc<crate::skills::SkillStore>,
 }
 
 pub type AsyncHandler = Box<
@@ -32,8 +26,6 @@ pub struct ToolDef {
   pub description: &'static str,
   pub parameters: Value,
   pub handler: Handler,
-  #[allow(dead_code)]
-  pub capability: Capability,
 }
 
 pub enum Handler {
@@ -119,9 +111,12 @@ mod tests {
 
   #[tokio::test]
   async fn execute_tool_unknown_returns_error() {
+    let workspace = crate::workspace::Workspace::from_current_dir();
+    let skill_store = std::sync::Arc::new(crate::skills::SkillStore::new(workspace.root(), Vec::new()));
     let result = execute_tool(
       ToolContext {
-        workspace: crate::workspace::Workspace::from_current_dir(),
+        workspace,
+        skill_store,
       },
       "nonexistent_tool",
       "{}",

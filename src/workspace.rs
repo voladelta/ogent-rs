@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone)]
 pub struct Workspace {
   root: PathBuf,
+  allowed_roots: Vec<PathBuf>,
 }
 
 impl Workspace {
@@ -11,6 +12,7 @@ impl Workspace {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     Self {
       root: normalize(&cwd),
+      allowed_roots: Vec::new(),
     }
   }
 
@@ -18,12 +20,18 @@ impl Workspace {
   pub fn from_root(root: PathBuf) -> Self {
     Self {
       root: normalize(&root),
+      allowed_roots: Vec::new(),
     }
   }
 
   pub fn root(&self) -> &Path {
     &self.root
   }
+
+  pub fn add_allowed_root(&mut self, path: PathBuf) {
+    self.allowed_roots.push(normalize(&path));
+  }
+
 
   pub fn workspace_path(&self, path: &str) -> Result<PathBuf> {
     self.resolve_scoped_path(path, false)
@@ -33,13 +41,20 @@ impl Workspace {
     self.resolve_scoped_path(path, true)
   }
 
-  fn resolve_scoped_path(&self, path: &str, allow_ogent_root: bool) -> Result<PathBuf> {
+  fn resolve_scoped_path(&self, path: &str, allow_extra_roots: bool) -> Result<PathBuf> {
     if path.is_empty() {
       bail!("path is required");
     }
     let abs = self.absolute_tool_path(path);
-    if self.path_in_workspace(&abs) || (allow_ogent_root && path_in_allowed_root(&abs)) {
+    if self.path_in_workspace(&abs) {
       return Ok(abs);
+    }
+    if allow_extra_roots {
+      for root in &self.allowed_roots {
+        if abs == *root || abs.starts_with(root) {
+          return Ok(abs);
+        }
+      }
     }
     bail!("path {path} is outside workspace {}", self.root.display())
   }
@@ -62,15 +77,6 @@ impl Workspace {
     let path = normalize(path);
     path == self.root || path.starts_with(&self.root)
   }
-}
-
-fn path_in_allowed_root(path: &Path) -> bool {
-  let Some(home) = std::env::var_os("HOME") else {
-    return false;
-  };
-  let path = normalize(path);
-  let root = normalize(&PathBuf::from(home).join(".ogent"));
-  path == root || path.starts_with(&root)
 }
 
 pub fn normalize(path: &Path) -> PathBuf {
@@ -142,7 +148,9 @@ mod tests {
     if std::env::var_os("HOME").is_none() {
       return;
     }
-    let ws = Workspace::from_current_dir();
+    let mut ws = Workspace::from_current_dir();
+    let home = std::env::var_os("HOME").unwrap();
+    ws.add_allowed_root(PathBuf::from(home).join(".ogent"));
     assert!(ws.readable_path("~/.ogent/skills/test.md").is_ok());
   }
 

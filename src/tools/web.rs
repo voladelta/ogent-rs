@@ -40,23 +40,38 @@ pub fn tools() -> Vec<ToolDef> {
   ]
 }
 
+#[derive(Deserialize, Default, Clone, Copy)]
+#[serde(rename_all = "kebab-case")]
+enum SearchType {
+  #[default]
+  Auto,
+  DeepReasoning,
+}
+
+#[derive(Deserialize, Default, Clone, Copy)]
+#[serde(rename_all = "kebab-case")]
+enum WebReadMode {
+  #[default]
+  Highlights,
+  Text,
+}
+
 #[derive(Deserialize)]
 struct WebSearchArgs {
   query: String,
   #[serde(default)]
   num_results: usize,
   #[serde(default, rename = "type")]
-  search_type: String,
+  search_type: SearchType,
 }
 
 async fn web_search(_ctx: ToolContext, args: &str) -> Result<String> {
   let args: WebSearchArgs = parse_args(args)?;
   require_nonempty(&args.query, "query")?;
   let n = args.num_results.clamp(1, 100);
-  let search_type = if args.search_type.is_empty() {
-    "auto"
-  } else {
-    &args.search_type
+  let search_type = match args.search_type {
+    SearchType::Auto => "auto",
+    SearchType::DeepReasoning => "deep-reasoning",
   };
   let body = json!({"query": args.query, "type": search_type, "numResults": n, "contents": {"highlights": true}});
   let v = exa_post("https://api.exa.ai/search", body).await?;
@@ -82,7 +97,7 @@ async fn web_search(_ctx: ToolContext, args: &str) -> Result<String> {
 struct WebReadArgs {
   urls: Vec<String>,
   #[serde(default)]
-  mode: String,
+  mode: WebReadMode,
 }
 
 async fn web_read(_ctx: ToolContext, args: &str) -> Result<String> {
@@ -90,15 +105,10 @@ async fn web_read(_ctx: ToolContext, args: &str) -> Result<String> {
   if args.urls.is_empty() {
     bail!("urls is required");
   }
-  let mode = if args.mode.is_empty() {
-    "highlights"
-  } else {
-    &args.mode
-  };
-  let body = if mode == "text" {
-    json!({"urls": args.urls, "text": true})
-  } else {
-    json!({"urls": args.urls, "highlights": true})
+  let mode = args.mode;
+  let body = match mode {
+    WebReadMode::Text => json!({"urls": args.urls, "text": true}),
+    WebReadMode::Highlights => json!({"urls": args.urls, "highlights": true}),
   };
   let v = exa_post("https://api.exa.ai/contents", body).await?;
   let mut out = String::new();
@@ -106,14 +116,19 @@ async fn web_read(_ctx: ToolContext, args: &str) -> Result<String> {
     out.push_str(&format!("--- {} ---\n", r["title"].as_str().unwrap_or("")));
     out.push_str(&format!("{}\n", r["url"].as_str().unwrap_or("")));
     out.push('\n');
-    if mode == "text" {
-      out.push_str(r["text"].as_str().unwrap_or(""));
-      out.push_str("\n\n");
-    } else if let Some(highlights) = r["highlights"].as_array() {
-      for h in highlights {
-        out.push_str(&format!("> {}\n", h.as_str().unwrap_or("")));
+    match mode {
+      WebReadMode::Text => {
+        out.push_str(r["text"].as_str().unwrap_or(""));
+        out.push_str("\n\n");
       }
-      out.push('\n');
+      WebReadMode::Highlights => {
+        if let Some(highlights) = r["highlights"].as_array() {
+          for h in highlights {
+            out.push_str(&format!("> {}\n", h.as_str().unwrap_or("")));
+          }
+          out.push('\n');
+        }
+      }
     }
   }
   Ok(out)

@@ -5,6 +5,7 @@ mod hashline;
 mod prompts;
 mod providers;
 mod session;
+mod skills;
 mod sse;
 mod symbol_tree;
 mod tools;
@@ -56,7 +57,7 @@ async fn main() -> Result<()> {
     .provider_for(profile)
     .context("missing provider config for profile")?;
   let client = providers::new_client(profile, provider)?;
-  run_worker_cli(workspace, client, &args.prompt.join(" ")).await
+  run_worker_cli(workspace, client, config.startup_skills, &args.prompt.join(" ")).await
 }
 
 fn ensure_run_mode_flags(args: &Args) -> Result<()> {
@@ -67,19 +68,34 @@ fn ensure_run_mode_flags(args: &Args) -> Result<()> {
 }
 
 async fn run_worker_cli(
-  workspace: crate::workspace::Workspace,
+  mut workspace: crate::workspace::Workspace,
   client: crate::client::Client,
+  startup_skills: Vec<String>,
   task: &str,
 ) -> Result<()> {
+  let skill_store = std::sync::Arc::new(skills::SkillStore::new(workspace.root(), startup_skills));
+  for root in skill_store.skill_roots() {
+    workspace.add_allowed_root(root.clone());
+  }
+
+  let discovered = skill_store.discover_skills();
+  let mut loaded = Vec::new();
+  for name in skill_store.startup_skills() {
+    if let Ok(skill) = skill_store.load_skill(name) {
+      loaded.push(skill);
+    }
+  }
+
   let system_prompt = prompts::compose_system_prompt("");
   let session_id = session::generate_session_id();
-  let messages = prompts::build_initial_messages(&system_prompt, task, &session_id);
+  let messages = prompts::build_initial_messages(&system_prompt, task, &session_id, &discovered, &loaded);
   let mut agent = Agent::new(
     workspace,
     client,
     messages,
     tools::configured_worker_tools(),
     session_id,
+    skill_store,
   );
   agent.set_output_sink(Some(agent::cli_output_sink()));
   agent.dirty = true;

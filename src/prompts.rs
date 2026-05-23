@@ -1,7 +1,3 @@
-use anyhow::{Result, bail};
-use std::fs;
-use std::path::PathBuf;
-
 use crate::types::{Message, MessageOrigin};
 
 pub const SYSTEM_PROMPT: &str = include_str!("../SYSTEM_PROMPT.md");
@@ -25,9 +21,11 @@ pub(crate) fn build_initial_messages(
   system_prompt: &str,
   task_prompt: &str,
   session_id: &str,
+  discovered_skills: &[crate::skills::SkillInfo],
+  loaded_skills: &[crate::skills::Skill],
 ) -> Vec<Message> {
   let mut messages = vec![Message::system(system_prompt.to_string())];
-  enrich_initial_messages(&mut messages);
+  enrich_initial_messages(&mut messages, discovered_skills, loaded_skills);
   messages.push(Message::user(
     format!("[session: {session_id}]\n\n{}", task_prompt.trim()),
     MessageOrigin::Human,
@@ -35,108 +33,29 @@ pub(crate) fn build_initial_messages(
   messages
 }
 
-pub fn skill_roots() -> Vec<PathBuf> {
-  let mut dirs = vec![PathBuf::from(".ogent/skills")];
-  if let Some(home) = std::env::var_os("HOME") {
-    dirs.push(PathBuf::from(home).join(".ogent/skills"));
+pub fn format_discover_skills(skills: &[crate::skills::SkillInfo]) -> String {
+  if skills.is_empty() {
+    return String::new();
   }
-  dirs
-}
-
-pub fn load_skill_content(skill_name: &str) -> Result<(String, String, String)> {
-  for dir in skill_roots() {
-    let root = dir.join(skill_name);
-    let path = root.join("SKILL.md");
-    let Ok(content) = fs::read_to_string(&path) else {
-      continue;
-    };
-    let (name, _) = parse_skill_frontmatter(&content);
-    return Ok((
-      if name.is_empty() {
-        skill_name.to_string()
-      } else {
-        name
-      },
-      root.display().to_string(),
-      strip_frontmatter(&content),
-    ));
-  }
-  bail!("skill {skill_name} not found in local .ogent/skills or ~/.ogent/skills")
-}
-
-pub fn discover_skills_message() -> String {
-  let mut seen = std::collections::HashSet::new();
   let mut out = String::from("<skills>\n");
-  for root in skill_roots() {
-    let Ok(entries) = fs::read_dir(root) else {
-      continue;
-    };
-    for entry in entries.flatten() {
-      if !entry.file_type().is_ok_and(|t| t.is_dir()) {
-        continue;
-      }
-      let Ok(content) = fs::read_to_string(entry.path().join("SKILL.md")) else {
-        continue;
-      };
-      let (name, desc) = parse_skill_frontmatter(&content);
-      let dir_name = entry.file_name().to_string_lossy().to_string();
-      let key = if name.is_empty() { dir_name } else { name };
-      if !seen.insert(key.clone()) {
-        continue;
-      }
-      out.push_str("  <skill name=\"");
-      out.push_str(&xml_escape(&key));
-      out.push_str("\" description=\"");
-      out.push_str(&xml_escape(&desc));
-      out.push_str("\" />\n");
-    }
+  for skill in skills {
+    out.push_str("  <skill name=\"");
+    out.push_str(&xml_escape(&skill.name));
+    out.push_str("\" description=\"");
+    out.push_str(&xml_escape(&skill.description));
+    out.push_str("\" />\n");
   }
-  if seen.is_empty() {
-    String::new()
-  } else {
-    out.push_str("</skills>");
-    out
-  }
+  out.push_str("</skills>");
+  out
 }
 
-fn parse_frontmatter(content: &str) -> Option<&str> {
-  content
-    .strip_prefix("---")
-    .and_then(|rest| rest.find("---").map(|end| &rest[..end]))
-}
-
-fn strip_frontmatter(content: &str) -> String {
-  let Some(fm) = parse_frontmatter(content) else {
-    return content.trim().to_string();
-  };
-  let start = 3 + fm.len() + 3;
-  content[start..].trim().to_string()
-}
-
-fn parse_skill_frontmatter(content: &str) -> (String, String) {
-  let Some(fm) = parse_frontmatter(content) else {
-    return (String::new(), String::new());
-  };
-  let mut name = String::new();
-  let mut description = String::new();
-
-  if let Ok(value) = serde_yaml::from_str::<serde_yaml::Value>(fm) {
-    if let Some(n) = value.get("name").and_then(|v| v.as_str()) {
-      name = n.to_string();
-    }
-    if let Some(d) = value.get("description").and_then(|v| v.as_str()) {
-      description = d.to_string();
-    }
-  } else {
-    for line in fm.lines().map(str::trim) {
-      if let Some(rest) = line.strip_prefix("name:") {
-        name = rest.trim().to_string();
-      } else if let Some(rest) = line.strip_prefix("description:") {
-        description = rest.trim().to_string();
-      }
-    }
-  }
-  (name, description)
+pub fn format_loaded_skill(skill: &crate::skills::Skill) -> String {
+  format!(
+    "<skill name=\"{}\" root=\"{}\">\n{}\n</skill>",
+    skill.name,
+    skill.root.display(),
+    skill.body
+  )
 }
 
 fn xml_escape(s: &str) -> String {
@@ -162,13 +81,14 @@ pub fn build_messages(prompt: &str) -> Vec<Message> {
   messages
 }
 
-pub fn enrich_initial_messages(messages: &mut Vec<Message>) {
-  push_internal_user_message(messages, discover_skills_message());
-  if let Ok((name, root, body)) = load_skill_content("colgrep") {
-    push_internal_user_message(
-      messages,
-      format!("<skill name=\"{name}\" root=\"{root}\">\n{body}\n</skill>"),
-    );
+pub fn enrich_initial_messages(
+  messages: &mut Vec<Message>,
+  discovered_skills: &[crate::skills::SkillInfo],
+  loaded_skills: &[crate::skills::Skill],
+) {
+  push_internal_user_message(messages, format_discover_skills(discovered_skills));
+  for skill in loaded_skills {
+    push_internal_user_message(messages, format_loaded_skill(skill));
   }
 }
 
@@ -195,7 +115,7 @@ mod tests {
 
   #[test]
   fn build_initial_messages_keeps_human_task_last() {
-    let messages = build_initial_messages("system", "do the task", "session-1");
+    let messages = build_initial_messages("system", "do the task", "session-1", &[], &[]);
     let last = messages.last().unwrap();
     assert_eq!(last.origin, MessageOrigin::Human);
     assert_eq!(last.content, "[session: session-1]\n\ndo the task");

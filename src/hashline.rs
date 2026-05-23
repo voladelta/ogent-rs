@@ -92,11 +92,18 @@ pub struct EditOp {
 }
 
 #[derive(Clone)]
+enum InsertMode {
+  Replace,
+  Before,
+  After,
+}
+
+#[derive(Clone)]
 struct ResolvedEdit {
   start_idx: usize,
   end_idx: Option<usize>,
   replacement: Vec<String>,
-  insert_mode: &'static str,
+  mode: InsertMode,
 }
 
 pub fn apply_anchor_edits(source: &str, ops: &[EditOp]) -> Result<String> {
@@ -133,29 +140,19 @@ fn resolve_edit(lines: &[String], op: &EditOp) -> Result<ResolvedEdit> {
       if end.is_some() {
         bail!("insert edits cannot use end");
       }
-      ResolvedEdit {
-        start_idx,
-        end_idx: None,
-        replacement,
-        insert_mode: "before",
-      }
+      ResolvedEdit { start_idx, end_idx: None, replacement, mode: InsertMode::Before }
     }
     "insert_after" => {
       if end.is_some() {
         bail!("insert edits cannot use end");
       }
-      ResolvedEdit {
-        start_idx: start_idx + 1,
-        end_idx: None,
-        replacement,
-        insert_mode: "after",
-      }
+      ResolvedEdit { start_idx, end_idx: None, replacement, mode: InsertMode::After }
     }
     "replace" => ResolvedEdit {
       start_idx,
       end_idx: Some(end.map_or(start_idx, |a| a.line - 1)),
       replacement,
-      insert_mode: "",
+      mode: InsertMode::Replace,
     },
     other => bail!("action must be replace, insert_before, or insert_after, got: {other}"),
   })
@@ -196,37 +193,27 @@ fn validate_anchor(lines: &[String], anchor: Anchor<'_>) -> Result<()> {
   Ok(())
 }
 
-fn effective_start(e: &ResolvedEdit) -> usize {
-  if e.insert_mode == "after" {
-    e.start_idx.saturating_sub(1)
-  } else {
-    e.start_idx
-  }
-}
-
-fn effective_end(e: &ResolvedEdit) -> usize {
-  e.end_idx.unwrap_or_else(|| effective_start(e))
-}
-
 fn apply_resolved(mut lines: Vec<String>, mut edits: Vec<ResolvedEdit>) -> Result<Vec<String>> {
-  edits.sort_by_key(|b| std::cmp::Reverse(effective_start(b)));
+  edits.sort_by_key(|e| std::cmp::Reverse(e.start_idx));
   for pair in edits.windows(2) {
     let upper = &pair[0];
     let lower = &pair[1];
-    if effective_end(lower) >= effective_start(upper) {
+    let lower_end = lower.end_idx.unwrap_or(lower.start_idx);
+    if lower_end >= upper.start_idx {
       bail!(
         "overlapping edits: lines {}-{} and {}-{}",
-        effective_start(lower) + 1,
-        effective_end(lower) + 1,
-        effective_start(upper) + 1,
-        effective_end(upper) + 1
+        lower.start_idx + 1,
+        lower_end + 1,
+        upper.start_idx + 1,
+        upper.end_idx.unwrap_or(upper.start_idx) + 1
       );
     }
   }
   for e in edits {
-    match e.end_idx {
-      None => lines.splice(e.start_idx..e.start_idx, e.replacement),
-      Some(end) => lines.splice(e.start_idx..=end, e.replacement),
+    match e.mode {
+      InsertMode::Before => lines.splice(e.start_idx..e.start_idx, e.replacement),
+      InsertMode::After => lines.splice(e.start_idx + 1..e.start_idx + 1, e.replacement),
+      InsertMode::Replace => lines.splice(e.start_idx..=e.end_idx.unwrap(), e.replacement),
     };
   }
   Ok(lines)

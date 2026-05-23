@@ -81,6 +81,7 @@ pub struct Agent {
   pub session_id: String,
   pub dirty: bool,
   output_sink: Option<Arc<dyn AgentOutputSink>>,
+  pub skill_store: Arc<crate::skills::SkillStore>,
 }
 
 impl Agent {
@@ -90,6 +91,7 @@ impl Agent {
     messages: Vec<Message>,
     tools: Vec<Tool>,
     session_id: String,
+    skill_store: Arc<crate::skills::SkillStore>,
   ) -> Self {
     Self {
       workspace,
@@ -99,6 +101,7 @@ impl Agent {
       session_id,
       dirty: false,
       output_sink: None,
+      skill_store,
     }
   }
 
@@ -173,8 +176,9 @@ impl Agent {
       for tool_call in assistant.tool_calls {
         self.emit_tool_call(&tool_call);
         let workspace = self.workspace.clone();
+        let skill_store = self.skill_store.clone();
         let result = execute_tool(
-          ToolContext { workspace },
+          ToolContext { workspace, skill_store },
           &tool_call.function.name,
           &tool_call.function.arguments,
         )
@@ -257,12 +261,14 @@ mod tests {
       30,
     )
     .unwrap();
+    let skill_store = std::sync::Arc::new(crate::skills::SkillStore::new(workspace.root(), Vec::new()));
     let mut agent = Agent::new(
       workspace.clone(),
       client,
       vec![Message::user("hello", MessageOrigin::Human)],
       Vec::new(),
       session_id.to_string(),
+      skill_store,
     );
     agent.dirty = true;
 

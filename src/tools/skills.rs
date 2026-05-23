@@ -19,11 +19,14 @@ struct LoadSkillArgs {
   name: String,
 }
 
-fn load_skill(_ctx: ToolContext, args: &str) -> Result<String> {
+fn load_skill(ctx: ToolContext, args: &str) -> Result<String> {
   let args: LoadSkillArgs = parse_args(args)?;
   require_nonempty(&args.name, "name")?;
-  let (name, root, body) = crate::prompts::load_skill_content(&args.name)?;
+  let skill = ctx.skill_store.load_skill(&args.name)?;
   Ok(format!(
-    "<skill name=\"{name}\" root=\"{root}\">\n{body}\n</skill>"
+    "<skill name=\"{}\" root=\"{}\">\n{}\n</skill>",
+    skill.name,
+    skill.root.display(),
+    skill.body
   ))
 }

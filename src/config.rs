@@ -3,11 +3,17 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+fn default_startup_skills() -> Vec<String> {
+  vec!["colgrep".to_string()]
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
   pub default_profile: String,
   pub profiles: HashMap<String, Profile>,
   pub providers: HashMap<String, ProviderConfig>,
+  #[serde(default = "default_startup_skills")]
+  pub startup_skills: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -159,6 +165,7 @@ impl Default for Config {
       default_profile: "ds-flash".to_string(),
       profiles,
       providers,
+      startup_skills: default_startup_skills(),
     }
   }
 }
