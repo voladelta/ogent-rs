@@ -59,7 +59,7 @@ fn elapsed_since_epoch() -> std::time::Duration {
     .unwrap_or_default()
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 pub fn timestamp_ms() -> u64 {
   elapsed_since_epoch().as_millis() as u64
 }

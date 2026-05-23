@@ -4,7 +4,6 @@ use serde::{Deserialize, Deserializer};
 use crate::types::{ChatResponse, ToolCall, Usage};
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub enum StreamEvent {
   Content(String),
   Reasoning(String),
@@ -329,8 +328,8 @@ mod tests {
     ));
   }
 
-  #[tokio::test]
-  async fn accumulator_applies_tool_call_chunks() {
+  #[test]
+  fn accumulator_applies_tool_call_chunks() {
     let mut acc = ChatAccumulator::default();
     apply_data_line(
       &mut acc,
@@ -346,8 +345,8 @@ mod tests {
     );
   }
 
-  #[tokio::test]
-  async fn accumulator_accepts_null_content_chunks() {
+  #[test]
+  fn accumulator_accepts_null_content_chunks() {
     let mut acc = ChatAccumulator::default();
     apply_data_line(
       &mut acc,
@@ -361,8 +360,8 @@ mod tests {
     assert_eq!(acc.response.content, "hello");
   }
 
-  #[tokio::test]
-  async fn accumulator_accepts_null_function_fields() {
+  #[test]
+  fn accumulator_accepts_null_function_fields() {
     let mut acc = ChatAccumulator::default();
     apply_data_line(
       &mut acc,
@@ -382,8 +381,8 @@ mod tests {
     assert_eq!(tc.function.arguments, "{\"path\": \"README.md\"}");
   }
 
-  #[tokio::test]
-  async fn accumulator_accepts_null_tool_calls() {
+  #[test]
+  fn accumulator_accepts_null_tool_calls() {
     let mut acc = ChatAccumulator::default();
     apply_data_line(
       &mut acc,
@@ -395,8 +394,8 @@ mod tests {
     assert!(!acc.emitted_tool_calling);
   }
 
-  #[tokio::test]
-  async fn accumulator_accepts_null_function_object() {
+  #[test]
+  fn accumulator_accepts_null_function_object() {
     let mut acc = ChatAccumulator::default();
     apply_data_line(
       &mut acc,

@@ -106,8 +106,6 @@ fn display_rest(kind: &str, signature: &str) -> String {
   }
 }
 
-// ── Shared helpers for language extractors ───────────────────────────────────
-
 pub(crate) fn byte_to_line(source: &str, byte: usize) -> usize {
   let end = byte.min(source.len());
   source[..end].chars().filter(|&c| c == '\n').count() + 1
@@ -131,7 +129,6 @@ pub(crate) fn signature_text(source: &str, node: Node, body_kinds: &[&str]) -> S
   }
 }
 
-/// Extract the "name" named field of `node` as a String.
 pub(crate) fn node_name(source: &str, node: Node) -> Option<String> {
   node
     .child_by_field_name("name")?
@@ -140,7 +137,6 @@ pub(crate) fn node_name(source: &str, node: Node) -> Option<String> {
     .map(|s| s.to_string())
 }
 
-/// Build a Symbol from a tree-sitter node, computing line positions automatically.
 pub(crate) fn make_symbol(
   source: &str,
   node: Node,
@@ -159,11 +155,7 @@ pub(crate) fn make_symbol(
   }
 }
 
-/// Collapse a child list into a single symbol or a `(group)` wrapper.
-///
-/// - 0 children → None
-/// - 1 child    → that child (unwrapped)
-/// - N children → a group symbol containing all children
+// Collapse a child list into a single symbol, a group wrapper, or None.
 pub(crate) fn group_or_single(
   source: &str,
   node: Node,

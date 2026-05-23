@@ -234,7 +234,6 @@ mod tests {
     assert_eq!(skill_2.name, "dir_c");
     assert_eq!(skill_2.root, skill_c_path);
 
-    // Let's clean up
     let _ = std::fs::remove_dir_all(temp);
   }
 
