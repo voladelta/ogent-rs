@@ -217,10 +217,7 @@ where
     let bytes = item?;
     buf.extend_from_slice(bytes.as_ref());
     let mut consumed = 0;
-    loop {
-      let Some(rel_pos) = buf[consumed..].iter().position(|&b| b == b'\n') else {
-        break;
-      };
+    while let Some(rel_pos) = buf[consumed..].iter().position(|&b| b == b'\n') {
       let abs_end = consumed + rel_pos;
       match decode_sse_line(&buf[consumed..abs_end])? {
         SseLine::Done => {
