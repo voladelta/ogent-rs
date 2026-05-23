@@ -95,13 +95,12 @@ async fn run_worker_cli(
     skill_store,
   );
   agent.set_output_sink(Some(agent::cli_output_sink()));
-  agent.dirty = true;
   let loop_result = agent.run_loop().await;
   if let Err(e) = loop_result {
-    agent.persist_if_dirty()?;
+    agent.persist()?;
     return Err(e.into());
   }
-  agent.persist_if_dirty()?;
+  agent.persist()?;
   Ok(())
 }
 
