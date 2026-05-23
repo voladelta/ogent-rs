@@ -79,7 +79,6 @@ pub struct Agent {
   pub messages: Vec<Message>,
   pub tools: Vec<Tool>,
   pub session_id: String,
-  pub dirty: bool,
   output_sink: Option<Arc<dyn AgentOutputSink>>,
   pub skill_store: Arc<crate::skills::SkillStore>,
 }
@@ -99,7 +98,6 @@ impl Agent {
       messages,
       tools,
       session_id,
-      dirty: false,
       output_sink: None,
       skill_store,
     }
@@ -161,13 +159,14 @@ impl Agent {
       let assistant = Message::assistant(resp);
       self.messages.push(assistant.clone());
       if streaming_to_sink && !assistant.content.is_empty() {
-        if !assistant.content.ends_with('\n') {
-          println!();
+        if !assistant.content.ends_with('\n')
+          && let Some(sink) = &self.output_sink
+        {
+          sink.stream_event(&StreamEvent::Content("\n".to_string()));
         }
       } else {
         self.emit_message(&assistant);
       }
-      self.dirty = true;
 
       if assistant.tool_calls.is_empty() {
         break;
@@ -198,10 +197,7 @@ impl Agent {
     Ok(())
   }
 
-  pub fn persist_if_dirty(&self) -> Result<()> {
-    if !self.dirty {
-      return Ok(());
-    }
+  pub fn persist(&self) -> Result<()> {
     session::persist_session_in(&self.workspace, &self.messages, &self.session_id)
   }
 }
@@ -249,7 +245,7 @@ mod tests {
   }
 
   #[test]
-  fn persist_if_dirty_writes_messages_jsonl() {
+  fn persist_writes_messages_jsonl() {
     let root = std::env::temp_dir().join(format!(
       "ogent-agent-persist-test-{}",
       crate::session::timestamp_ms()
@@ -265,6 +261,51 @@ mod tests {
     .unwrap();
     let skill_store =
       std::sync::Arc::new(crate::skills::SkillStore::new(workspace.root(), Vec::new()));
+    let agent = Agent::new(
+      workspace.clone(),
+      client,
+      vec![Message::user("hello", MessageOrigin::Human)],
+      Vec::new(),
+      session_id.to_string(),
+      skill_store,
+    );
+
+    agent.persist().unwrap();
+
+    let path = crate::session::session_file_in(&workspace, session_id);
+    assert!(path.exists());
+    let data = std::fs::read_to_string(&path).unwrap();
+    assert!(data.contains("\"content\":\"hello\""));
+    let _ = std::fs::remove_dir_all(root);
+  }
+
+  #[tokio::test]
+  async fn test_run_loop_streaming_newline_redirect() {
+    use std::sync::Mutex;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let url = format!("http://{}", addr);
+
+    tokio::spawn(async move {
+      let (mut socket, _) = listener.accept().await.unwrap();
+      let mut buf = [0u8; 1024];
+      let _ = socket.read(&mut buf).await;
+      let response = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: keep-alive\r\n\r\n\
+                      data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\n";
+      let _ = socket.write_all(response.as_bytes()).await;
+    });
+
+    let root = std::env::temp_dir().join(format!(
+      "ogent-agent-newline-test-{}",
+      crate::session::timestamp_ms()
+    ));
+    let workspace = Workspace::from_root(root.clone());
+    let session_id = "newline-test";
+    let client = Client::new(&url, "dummy".into(), |_, _| Ok(serde_json::Value::Null), 30).unwrap();
+    let skill_store =
+      std::sync::Arc::new(crate::skills::SkillStore::new(workspace.root(), Vec::new()));
     let mut agent = Agent::new(
       workspace.clone(),
       client,
@@ -273,14 +314,37 @@ mod tests {
       session_id.to_string(),
       skill_store,
     );
-    agent.dirty = true;
 
-    agent.persist_if_dirty().unwrap();
+    struct MockSink {
+      events: Arc<Mutex<Vec<StreamEvent>>>,
+    }
+    impl AgentOutputSink for MockSink {
+      fn message(&self, _message: &Message) {}
+      fn stream_event(&self, event: &StreamEvent) {
+        self.events.lock().unwrap().push(event.clone());
+      }
+    }
 
-    let path = crate::session::session_file_in(&workspace, session_id);
-    assert!(path.exists());
-    let data = std::fs::read_to_string(&path).unwrap();
-    assert!(data.contains("\"content\":\"hello\""));
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let sink = Arc::new(MockSink {
+      events: events.clone(),
+    });
+    agent.set_output_sink(Some(sink));
+
+    let run_res = agent.run_loop().await;
+    assert!(run_res.is_ok());
+
+    let recorded = events.lock().unwrap();
+    assert_eq!(recorded.len(), 2);
+    match &recorded[0] {
+      StreamEvent::Content(c) => assert_eq!(c, "hello"),
+      _ => panic!("Expected first event to be Content"),
+    }
+    match &recorded[1] {
+      StreamEvent::Content(c) => assert_eq!(c, "\n"),
+      _ => panic!("Expected second event to be Content"),
+    }
+
     let _ = std::fs::remove_dir_all(root);
   }
 }
