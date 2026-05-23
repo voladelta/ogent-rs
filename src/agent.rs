@@ -151,10 +151,13 @@ impl Agent {
       let resp = self
         .client
         .chat(&self.messages, &self.tools, stream_tx)
-        .await?;
+        .await;
+      // Always drain the streaming task before propagating errors: dropping
+      // stream_tx (inside chat) closes the channel, so the task exits promptly.
       if let Some(handle) = stream_handle {
         let _ = handle.await;
       }
+      let resp = resp?;
 
       let assistant = Message::assistant(resp);
       self.messages.push(assistant.clone());

@@ -419,4 +419,106 @@ mod tests {
     assert_eq!(tc.function.name, "");
     assert_eq!(tc.function.arguments, "");
   }
+
+  // --- parse_sse_response integration tests ---
+  //
+  // These tests require a real HTTP connection because reqwest::Response is
+  // not constructible from raw bytes in the public API.
+
+  /// Spawn a one-shot HTTP/1.1 server that sends `body` as the response body
+  /// after SSE headers and returns the resulting `reqwest::Response`.
+  async fn sse_response(body: Vec<u8>) -> reqwest::Response {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+      let (mut sock, _) = listener.accept().await.unwrap();
+      let mut buf = [0u8; 2048];
+      let _ = sock.read(&mut buf).await;
+      let headers =
+        b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n";
+      let _ = sock.write_all(headers).await;
+      let _ = sock.write_all(&body).await;
+    });
+    reqwest::get(format!("http://127.0.0.1:{}", addr.port()))
+      .await
+      .unwrap()
+  }
+
+  /// Like `sse_response` but writes `parts` sequentially with `TCP_NODELAY`
+  /// and a 1 ms pause between each part, encouraging reqwest to receive them
+  /// as separate `bytes_stream` items.
+  async fn sse_response_chunked(parts: Vec<Vec<u8>>) -> reqwest::Response {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+      let (mut sock, _) = listener.accept().await.unwrap();
+      sock.set_nodelay(true).unwrap();
+      let mut buf = [0u8; 2048];
+      let _ = sock.read(&mut buf).await;
+      let headers =
+        b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n";
+      let _ = sock.write_all(headers).await;
+      for part in parts {
+        let _ = sock.write_all(&part).await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
+      }
+    });
+    reqwest::get(format!("http://127.0.0.1:{}", addr.port()))
+      .await
+      .unwrap()
+  }
+
+  #[tokio::test]
+  async fn parse_sse_response_ok_with_done() {
+    let body =
+      b"data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\ndata: [DONE]\n\n".to_vec();
+    let resp = sse_response(body).await;
+    let result = parse_sse_response(resp, None).await;
+    assert!(result.is_ok(), "unexpected error: {result:?}");
+    assert_eq!(result.unwrap().content, "hi");
+  }
+
+  #[tokio::test]
+  async fn parse_sse_response_truncated_stream_without_done() {
+    let body = b"data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n".to_vec();
+    let resp = sse_response(body).await;
+    let result = parse_sse_response(resp, None).await;
+    assert!(
+      matches!(result, Err(SseError::TruncatedStream)),
+      "expected TruncatedStream, got {result:?}"
+    );
+  }
+
+  #[tokio::test]
+  async fn parse_sse_response_json_parse_error_on_invalid_data() {
+    let body = b"data: not-valid-json\n\ndata: [DONE]\n\n".to_vec();
+    let resp = sse_response(body).await;
+    let result = parse_sse_response(resp, None).await;
+    assert!(
+      matches!(result, Err(SseError::JsonParse { .. })),
+      "expected JsonParse, got {result:?}"
+    );
+  }
+
+  /// Verify that multi-byte UTF-8 characters are preserved when the character's
+  /// bytes happen to be split across two network chunks.
+  ///
+  /// The old code called `String::from_utf8_lossy` per chunk, which would
+  /// corrupt a character whose bytes straddled a chunk boundary.  The new code
+  /// accumulates a `Vec<u8>` and decodes only on complete lines, so the split
+  /// is harmless.
+  #[tokio::test]
+  async fn parse_sse_response_multibyte_utf8_split_across_chunks() {
+    // "café" — the é (U+00E9) is encoded as 0xC3 0xA9 (two bytes).
+    // We split the SSE line right between those two bytes.
+    let prefix = b"data: {\"choices\":[{\"delta\":{\"content\":\"caf".to_vec();
+    let first_byte_of_e = b"\xc3".to_vec(); // first byte of é
+    let suffix = b"\xa9\"}}]}\n\ndata: [DONE]\n\n".to_vec(); // second byte + rest
+    let resp = sse_response_chunked(vec![prefix, first_byte_of_e, suffix]).await;
+    let result = parse_sse_response(resp, None).await;
+    assert!(result.is_ok(), "unexpected error: {result:?}");
+    assert_eq!(result.unwrap().content, "café");
+  }
 }

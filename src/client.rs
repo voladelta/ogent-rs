@@ -73,6 +73,7 @@ impl Client {
     stream_tx: Option<tokio::sync::mpsc::Sender<crate::sse::StreamEvent>>,
   ) -> Result<ChatResponse, ClientError> {
     let req_body = (self.build_req)(messages, tools).map_err(ClientError::BuildRequest)?;
+    let streaming = stream_tx.is_some();
     let mut last_err = None;
     for attempt in 0..=MAX_RETRIES {
       if attempt > 0 {
@@ -82,6 +83,9 @@ impl Client {
       match self.chat_once(&req_body, stream_tx.clone()).await {
         Ok(resp) => return Ok(resp),
         Err(err) if !err.is_retryable() => return Err(err),
+        // Never retry SSE errors while a streaming sink is attached: partial
+        // events may already have been emitted, so a retry would duplicate output.
+        Err(err @ ClientError::Sse(_)) if streaming => return Err(err),
         Err(err) => last_err = Some(err),
       }
     }
