@@ -28,6 +28,7 @@ impl ClientError {
     match self {
       Self::ApiError { status, .. } => matches!(status, 500 | 502 | 503 | 504),
       Self::Http(e) => e.is_connect() || e.is_timeout(),
+      Self::Sse(e) => e.is_retryable(),
       _ => false,
     }
   }

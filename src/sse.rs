@@ -69,6 +69,51 @@ where
 pub enum SseError {
   #[error("sse stream read failed")]
   Read(#[source] reqwest::Error),
+  #[error("sse stream ended without [DONE] sentinel")]
+  TruncatedStream,
+  #[error("sse line contained invalid UTF-8")]
+  InvalidUtf8,
+  #[error("sse chunk is not valid JSON")]
+  JsonParse {
+    data: String,
+    #[source]
+    source: serde_json::Error,
+  },
+}
+
+impl SseError {
+  pub fn is_retryable(&self) -> bool {
+    matches!(self, Self::Read(_) | Self::TruncatedStream)
+  }
+}
+
+/// Low-level SSE line classification.
+enum SseLine {
+  /// Decoded JSON string from a `data:` line (not `[DONE]`).
+  Data(String),
+  /// The `[DONE]` end-of-stream sentinel.
+  Done,
+  /// Empty lines, comments, or any non-`data:` line — caller should skip.
+  Other,
+}
+
+/// Classify a single raw SSE line (bytes up to but not including `\n`).
+///
+/// Strips a trailing `\r` so that `\r\n`-terminated streams are handled
+/// identically to `\n`-terminated ones. Returns `Err(SseError::InvalidUtf8)`
+/// if the bytes are not valid UTF-8; all other errors are structural and
+/// expressed through the `SseLine` variants.
+fn decode_sse_line(line: &[u8]) -> Result<SseLine, SseError> {
+  let line = line.strip_suffix(b"\r").unwrap_or(line);
+  let s = std::str::from_utf8(line).map_err(|_| SseError::InvalidUtf8)?;
+  let data = match s.strip_prefix("data:") {
+    Some(d) => d.trim_start(),
+    None => return Ok(SseLine::Other),
+  };
+  if data == "[DONE]" {
+    return Ok(SseLine::Done);
+  }
+  Ok(SseLine::Data(data.to_string()))
 }
 
 #[derive(Default)]
@@ -81,11 +126,7 @@ struct AccToolCall {
 
 impl AccToolCall {
   fn into_tool_call(self) -> ToolCall {
-    ToolCall::function(
-      self.id,
-      self.name,
-      repair_tool_arguments_json(&self.arguments),
-    )
+    ToolCall::function(self.id, self.name, self.arguments)
   }
 }
 
@@ -151,64 +192,6 @@ impl ChatAccumulator {
   }
 }
 
-fn repair_tool_arguments_json(arguments: &str) -> String {
-  if arguments.trim().is_empty() || serde_json::from_str::<serde_json::Value>(arguments).is_ok() {
-    return arguments.to_string();
-  }
-
-  let mut stack = Vec::new();
-  let mut in_string = false;
-  let mut escaped = false;
-
-  for ch in arguments.chars() {
-    if in_string {
-      if escaped {
-        escaped = false;
-      } else if ch == '\\' {
-        escaped = true;
-      } else if ch == '"' {
-        in_string = false;
-      }
-      continue;
-    }
-
-    match ch {
-      '"' => in_string = true,
-      '{' => stack.push('}'),
-      '[' => stack.push(']'),
-      '}' | ']' if stack.pop() != Some(ch) => {
-        return arguments.to_string();
-      }
-      _ => {}
-    }
-  }
-
-  if in_string || stack.is_empty() {
-    return arguments.to_string();
-  }
-
-  let mut repaired = arguments.to_string();
-  while let Some(ch) = stack.pop() {
-    repaired.push(ch);
-  }
-
-  if serde_json::from_str::<serde_json::Value>(&repaired).is_ok() {
-    repaired
-  } else {
-    arguments.to_string()
-  }
-}
-
-fn truncate_for_log(s: &str, limit: usize) -> String {
-  if s.len() <= limit {
-    return s.to_string();
-  }
-  let end = s.floor_char_boundary(limit);
-  let mut out = s[..end].to_string();
-  out.push_str("...");
-  out
-}
-
 async fn send_event(tx: &mut Option<tokio::sync::mpsc::Sender<StreamEvent>>, ev: StreamEvent) {
   if let Some(t) = tx
     && t.send(ev).await.is_err()
@@ -217,56 +200,73 @@ async fn send_event(tx: &mut Option<tokio::sync::mpsc::Sender<StreamEvent>>, ev:
   }
 }
 
-fn parse_sse_data_line(line: &str) -> Option<StreamChunk> {
-  let data = line.strip_prefix("data:")?.trim_start();
-  if data == "[DONE]" {
-    return None;
-  }
-  match serde_json::from_str::<StreamChunk>(data) {
-    Ok(chunk) => Some(chunk),
-    Err(_) => {
-      eprintln!(
-        "failed to parse sse data chunk: {}",
-        truncate_for_log(data, 240)
-      );
-      None
-    }
-  }
-}
-
+/// Parse an OpenAI-compatible SSE response into a [`ChatResponse`].
+///
+/// The byte stream is accumulated in a `Vec<u8>` and split on `b'\n'`
+/// boundaries so that multi-byte UTF-8 characters that span network chunk
+/// boundaries are never corrupted by premature string conversion.
+///
+/// Returns [`SseError::TruncatedStream`] if the connection closes before the
+/// `[DONE]` sentinel is received, and [`SseError::JsonParse`] if a `data:`
+/// line cannot be decoded as a [`StreamChunk`].
 pub async fn parse_sse_response(
   resp: reqwest::Response,
   mut stream_tx: Option<tokio::sync::mpsc::Sender<StreamEvent>>,
 ) -> Result<ChatResponse, SseError> {
   let mut accumulator = ChatAccumulator::default();
   let mut stream = resp.bytes_stream();
-  let mut buf = String::new();
+  let mut buf: Vec<u8> = Vec::new();
+  let mut done = false;
 
-  while let Some(item) = stream.next().await {
+  'stream: while let Some(item) = stream.next().await {
     let bytes = item.map_err(SseError::Read)?;
-    buf.push_str(&String::from_utf8_lossy(&bytes));
+    buf.extend_from_slice(&bytes);
     let mut consumed = 0;
-    while let Some(pos) = buf[consumed..].find('\n') {
-      let abs_pos = consumed + pos;
-      let line = buf[consumed..abs_pos].trim_end_matches('\r');
-      if let Some(chunk) = parse_sse_data_line(line) {
-        for ev in accumulator.apply(chunk) {
-          send_event(&mut stream_tx, ev).await;
+    loop {
+      let Some(rel_pos) = buf[consumed..].iter().position(|&b| b == b'\n') else {
+        break;
+      };
+      let abs_end = consumed + rel_pos;
+      match decode_sse_line(&buf[consumed..abs_end])? {
+        SseLine::Done => {
+          done = true;
+          break 'stream;
         }
+        SseLine::Data(json) => {
+          let chunk = serde_json::from_str::<StreamChunk>(&json)
+            .map_err(|source| SseError::JsonParse { data: json.clone(), source })?;
+          for ev in accumulator.apply(chunk) {
+            send_event(&mut stream_tx, ev).await;
+          }
+        }
+        SseLine::Other => {}
       }
-      consumed = abs_pos + 1;
+      consumed = abs_end + 1;
     }
     if consumed > 0 {
       buf.drain(..consumed);
     }
   }
-  if !buf.is_empty()
-    && let Some(chunk) = parse_sse_data_line(buf.trim_end_matches('\r'))
-  {
-    for ev in accumulator.apply(chunk) {
-      send_event(&mut stream_tx, ev).await;
+
+  // Process any trailing bytes (last line without a terminating newline).
+  if !done && !buf.is_empty() {
+    match decode_sse_line(&buf)? {
+      SseLine::Done => done = true,
+      SseLine::Data(json) => {
+        let chunk = serde_json::from_str::<StreamChunk>(&json)
+          .map_err(|source| SseError::JsonParse { data: json.clone(), source })?;
+        for ev in accumulator.apply(chunk) {
+          send_event(&mut stream_tx, ev).await;
+        }
+      }
+      SseLine::Other => {}
     }
   }
+
+  if !done {
+    return Err(SseError::TruncatedStream);
+  }
+
   Ok(accumulator.finish())
 }
 
@@ -274,19 +274,79 @@ pub async fn parse_sse_response(
 mod tests {
   use super::*;
 
-  fn apply_line(acc: &mut ChatAccumulator, line: &str) -> Vec<StreamEvent> {
-    let chunk = parse_sse_data_line(line).expect("valid test line");
+  fn apply_data_line(acc: &mut ChatAccumulator, line: &str) -> Vec<StreamEvent> {
+    let SseLine::Data(json) = decode_sse_line(line.as_bytes()).expect("valid SSE line") else {
+      return vec![];
+    };
+    let chunk = serde_json::from_str::<StreamChunk>(&json).expect("valid JSON");
     acc.apply(chunk)
   }
+
+  // --- decode_sse_line unit tests ---
+
+  #[test]
+  fn decode_sse_line_emits_data() {
+    let payload = r#"{"choices":[]}"#;
+    let line = format!("data: {payload}");
+    let SseLine::Data(s) = decode_sse_line(line.as_bytes()).unwrap() else {
+      panic!("expected SseLine::Data");
+    };
+    assert_eq!(s, payload);
+  }
+
+  #[test]
+  fn decode_sse_line_emits_done() {
+    assert!(matches!(
+      decode_sse_line(b"data: [DONE]").unwrap(),
+      SseLine::Done
+    ));
+    // No space after colon is also valid SSE.
+    assert!(matches!(
+      decode_sse_line(b"data:[DONE]").unwrap(),
+      SseLine::Done
+    ));
+  }
+
+  #[test]
+  fn decode_sse_line_skips_non_data_lines() {
+    assert!(matches!(decode_sse_line(b"").unwrap(), SseLine::Other));
+    assert!(matches!(
+      decode_sse_line(b": heartbeat").unwrap(),
+      SseLine::Other
+    ));
+    assert!(matches!(
+      decode_sse_line(b"event: ping").unwrap(),
+      SseLine::Other
+    ));
+  }
+
+  #[test]
+  fn decode_sse_line_strips_trailing_cr() {
+    assert!(matches!(
+      decode_sse_line(b"data: [DONE]\r").unwrap(),
+      SseLine::Done
+    ));
+  }
+
+  #[test]
+  fn decode_sse_line_rejects_invalid_utf8() {
+    // 0xFF is not valid UTF-8
+    assert!(matches!(
+      decode_sse_line(b"data: \xff"),
+      Err(SseError::InvalidUtf8)
+    ));
+  }
+
+  // --- ChatAccumulator tests (use apply_data_line helper) ---
 
   #[tokio::test]
   async fn accumulator_applies_tool_call_chunks() {
     let mut acc = ChatAccumulator::default();
-    apply_line(
+    apply_data_line(
       &mut acc,
       r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"x","type":"function","function":{"name":"bash","arguments":"{\"command\""}}]}}]}"#,
     );
-    apply_line(
+    apply_data_line(
       &mut acc,
       r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":":\"ls\""}}]}}]}"#,
     );
@@ -299,11 +359,11 @@ mod tests {
   #[tokio::test]
   async fn accumulator_accepts_null_content_chunks() {
     let mut acc = ChatAccumulator::default();
-    apply_line(
+    apply_data_line(
       &mut acc,
       r#"data: {"choices":[{"delta":{"content":null,"reasoning_content":"thinking"}}]}"#,
     );
-    apply_line(
+    apply_data_line(
       &mut acc,
       r#"data: {"choices":[{"delta":{"content":"hello","reasoning_content":null}}]}"#,
     );
@@ -314,15 +374,15 @@ mod tests {
   #[tokio::test]
   async fn accumulator_accepts_null_function_fields() {
     let mut acc = ChatAccumulator::default();
-    apply_line(
+    apply_data_line(
       &mut acc,
       r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"x","type":"function","function":{"name":"read_file","arguments":""}}]}}]}"#,
     );
-    apply_line(
+    apply_data_line(
       &mut acc,
       r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":null,"arguments":"{\"path\": \"README.md"}}]}}]}"#,
     );
-    apply_line(
+    apply_data_line(
       &mut acc,
       r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":null,"arguments":"\"}"}}]}}]}"#,
     );
@@ -335,7 +395,7 @@ mod tests {
   #[tokio::test]
   async fn accumulator_accepts_null_tool_calls() {
     let mut acc = ChatAccumulator::default();
-    apply_line(
+    apply_data_line(
       &mut acc,
       r#"data: {"choices":[{"delta":{"content":"hello","reasoning_content":"thinking","tool_calls":null}}]}"#,
     );
@@ -348,7 +408,7 @@ mod tests {
   #[tokio::test]
   async fn accumulator_accepts_null_function_object() {
     let mut acc = ChatAccumulator::default();
-    apply_line(
+    apply_data_line(
       &mut acc,
       r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"x","type":"function","function":null}]}}]}"#,
     );
@@ -358,45 +418,5 @@ mod tests {
     assert_eq!(tc.kind, "function");
     assert_eq!(tc.function.name, "");
     assert_eq!(tc.function.arguments, "");
-  }
-
-  #[test]
-  fn finish_repairs_missing_closing_delimiters() {
-    let acc = ChatAccumulator {
-      response: ChatResponse::default(),
-      tool_calls: vec![AccToolCall {
-        id: "x".to_string(),
-        kind: "function".to_string(),
-        name: "write_file".to_string(),
-        arguments: r#"{"path":"out.txt","content":"fix it""#.to_string(),
-      }],
-      emitted_tool_calling: false,
-    };
-
-    let resp = acc.finish();
-
-    let tc = resp.tool_calls.first().unwrap();
-    assert_eq!(
-      tc.function.arguments,
-      "{\"path\":\"out.txt\",\"content\":\"fix it\"}"
-    );
-  }
-
-  #[test]
-  fn repair_tool_arguments_json_ignores_brackets_inside_strings() {
-    let repaired =
-      repair_tool_arguments_json(r#"{"command":"printf '] }'","items":[{"path":"src/sse.rs"}"#);
-
-    assert_eq!(
-      repaired,
-      r#"{"command":"printf '] }'","items":[{"path":"src/sse.rs"}]}"#
-    );
-  }
-
-  #[test]
-  fn repair_tool_arguments_json_leaves_mismatched_json_unchanged() {
-    let arguments = r#"{"items":[}]"#;
-
-    assert_eq!(repair_tool_arguments_json(arguments), arguments);
   }
 }
