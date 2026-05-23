@@ -200,27 +200,22 @@ async fn send_event(tx: &mut Option<tokio::sync::mpsc::Sender<StreamEvent>>, ev:
   }
 }
 
-/// Parse an OpenAI-compatible SSE response into a [`ChatResponse`].
-///
-/// The byte stream is accumulated in a `Vec<u8>` and split on `b'\n'`
-/// boundaries so that multi-byte UTF-8 characters that span network chunk
-/// boundaries are never corrupted by premature string conversion.
-///
-/// Returns [`SseError::TruncatedStream`] if the connection closes before the
-/// `[DONE]` sentinel is received, and [`SseError::JsonParse`] if a `data:`
-/// line cannot be decoded as a [`StreamChunk`].
-pub async fn parse_sse_response(
-  resp: reqwest::Response,
+async fn parse_sse_byte_stream<S, B>(
+  stream: S,
   mut stream_tx: Option<tokio::sync::mpsc::Sender<StreamEvent>>,
-) -> Result<ChatResponse, SseError> {
+) -> Result<ChatResponse, SseError>
+where
+  S: futures_util::Stream<Item = Result<B, SseError>>,
+  B: AsRef<[u8]>,
+{
   let mut accumulator = ChatAccumulator::default();
-  let mut stream = resp.bytes_stream();
   let mut buf: Vec<u8> = Vec::new();
   let mut done = false;
 
+  futures_util::pin_mut!(stream);
   'stream: while let Some(item) = stream.next().await {
-    let bytes = item.map_err(SseError::Read)?;
-    buf.extend_from_slice(&bytes);
+    let bytes = item?;
+    buf.extend_from_slice(bytes.as_ref());
     let mut consumed = 0;
     loop {
       let Some(rel_pos) = buf[consumed..].iter().position(|&b| b == b'\n') else {
@@ -233,8 +228,11 @@ pub async fn parse_sse_response(
           break 'stream;
         }
         SseLine::Data(json) => {
-          let chunk = serde_json::from_str::<StreamChunk>(&json)
-            .map_err(|source| SseError::JsonParse { data: json.clone(), source })?;
+          let chunk =
+            serde_json::from_str::<StreamChunk>(&json).map_err(|source| SseError::JsonParse {
+              data: json.clone(),
+              source,
+            })?;
           for ev in accumulator.apply(chunk) {
             send_event(&mut stream_tx, ev).await;
           }
@@ -248,13 +246,15 @@ pub async fn parse_sse_response(
     }
   }
 
-  // Process any trailing bytes (last line without a terminating newline).
   if !done && !buf.is_empty() {
     match decode_sse_line(&buf)? {
       SseLine::Done => done = true,
       SseLine::Data(json) => {
-        let chunk = serde_json::from_str::<StreamChunk>(&json)
-          .map_err(|source| SseError::JsonParse { data: json.clone(), source })?;
+        let chunk =
+          serde_json::from_str::<StreamChunk>(&json).map_err(|source| SseError::JsonParse {
+            data: json.clone(),
+            source,
+          })?;
         for ev in accumulator.apply(chunk) {
           send_event(&mut stream_tx, ev).await;
         }
@@ -268,6 +268,23 @@ pub async fn parse_sse_response(
   }
 
   Ok(accumulator.finish())
+}
+
+/// Parse an OpenAI-compatible SSE response into a [`ChatResponse`].
+///
+/// The byte stream is accumulated in a `Vec<u8>` and split on `b'\n'`
+/// boundaries so that multi-byte UTF-8 characters that span network chunk
+/// boundaries are never corrupted by premature string conversion.
+///
+/// Returns [`SseError::TruncatedStream`] if the connection closes before the
+/// `[DONE]` sentinel is received, and [`SseError::JsonParse`] if a `data:`
+/// line cannot be decoded as a [`StreamChunk`].
+pub async fn parse_sse_response(
+  resp: reqwest::Response,
+  stream_tx: Option<tokio::sync::mpsc::Sender<StreamEvent>>,
+) -> Result<ChatResponse, SseError> {
+  let stream = resp.bytes_stream().map(|item| item.map_err(SseError::Read));
+  parse_sse_byte_stream(stream, stream_tx).await
 }
 
 #[cfg(test)]
@@ -420,10 +437,7 @@ mod tests {
     assert_eq!(tc.function.arguments, "");
   }
 
-  // --- parse_sse_response integration tests ---
-  //
-  // These tests require a real HTTP connection because reqwest::Response is
-  // not constructible from raw bytes in the public API.
+  // --- parse_sse_response and byte-stream parser tests ---
 
   /// Spawn a one-shot HTTP/1.1 server that sends `body` as the response body
   /// after SSE headers and returns the resulting `reqwest::Response`.
@@ -439,31 +453,6 @@ mod tests {
         b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n";
       let _ = sock.write_all(headers).await;
       let _ = sock.write_all(&body).await;
-    });
-    reqwest::get(format!("http://127.0.0.1:{}", addr.port()))
-      .await
-      .unwrap()
-  }
-
-  /// Like `sse_response` but writes `parts` sequentially with `TCP_NODELAY`
-  /// and a 1 ms pause between each part, encouraging reqwest to receive them
-  /// as separate `bytes_stream` items.
-  async fn sse_response_chunked(parts: Vec<Vec<u8>>) -> reqwest::Response {
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    tokio::spawn(async move {
-      let (mut sock, _) = listener.accept().await.unwrap();
-      sock.set_nodelay(true).unwrap();
-      let mut buf = [0u8; 2048];
-      let _ = sock.read(&mut buf).await;
-      let headers =
-        b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n";
-      let _ = sock.write_all(headers).await;
-      for part in parts {
-        let _ = sock.write_all(&part).await;
-        tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
-      }
     });
     reqwest::get(format!("http://127.0.0.1:{}", addr.port()))
       .await
@@ -503,21 +492,25 @@ mod tests {
   }
 
   /// Verify that multi-byte UTF-8 characters are preserved when the character's
-  /// bytes happen to be split across two network chunks.
+  /// bytes happen to be split across two stream chunks.
   ///
   /// The old code called `String::from_utf8_lossy` per chunk, which would
   /// corrupt a character whose bytes straddled a chunk boundary.  The new code
   /// accumulates a `Vec<u8>` and decodes only on complete lines, so the split
   /// is harmless.
   #[tokio::test]
-  async fn parse_sse_response_multibyte_utf8_split_across_chunks() {
+  async fn parse_sse_byte_stream_multibyte_utf8_split_across_chunks() {
     // "café" — the é (U+00E9) is encoded as 0xC3 0xA9 (two bytes).
     // We split the SSE line right between those two bytes.
     let prefix = b"data: {\"choices\":[{\"delta\":{\"content\":\"caf".to_vec();
     let first_byte_of_e = b"\xc3".to_vec(); // first byte of é
     let suffix = b"\xa9\"}}]}\n\ndata: [DONE]\n\n".to_vec(); // second byte + rest
-    let resp = sse_response_chunked(vec![prefix, first_byte_of_e, suffix]).await;
-    let result = parse_sse_response(resp, None).await;
+    let stream = futures_util::stream::iter(
+      vec![prefix, first_byte_of_e, suffix]
+        .into_iter()
+        .map(Ok::<Vec<u8>, SseError>),
+    );
+    let result = parse_sse_byte_stream(stream, None).await;
     assert!(result.is_ok(), "unexpected error: {result:?}");
     assert_eq!(result.unwrap().content, "café");
   }
