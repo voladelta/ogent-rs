@@ -4,7 +4,7 @@ use serde_json::json;
 use std::fs;
 use std::path::Path;
 
-use crate::tools::{Capability, Handler, ToolContext, ToolDef, parse_args};
+use crate::tools::{Handler, ToolContext, ToolDef, parse_args};
 
 pub fn tools() -> Vec<ToolDef> {
   vec![
@@ -13,14 +13,12 @@ pub fn tools() -> Vec<ToolDef> {
       description: "Display a tree map of the repository directory structure. path defaults to the workspace root; levels defaults to 3.",
       parameters: json!({"type":"object","properties":{"path":{"type":"string","description":"Directory path relative to workspace root. Default: \".\""},"levels":{"type":"integer","description":"Max depth to descend. Default: 3 if 0 or omitted."}},"additionalProperties":false}),
       handler: Handler::Sync(repo_map),
-      capability: Capability::ReadOnly,
     },
     ToolDef {
       name: "code_map",
       description: "Display a symbol map of source files (Rust and Go), showing structs, enums, traits, impls, functions, interfaces, types, and modules with line ranges. Use to understand the shape and contents of source files before deciding which files or line ranges to read. For a single file, pass its path; for a directory, pass the directory path to map all .rs and .go files inside. Use before read_file to target exact line ranges.",
       parameters: json!({"type":"object","properties":{"path":{"type":"string","description":"File or directory path relative to workspace root. Default: \".\""}},"additionalProperties":false}),
       handler: Handler::Sync(code_map),
-      capability: Capability::ReadOnly,
     },
   ]
 }

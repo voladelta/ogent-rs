@@ -6,7 +6,7 @@ use std::process::Stdio;
 use tokio::process::Command;
 use tokio::time::{Duration, timeout};
 
-use crate::tools::{Capability, Handler, ToolContext, ToolDef, parse_args, require_nonempty};
+use crate::tools::{Handler, ToolContext, ToolDef, parse_args, require_nonempty};
 
 pub fn tools() -> Vec<ToolDef> {
   vec![ToolDef {
@@ -17,7 +17,6 @@ pub fn tools() -> Vec<ToolDef> {
       let args = args.to_owned();
       Box::pin(async move { bash(ctx, &args).await })
     })),
-    capability: Capability::WorkspaceMutating,
   }]
 }
 

@@ -3,7 +3,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio::time::Duration;
 
-use crate::tools::{Capability, Handler, ToolContext, ToolDef, parse_args, require_nonempty};
+use crate::tools::{Handler, ToolContext, ToolDef, parse_args, require_nonempty};
 
 pub fn tools() -> Vec<ToolDef> {
   vec![
@@ -15,7 +15,6 @@ pub fn tools() -> Vec<ToolDef> {
         let args = args.to_owned();
         Box::pin(async move { web_search(ctx, &args).await })
       })),
-      capability: Capability::Network,
     },
     ToolDef {
       name: "web_read",
@@ -25,7 +24,6 @@ pub fn tools() -> Vec<ToolDef> {
         let args = args.to_owned();
         Box::pin(async move { web_read(ctx, &args).await })
       })),
-      capability: Capability::Network,
     },
     ToolDef {
       name: "web_code_context",
@@ -35,7 +33,6 @@ pub fn tools() -> Vec<ToolDef> {
         let args = args.to_owned();
         Box::pin(async move { web_code_context(ctx, &args).await })
       })),
-      capability: Capability::Network,
     },
   ]
 }

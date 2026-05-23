@@ -2,7 +2,7 @@ use anyhow::Result;
 use serde::Deserialize;
 use serde_json::json;
 
-use crate::tools::{Capability, Handler, ToolContext, ToolDef, parse_args, require_nonempty};
+use crate::tools::{Handler, ToolContext, ToolDef, parse_args, require_nonempty};
 
 pub fn tools() -> Vec<ToolDef> {
   vec![ToolDef {
@@ -10,7 +10,6 @@ pub fn tools() -> Vec<ToolDef> {
     description: "Load a skill from .ogent/skills/ or ~/.ogent/skills/.",
     parameters: json!({"type":"object","properties":{"name":{"type":"string"}},"required":["name"],"additionalProperties":false}),
     handler: Handler::Sync(load_skill),
-    capability: Capability::ReadOnly,
   }]
 }
 

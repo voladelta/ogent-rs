@@ -4,7 +4,7 @@ use serde_json::json;
 use std::fs;
 
 use crate::hashline::{apply_anchor_edits, render_hashlines};
-use crate::tools::{Capability, Handler, ToolContext, ToolDef, parse_args, require_nonempty};
+use crate::tools::{Handler, ToolContext, ToolDef, parse_args, require_nonempty};
 
 pub fn tools() -> Vec<ToolDef> {
   vec![
@@ -13,28 +13,24 @@ pub fn tools() -> Vec<ToolDef> {
       description: "Read a file from the local filesystem. Use start and end as 1-indexed line numbers; omit both for the full file.",
       parameters: json!({"type":"object","properties":{"path":{"type":"string"},"start":{"type":"integer","description":"1-indexed start line (inclusive)"},"end":{"type":"integer","description":"1-indexed end line (inclusive)"}},"required":["path"],"additionalProperties":false}),
       handler: Handler::Sync(read_file),
-      capability: Capability::ReadOnly,
     },
     ToolDef {
       name: "write_file",
       description: "Write content to a new file. For existing files, prefer edit_hash_anchors.",
       parameters: json!({"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"},"overwrite_existing":{"type":"boolean"}},"required":["path","content"],"additionalProperties":false}),
       handler: Handler::Sync(write_file),
-      capability: Capability::WorkspaceMutating,
     },
     ToolDef {
       name: "read_hash_anchors",
       description: "Read a file with each line prefixed as <line>:<hash>|content, where the 4-char hash is derived from line content. Use before edit_hash_anchors to generate stable anchors.",
       parameters: json!({"type":"object","properties":{"path":{"type":"string"},"start":{"type":"integer","description":"1-indexed start line (inclusive)"},"end":{"type":"integer","description":"1-indexed end line (inclusive)"}},"required":["path"],"additionalProperties":false}),
       handler: Handler::Sync(read_hash_anchors),
-      capability: Capability::ReadOnly,
     },
     ToolDef {
       name: "edit_hash_anchors",
       description: "Edit a file using hashline anchors from read_hash_anchors. Anchors must be <line>:<4-char-hash> (e.g., \"15:af63\"); use end_anchor for multi-line ranges. new_string replaces the entire anchored line(s).",
       parameters: json!({"type":"object","properties":{"path":{"type":"string"},"ops":{"type":"array","items":{"type":"object","properties":{"anchor":{"type":"string","description":"Anchor in <line-number>:<4-char-hash> format (e.g., 15:af63)"},"end_anchor":{"type":"string","description":"Optional end anchor in <line-number>:<4-char-hash> format for range replacement"},"action":{"type":"string","enum":["replace","insert_before","insert_after"]},"new_string":{"type":"string"}},"required":["anchor","action","new_string"]}}},"required":["path","ops"],"additionalProperties":false}),
       handler: Handler::Sync(edit_hash_anchors),
-      capability: Capability::WorkspaceMutating,
     },
   ]
 }
