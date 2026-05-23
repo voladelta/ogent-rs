@@ -33,11 +33,7 @@ struct RepoMapArgs {
 
 fn repo_map(ctx: ToolContext, args: &str) -> Result<String> {
   let args: RepoMapArgs = parse_args(args)?;
-  let rel = if args.path.is_empty() {
-    "."
-  } else {
-    &args.path
-  };
+  let rel = path_or_root(&args.path);
   let path = ctx.workspace.readable_path(rel)?;
   let levels = if args.levels == 0 { 3 } else { args.levels };
   let mut out = String::new();
@@ -86,11 +82,11 @@ struct CodeMapArgs {
 
 fn code_map(ctx: ToolContext, args: &str) -> Result<String> {
   let args: CodeMapArgs = parse_args(args)?;
-  let rel = if args.path.is_empty() {
-    "."
-  } else {
-    &args.path
-  };
+  let rel = path_or_root(&args.path);
   let path = ctx.workspace.readable_path(rel)?;
   crate::symbol_tree::format_path(&path)
+}
+
+fn path_or_root(path: &str) -> &str {
+  if path.is_empty() { "." } else { path }
 }

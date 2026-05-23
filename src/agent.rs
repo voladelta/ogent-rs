@@ -190,7 +190,6 @@ impl Agent {
         self.messages.push(tool_message.clone());
         self.emit_message(&tool_message);
       }
-      self.dirty = true;
     }
 
     Ok(())
