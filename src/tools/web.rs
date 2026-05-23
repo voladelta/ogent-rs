@@ -147,14 +147,16 @@ async fn web_code_context(_ctx: ToolContext, args: &str) -> Result<String> {
   Ok(v["response"].as_str().unwrap_or("").to_string())
 }
 
-fn exa_client() -> &'static reqwest::Client {
+fn exa_client() -> Result<&'static reqwest::Client> {
   static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
-  CLIENT.get_or_init(|| {
-    reqwest::Client::builder()
-      .timeout(Duration::from_secs(60))
-      .build()
-      .expect("exa http client build failed")
-  })
+  if let Some(c) = CLIENT.get() {
+    return Ok(c);
+  }
+  let client = reqwest::Client::builder()
+    .timeout(Duration::from_secs(60))
+    .build()
+    .context("build exa client")?;
+  Ok(CLIENT.get_or_init(|| client))
 }
 
 fn exa_api_key() -> String {
@@ -171,7 +173,7 @@ pub fn ensure_exa_api_key_set() -> Result<()> {
 
 async fn exa_post(url: &str, body: Value) -> Result<Value> {
   let key = exa_api_key();
-  let resp = exa_client()
+  let resp = exa_client()?
     .post(url)
     .header("x-api-key", key)
     .json(&body)
