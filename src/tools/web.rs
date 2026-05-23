@@ -11,28 +11,19 @@ pub fn tools() -> Vec<ToolDef> {
       name: "web_search",
       description: "Search the web for relevant excerpts. Use type=auto for quick facts and deep-reasoning for complex or niche topics.",
       parameters: json!({"type":"object","properties":{"query":{"type":"string"},"num_results":{"type":"integer"},"type":{"type":"string","enum":["auto","deep-reasoning"]}},"required":["query"],"additionalProperties":false}),
-      handler: Handler::Async(Box::new(|ctx, args| {
-        let args = args.to_owned();
-        Box::pin(async move { web_search(ctx, &args).await })
-      })),
+      handler: Handler::async_fn(|ctx, args| async move { web_search(ctx, &args).await }),
     },
     ToolDef {
       name: "web_read",
       description: "Read key excerpts from one or more URLs. Set mode=text for full text or highlights for key excerpts.",
       parameters: json!({"type":"object","properties":{"urls":{"type":"array","items":{"type":"string"}},"mode":{"type":"string","enum":["text","highlights"],"description":"text for full page text, highlights for key excerpts. Default: highlights."}},"required":["urls"],"additionalProperties":false}),
-      handler: Handler::Async(Box::new(|ctx, args| {
-        let args = args.to_owned();
-        Box::pin(async move { web_read(ctx, &args).await })
-      })),
+      handler: Handler::async_fn(|ctx, args| async move { web_read(ctx, &args).await }),
     },
     ToolDef {
       name: "web_code_context",
       description: "Search real code for syntax, APIs, and patterns to avoid hallucinating implementation details. Not for general web search or URL reading.",
       parameters: json!({"type":"object","properties":{"query":{"type":"string"}},"required":["query"],"additionalProperties":false}),
-      handler: Handler::Async(Box::new(|ctx, args| {
-        let args = args.to_owned();
-        Box::pin(async move { web_code_context(ctx, &args).await })
-      })),
+      handler: Handler::async_fn(|ctx, args| async move { web_code_context(ctx, &args).await }),
     },
   ]
 }

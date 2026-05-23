@@ -13,10 +13,7 @@ pub fn tools() -> Vec<ToolDef> {
     name: "bash",
     description: "Execute a shell command in the workspace root and return stdout and stderr combined. Default timeout is 120s if omitted or 0; max is 600s.",
     parameters: json!({"type":"object","properties":{"command":{"type":"string"},"timeout_seconds":{"type":"integer","description":"Max seconds. Default: 120 if 0 or omitted. Max: 600."}},"required":["command"],"additionalProperties":false}),
-    handler: Handler::Async(Box::new(|ctx, args| {
-      let args = args.to_owned();
-      Box::pin(async move { bash(ctx, &args).await })
-    })),
+    handler: Handler::async_fn(|ctx, args| async move { bash(ctx, &args).await }),
   }]
 }
 

@@ -241,11 +241,11 @@ pub async fn parse_sse_response(
   let mut accumulator = ChatAccumulator::default();
   let mut stream = resp.bytes_stream();
   let mut buf = String::new();
-  let mut consumed = 0;
 
   while let Some(item) = stream.next().await {
     let bytes = item.map_err(SseError::Read)?;
     buf.push_str(&String::from_utf8_lossy(&bytes));
+    let mut consumed = 0;
     while let Some(pos) = buf[consumed..].find('\n') {
       let abs_pos = consumed + pos;
       let line = buf[consumed..abs_pos].trim_end_matches('\r');
@@ -258,11 +258,10 @@ pub async fn parse_sse_response(
     }
     if consumed > 0 {
       buf.drain(..consumed);
-      consumed = 0;
     }
   }
-  if !buf[consumed..].is_empty()
-    && let Some(chunk) = parse_sse_data_line(buf[consumed..].trim_end_matches('\r'))
+  if !buf.is_empty()
+    && let Some(chunk) = parse_sse_data_line(buf.trim_end_matches('\r'))
   {
     for ev in accumulator.apply(chunk) {
       send_event(&mut stream_tx, ev).await;

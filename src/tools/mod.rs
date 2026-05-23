@@ -33,6 +33,16 @@ pub enum Handler {
   Async(AsyncHandler),
 }
 
+impl Handler {
+  pub fn async_fn<F, Fut>(f: F) -> Self
+  where
+    F: Fn(ToolContext, String) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = Result<String>> + Send + 'static,
+  {
+    Self::Async(Box::new(move |ctx, args| Box::pin(f(ctx, args.to_owned()))))
+  }
+}
+
 impl ToolDef {
   pub fn schema(&self) -> Tool {
     Tool {
