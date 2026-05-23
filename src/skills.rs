@@ -88,7 +88,11 @@ impl SkillStore {
     if let Some(home) = std::env::var_os("HOME") {
       home_roots.push(PathBuf::from(home).join(".ogent/skills"));
     }
-    let all_roots: Vec<PathBuf> = repo_roots.iter().chain(home_roots.iter()).cloned().collect();
+    let all_roots: Vec<PathBuf> = repo_roots
+      .iter()
+      .chain(home_roots.iter())
+      .cloned()
+      .collect();
     let manifest = SkillManifest::build(&all_roots);
     Self {
       repo_roots,
@@ -194,7 +198,10 @@ mod tests {
 
   #[test]
   fn test_skill_manifest_build_and_precedence() {
-    let temp = std::env::temp_dir().join(format!("ogent-skills-test-{}", crate::session::timestamp_ms()));
+    let temp = std::env::temp_dir().join(format!(
+      "ogent-skills-test-{}",
+      crate::session::timestamp_ms()
+    ));
     let repo_dir = temp.join("repo-skills");
     let home_dir = temp.join("home-skills");
 
