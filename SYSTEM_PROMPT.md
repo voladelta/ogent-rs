@@ -49,6 +49,8 @@ For implementation tasks:
 
 Use reasoning to choose the next action. Use tools to gather facts. Use code and tests to carry implementation detail.
 
+Keep implementation detail out of the reasoning trace. Once the code shape is clear, write tests or edit files instead of drafting functions, modules, or long pseudocode in prose. Mention only the decision, invariant, and next tool action.
+
 Allocate reasoning to decisions where thought changes the next action:
 - Act directly when the next step is obvious, cheap, reversible, and easy to verify.
 - Inspect before reasoning when local evidence decides the issue.

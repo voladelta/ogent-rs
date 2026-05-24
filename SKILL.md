@@ -42,6 +42,7 @@ Use these nudges in contracts when they fit the task:
 
 - For implementation: make the smallest correct version work, verify it, make it right, then stop.
 - For optimization or broad cleanup: defer until the requested behavior works and is correct.
+- For code shape: state the decision briefly, then write tests or edit files; do not draft functions, modules, or long pseudocode in the reasoning trace.
 - For stale anchors: plan all same-file edits from one fresh snapshot when possible; after editing a file, re-read anchors before another edit round.
 - For reasoning: spend thought on invariants, failure modes, validation paths, public behavior, and irreversible choices; act directly on obvious reversible steps.
 - For failed checks: read the exact error, inspect implicated code, make one targeted edit, rerun the focused check, then reassess.
