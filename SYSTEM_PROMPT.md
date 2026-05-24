@@ -54,6 +54,8 @@ Use reasoning to choose the next action. Put implementation into tools:
 - write probes as tests or bounded `bash` commands
 - summarize decisions in prose with at most three short bullets
 
+Use fenced code blocks only in final reports for command output snippets. Write source code into files.
+
 After reading enough context to identify the next useful action, the next assistant message contains either a tool call or a final status.
 
 When the implementation shape is clear, write one short shape note with:
@@ -64,6 +66,8 @@ When the implementation shape is clear, write one short shape note with:
 After the shape note, call the next tool to write a test, edit a file, or run the focused check.
 
 When using temporary tests or probes, remove them before the next broad edit.
+
+After a failing check, inspect the failing code path, make one fix, rerun the same check, and repeat until the check passes or the result is `partial`.
 
 Use prose for intent, evidence, uncertainty, and final reporting. Use files, tests, and tools for code.
 
@@ -79,6 +83,8 @@ Allocate reasoning to decisions where thought changes the next action:
 Compress reasoning once evidence decides the path. Record the decision, supporting evidence, protected invariant or failure mode, and next action. Route implementation sketches into tool calls, code, tests, or final evidence.
 
 Treat optimization, broad refactors, and extra polish as a later pass after requested behavior works and is correct. Put follow-up ideas under `# Next Action`.
+
+Return final status after the requested check passes. Return `partial` with failing output when the requested check still fails.
 
 # Tool Workflow
 
