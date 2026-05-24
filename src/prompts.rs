@@ -2,23 +2,14 @@ use crate::types::{Message, MessageOrigin};
 
 pub const SYSTEM_PROMPT: &str = include_str!("../SYSTEM_PROMPT.md");
 
-pub fn compose_system_prompt() -> String {
-  SYSTEM_PROMPT.trim().to_string()
-}
-
 pub(crate) fn build_initial_messages(
-  system_prompt: &str,
   task_prompt: &str,
-  session_id: &str,
   discovered_skills: &[crate::skills::SkillInfo],
   loaded_skills: &[crate::skills::Skill],
 ) -> Vec<Message> {
-  let mut messages = vec![Message::system(system_prompt.to_string())];
+  let mut messages = vec![Message::system(SYSTEM_PROMPT.trim().to_string())];
   enrich_initial_messages(&mut messages, discovered_skills, loaded_skills);
-  messages.push(Message::user(
-    format!("[session: {session_id}]\n\n{}", task_prompt.trim()),
-    MessageOrigin::Human,
-  ));
+  messages.push(Message::user(task_prompt.trim(), MessageOrigin::Human));
   messages
 }
 
@@ -38,8 +29,22 @@ pub fn format_discover_skills(skills: &[crate::skills::SkillInfo]) -> String {
   out
 }
 
-pub fn format_loaded_skill(skill: &crate::skills::Skill) -> String {
-  crate::skills::format_loaded_skill(skill)
+pub fn enrich_initial_messages(
+  messages: &mut Vec<Message>,
+  discovered_skills: &[crate::skills::SkillInfo],
+  loaded_skills: &[crate::skills::Skill],
+) {
+  push_internal_user_message(messages, format_discover_skills(discovered_skills));
+  for skill in loaded_skills {
+    push_internal_user_message(messages, crate::skills::format_loaded_skill(skill));
+  }
+}
+
+fn push_internal_user_message(messages: &mut Vec<Message>, content: String) {
+  if content.is_empty() {
+    return;
+  }
+  messages.push(Message::user(content, MessageOrigin::Internal));
 }
 
 #[cfg(test)]
@@ -49,24 +54,6 @@ pub fn build_messages(prompt: &str) -> Vec<Message> {
     messages.push(Message::user(prompt.to_string(), MessageOrigin::Human));
   }
   messages
-}
-
-pub fn enrich_initial_messages(
-  messages: &mut Vec<Message>,
-  discovered_skills: &[crate::skills::SkillInfo],
-  loaded_skills: &[crate::skills::Skill],
-) {
-  push_internal_user_message(messages, format_discover_skills(discovered_skills));
-  for skill in loaded_skills {
-    push_internal_user_message(messages, format_loaded_skill(skill));
-  }
-}
-
-fn push_internal_user_message(messages: &mut Vec<Message>, content: String) {
-  if content.is_empty() {
-    return;
-  }
-  messages.push(Message::user(content, MessageOrigin::Internal));
 }
 
 #[cfg(test)]

@@ -83,16 +83,13 @@ async fn run_agent_cli(
     }
   }
 
-  let system_prompt = prompts::compose_system_prompt();
-  let session_id = session::generate_session_id();
-  let messages =
-    prompts::build_initial_messages(&system_prompt, task, &session_id, &discovered, &loaded);
+  let messages = prompts::build_initial_messages(task, &discovered, &loaded);
   let mut agent = Agent::new(
     workspace,
     client,
     messages,
     tools::configured_agent_tools(),
-    session_id,
+    session::generate_session_id(),
     skill_store,
   );
   agent.set_output_sink(Some(agent::cli_output_sink()));
