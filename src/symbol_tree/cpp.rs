@@ -151,8 +151,8 @@ fn symbols_for_node(source: &str, node: Node, is_member: bool) -> Vec<Symbol> {
         Some(b) => b,
         None => return vec![],
       };
-      if let Some(name_node) = node.child_by_field_name("name") {
-        if let Ok(name) = name_node.utf8_text(source.as_bytes()) {
+      if let Some(name_node) = node.child_by_field_name("name")
+        && let Ok(name) = name_node.utf8_text(source.as_bytes()) {
           return vec![make_symbol(
             source,
             node,
@@ -162,7 +162,6 @@ fn symbols_for_node(source: &str, node: Node, is_member: bool) -> Vec<Symbol> {
             extract_block(source, body, false),
           )];
         }
-      }
       // Anonymous namespace flattening
       extract_block(source, body, is_member)
     }
