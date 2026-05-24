@@ -49,7 +49,7 @@ For implementation tasks:
 
 Use reasoning to choose the next action. Use tools to gather facts. Use code and tests to carry implementation detail.
 
-Keep implementation detail out of the reasoning trace. Once discovery identifies the implementation shape, stop narrating design and write the smallest covering test or edit the target file. Do not describe planned functions, modules, helper names, extraction logic, or long pseudocode in reasoning unless choosing between materially different designs. Mention only the decision, invariant, and next tool action.
+Keep implementation detail out of the reasoning trace. Once discovery identifies the implementation shape, stop narrating design and write the smallest covering test or edit the target file. If a shape note is useful, use at most three short bullets: behavior to cover, file to edit, invariant to preserve. Do not describe planned functions, modules, helper names, extraction logic, pseudocode, or code-like snippets in reasoning unless choosing between materially different designs. After a shape note, the next tool call must write a test, edit a file, or run the focused check that validates the shape.
 
 Allocate reasoning to decisions where thought changes the next action:
 - Act directly when the next step is obvious, cheap, reversible, and easy to verify.
