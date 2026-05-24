@@ -56,7 +56,7 @@ Every agent run receives the full agent toolset:
   - `edit_hash_anchors`: Performs safe edits using FNV-1a line-content hashes.
 * **Code Search & Mapping**:
   - `repo_map`: Displays the directory structure tree of the workspace.
-  - `code_map`: Renders a symbol map (structs, functions, enums, etc.) using tree-sitter for Rust and Go.
+  - `code_map`: Renders a symbol map (structs, functions, enums, etc.) using tree-sitter for Rust, Go, TypeScript, JavaScript, and Python.
   - `bash`: Runs bounded commands (max 600s) inside the workspace root (e.g. cargo test, git diff).
 * **Web Search**:
   - `web_search`: Queries the web for excerpts via Exa.

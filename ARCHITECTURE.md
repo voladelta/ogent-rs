@@ -11,7 +11,7 @@ main.rs
     -> tools/ + session.rs
       -> hashline.rs
     -> symbol_tree/
-      -> mod.rs, rust.rs, go.rs
+      -> mod.rs, rust.rs, go.rs, typescript.rs, python.rs
 ```
 
 ## Module Ownership
@@ -43,8 +43,8 @@ main.rs
 - [src/hashline.rs](file:///Users/mbp/Codehub/ogent-rs/src/hashline.rs)
   - Implementation of safe editing via FNV-1a line hashing and validation.
 - [src/symbol_tree/mod.rs](file:///Users/mbp/Codehub/ogent-rs/src/symbol_tree/mod.rs)
-  - Tree-sitter powered AST symbol extraction for Rust and Go files (used by the `code_map` tool).
-  - `rust.rs` and `go.rs` contain the language-specific parsers.
+  - Tree-sitter powered AST symbol extraction for Rust, Go, TypeScript, JavaScript, and Python files (used by the `code_map` tool).
+  - `rust.rs`, `go.rs`, `typescript.rs`, and `python.rs` contain the language-specific parsers.
 
 ---
 

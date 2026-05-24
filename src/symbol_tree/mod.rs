@@ -4,7 +4,9 @@ use std::path::{Path, PathBuf};
 use tree_sitter::Node;
 
 mod go;
+mod python;
 mod rust;
+mod typescript;
 
 pub struct Symbol {
   pub kind: &'static str,
@@ -26,7 +28,10 @@ pub fn collect_source_files(path: &Path) -> Vec<PathBuf> {
 fn collect_files_inner(path: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
   if path.is_file() {
     if let Some(ext) = path.extension()
-      && (ext == "rs" || ext == "go")
+      && matches!(
+        ext.to_str().unwrap_or(""),
+        "rs" | "go" | "ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs" | "py"
+      )
     {
       files.push(path.to_path_buf());
     }
@@ -47,7 +52,10 @@ fn collect_files_inner(path: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
 pub fn format_path(path: &Path) -> Result<String> {
   let files = collect_source_files(path);
   if files.is_empty() {
-    bail!("no .rs or .go files found at {}", path.display());
+    bail!(
+      "no supported source files found at {} (expected .rs, .go, .ts, .tsx, .js, .jsx, .mjs, .cjs, or .py)",
+      path.display()
+    );
   }
   let mut out = String::new();
   for file in &files {
@@ -65,6 +73,8 @@ fn process_file(path: &Path) -> Result<String> {
   let syms = match ext {
     "rs" => rust::parse(&source)?,
     "go" => go::parse(&source)?,
+    "ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs" => typescript::parse(&source, ext)?,
+    "py" => python::parse(&source)?,
     _ => bail!("unsupported extension: {}", ext),
   };
   let mut out = String::new();
@@ -291,5 +301,146 @@ func (p *Person) String() string {
     assert!(out.contains("struct"));
     assert!(out.contains("interface"));
     assert!(out.contains("fn"));
+  }
+
+  #[test]
+  fn typescript_simple_file() {
+    let src = r#"
+export interface Greeter {
+  greet(name: string): string;
+  readonly label: string;
+}
+
+type ID = string | number;
+
+export enum Mode {
+  Fast,
+  Slow,
+}
+
+export class Service {
+  start(): void {}
+}
+
+export function make(id: ID): Service {
+  return new Service();
+}
+
+const version = "1";
+"#;
+    let syms = typescript::parse(src, "ts").unwrap();
+    let names: Vec<_> = syms.iter().map(|s| (s.kind, s.name.as_str())).collect();
+    assert!(names.contains(&("interface", "Greeter")));
+    assert!(names.contains(&("type", "ID")));
+    assert!(names.contains(&("enum", "Mode")));
+    assert!(names.contains(&("class", "Service")));
+    assert!(names.contains(&("fn", "make")));
+    assert!(names.contains(&("var", "version")));
+
+    let interface = syms.iter().find(|s| s.name == "Greeter").unwrap();
+    assert!(
+      interface
+        .children
+        .iter()
+        .any(|s| s.kind == "fn" && s.name == "greet")
+    );
+
+    let class = syms.iter().find(|s| s.name == "Service").unwrap();
+    assert!(
+      class
+        .children
+        .iter()
+        .any(|s| s.kind == "fn" && s.name == "start")
+    );
+  }
+
+  #[test]
+  fn javascript_simple_file() {
+    let src = r#"
+export function load() {
+  return true;
+}
+
+class Widget {
+  render() {}
+}
+
+const cached = () => true;
+"#;
+    let syms = typescript::parse(src, "js").unwrap();
+    let names: Vec<_> = syms.iter().map(|s| (s.kind, s.name.as_str())).collect();
+    assert!(names.contains(&("fn", "load")));
+    assert!(names.contains(&("class", "Widget")));
+    assert!(names.contains(&("var", "cached")));
+
+    let class = syms.iter().find(|s| s.name == "Widget").unwrap();
+    assert!(
+      class
+        .children
+        .iter()
+        .any(|s| s.kind == "fn" && s.name == "render")
+    );
+  }
+
+  #[test]
+  fn python_simple_file() {
+    let src = r#"
+MAX_SIZE = 100
+
+class Worker:
+    @classmethod
+    async def build(cls):
+        return cls()
+
+    def run(self):
+        pass
+
+def main():
+    pass
+"#;
+    let syms = python::parse(src).unwrap();
+    let names: Vec<_> = syms.iter().map(|s| (s.kind, s.name.as_str())).collect();
+    assert!(names.contains(&("var", "MAX_SIZE")));
+    assert!(names.contains(&("class", "Worker")));
+    assert!(names.contains(&("fn", "main")));
+
+    let class = syms.iter().find(|s| s.name == "Worker").unwrap();
+    assert!(
+      class
+        .children
+        .iter()
+        .any(|s| s.kind == "fn" && s.name == "build")
+    );
+    assert!(
+      class
+        .children
+        .iter()
+        .any(|s| s.kind == "fn" && s.name == "run")
+    );
+  }
+
+  #[test]
+  fn format_path_includes_new_language_extensions() {
+    let unique = std::time::SystemTime::now()
+      .duration_since(std::time::UNIX_EPOCH)
+      .unwrap()
+      .as_nanos();
+    let dir = std::env::temp_dir().join(format!("ogent-symbol-tree-{unique}"));
+    std::fs::create_dir(&dir).unwrap();
+    std::fs::write(dir.join("a.ts"), "export function typed(): void {}\n").unwrap();
+    std::fs::write(dir.join("b.js"), "function scripted() {}\n").unwrap();
+    std::fs::write(dir.join("c.py"), "def scripted_py():\n    pass\n").unwrap();
+    std::fs::write(dir.join("ignored.txt"), "def ignored():\n    pass\n").unwrap();
+
+    let out = format_path(&dir).unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+
+    assert!(out.contains("a.ts"));
+    assert!(out.contains("typed"));
+    assert!(out.contains("b.js"));
+    assert!(out.contains("scripted"));
+    assert!(out.contains("c.py"));
+    assert!(out.contains("scripted_py"));
+    assert!(!out.contains("ignored.txt"));
   }
 }

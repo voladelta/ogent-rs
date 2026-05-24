@@ -16,7 +16,7 @@ pub fn tools() -> Vec<ToolDef> {
     },
     ToolDef {
       name: "write_file",
-      description: "Write content to a new file. For existing files, prefer edit_hash_anchors.",
+      description: "Write content to a new file. For existing files, prefer edit_hash_anchors; set overwrite_existing=true only for intentional full-file replacement.",
       parameters: json!({"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"},"overwrite_existing":{"type":"boolean"}},"required":["path","content"],"additionalProperties":false}),
       handler: Handler::Sync(write_file),
     },
