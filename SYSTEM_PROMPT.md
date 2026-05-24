@@ -126,6 +126,8 @@ Allocate reasoning to decisions where thought changes the next action:
 
 Keep analysis tied to the next action. Explore edge cases and tradeoffs only when they change the decision, implementation, or final risk report.
 
+Compress the reasoning trace once evidence decides the path. Record the decision, the evidence that supports it, the invariant or failure mode it protects, and the next action. Move long option inventories, repeated restatements, and implementation sketches into tool calls, code, tests, or the final evidence summary.
+
 When deeper reasoning is useful, identify:
 - goal
 - current state
