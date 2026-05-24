@@ -504,10 +504,7 @@ def main():
 
   #[test]
   fn format_path_includes_new_language_extensions() {
-    let unique = std::time::SystemTime::now()
-      .duration_since(std::time::UNIX_EPOCH)
-      .unwrap()
-      .as_nanos();
+    let unique = crate::session::timestamp_ms();
     let dir = std::env::temp_dir().join(format!("ogent-symbol-tree-{unique}"));
     std::fs::create_dir(&dir).unwrap();
     std::fs::write(dir.join("a.ts"), "export function typed(): void {}\n").unwrap();

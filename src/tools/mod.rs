@@ -69,18 +69,16 @@ pub fn require_nonempty(value: &str, name: &str) -> Result<()> {
 
 static ALL_TOOLS: OnceLock<Vec<ToolDef>> = OnceLock::new();
 
-fn build_all_tools() -> Vec<ToolDef> {
-  let mut tools = Vec::new();
-  tools.extend(fs::tools());
-  tools.extend(shell::tools());
-  tools.extend(repo::tools());
-  tools.extend(web::tools());
-  tools.extend(skills::tools());
-  tools
-}
-
 pub fn all_tools() -> &'static [ToolDef] {
-  ALL_TOOLS.get_or_init(build_all_tools)
+  ALL_TOOLS.get_or_init(|| {
+    let mut tools = Vec::new();
+    tools.extend(fs::tools());
+    tools.extend(shell::tools());
+    tools.extend(repo::tools());
+    tools.extend(web::tools());
+    tools.extend(skills::tools());
+    tools
+  })
 }
 
 static AGENT_TOOLS: OnceLock<Vec<Tool>> = OnceLock::new();

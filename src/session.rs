@@ -3,7 +3,7 @@ use crate::workspace::Workspace;
 use anyhow::{Context, Result};
 use std::fs;
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -33,14 +33,10 @@ pub fn persist_session_in(
   messages: &[Message],
   session_id: &str,
 ) -> Result<()> {
-  let path = session_file_in(workspace, session_id);
-  persist_messages(messages, &path)
-}
-
-fn persist_messages(messages: &[Message], path: &Path) -> Result<()> {
   if messages.is_empty() {
     return Ok(());
   }
+  let path = session_file_in(workspace, session_id);
   let dir = path
     .parent()
     .context("messages path must have a parent directory")?;

@@ -87,12 +87,13 @@ impl<'a> From<&'a Message> for ProviderMessage<'a> {
 pub fn new_client(profile: &Profile, provider: &ProviderConfig) -> Result<Client> {
   let url = provider.base_url.as_str();
   let key_env = provider.key_env.as_str();
+  let api_key = env::var(key_env).with_context(|| format!("{key_env} is not set"))?;
   match profile.backend.as_str() {
     "kimi" => {
       let model = profile.model.clone();
-      make_client(
+      Ok(Client::new(
         url,
-        key_env,
+        api_key,
         move |messages, tools| {
           let provider_messages: Vec<_> = messages.iter().map(ProviderMessage::from).collect();
           serde_json::to_value(KimiRequest {
@@ -108,13 +109,13 @@ pub fn new_client(profile: &Profile, provider: &ProviderConfig) -> Result<Client
           })
         },
         600,
-      )
+      )?)
     }
     "z" => {
       let model = profile.model.clone();
-      make_client(
+      Ok(Client::new(
         url,
-        key_env,
+        api_key,
         move |messages, tools| {
           let provider_messages: Vec<_> = messages.iter().map(ProviderMessage::from).collect();
           serde_json::to_value(ZRequest {
@@ -130,14 +131,14 @@ pub fn new_client(profile: &Profile, provider: &ProviderConfig) -> Result<Client
           })
         },
         600,
-      )
+      )?)
     }
     "deepseek" => {
       let model = profile.model.clone();
       let effort = profile.effort.clone();
-      make_client(
+      Ok(Client::new(
         url,
-        key_env,
+        api_key,
         move |messages, tools| {
           let provider_messages: Vec<_> = messages.iter().map(ProviderMessage::from).collect();
           serde_json::to_value(DeepSeekRequest {
@@ -151,22 +152,10 @@ pub fn new_client(profile: &Profile, provider: &ProviderConfig) -> Result<Client
           })
         },
         600,
-      )
+      )?)
     }
     other => bail!("unknown backend: {other}"),
   }
-}
-
-fn make_client<F>(url: &str, key_env: &str, build: F, timeout_secs: u64) -> Result<Client>
-where
-  F:
-    Fn(&[Message], &[Tool]) -> Result<serde_json::Value, serde_json::Error> + Send + Sync + 'static,
-{
-  Ok(Client::new(url, env_key(key_env)?, build, timeout_secs)?)
-}
-
-fn env_key(name: &str) -> Result<String> {
-  env::var(name).with_context(|| format!("{name} is not set"))
 }
 
 #[cfg(test)]

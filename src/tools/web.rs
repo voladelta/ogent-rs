@@ -150,10 +150,6 @@ fn exa_client() -> Result<&'static reqwest::Client> {
   Ok(CLIENT.get_or_init(|| client))
 }
 
-fn exa_api_key() -> String {
-  std::env::var("EXA_API_KEY").unwrap_or_default()
-}
-
 pub fn ensure_exa_api_key_set() -> Result<()> {
   let key = std::env::var("EXA_API_KEY").unwrap_or_default();
   if key.trim().is_empty() {
@@ -163,7 +159,7 @@ pub fn ensure_exa_api_key_set() -> Result<()> {
 }
 
 async fn exa_post(url: &str, body: Value) -> Result<Value> {
-  let key = exa_api_key();
+  let key = std::env::var("EXA_API_KEY").unwrap_or_default();
   let resp = exa_client()?
     .post(url)
     .header("x-api-key", key)

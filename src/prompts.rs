@@ -63,16 +63,16 @@ mod tests {
 
   #[test]
   fn test_compose_system_prompt() {
-    let sys = compose_system_prompt();
+    let sys = SYSTEM_PROMPT;
     assert!(sys.contains("Core Contract"));
   }
 
   #[test]
   fn build_initial_messages_keeps_human_task_last() {
-    let messages = build_initial_messages("system", "do the task", "session-1", &[], &[]);
+    let messages = build_initial_messages("do the task", &[], &[]);
     let last = messages.last().unwrap();
     assert_eq!(last.origin, MessageOrigin::Human);
-    assert_eq!(last.content, "[session: session-1]\n\ndo the task");
+    assert_eq!(last.content, "do the task");
   }
 
   #[test]
