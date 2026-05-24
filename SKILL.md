@@ -1,11 +1,11 @@
 ---
 name: ogent
-description: Use ogent as an external coding co-worker for focused software engineering tasks. Invoke when you need an independent CLI agent to implement, debug, review, verify, research, summarize, design, or write within the current repository.
+description: Use ogent as an external coding agent for focused software engineering tasks. Invoke when you need an independent CLI agent to implement, debug, review, verify, research, summarize, design, or write within the current repository.
 ---
 
 # ogent
 
-Use `ogent` when an independent coding co-worker would help make concrete progress in the current repository.
+Use `ogent` when an independent coding agent would help make concrete progress in the current repository.
 
 Run `ogent` from the repository root or the intended workspace. Its workspace is the process current directory.
 
@@ -53,7 +53,7 @@ Add these blocks when the task is subtle, review-like, or likely to produce adja
 
 ```text
 Role:
-<one sentence naming the lens ogent should use, such as Rust parser reviewer, security reviewer, implementation worker, or verification worker>
+<one sentence naming the lens ogent should use, such as Rust parser reviewer, security reviewer, implementation agent, or verification agent>
 
 Procedure:
 1. <first concrete inspection or action>
@@ -154,7 +154,7 @@ ogent "$task_contract"
 
 ## Handling Results
 
-Treat `ogent` output as a co-worker report. Verify its evidence before relying on its conclusions.
+Treat `ogent` output as a collaborator report. Verify its evidence before relying on its conclusions.
 
 After it finishes:
 - read the status and evidence

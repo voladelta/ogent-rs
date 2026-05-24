@@ -1,6 +1,6 @@
 # ogent
 
-`ogent` is a single worker-mode coding agent designed to run from the CLI to perform focused, bounded tasks (implementing a feature, debugging a failure, reviewing changes, etc.) within a workspace.
+`ogent` is a single CLI agent process designed to perform focused, bounded tasks (implementing a feature, debugging a failure, reviewing changes, etc.) within a workspace.
 
 ## Quick Start
 
@@ -36,18 +36,18 @@ ogent --profile kimi "Review the staged diff"
 
 ---
 
-## Worker Runtime & Key Behavior
+## Agent Runtime & Key Behavior
 
-- **Worker Mode**: Invocations execute in worker mode.
+- **Agent Process**: Each invocation runs one standalone CLI agent process.
 - **System Prompt**: It relies on [SYSTEM_PROMPT.md](SYSTEM_PROMPT.md) for its prompt loop, state, and result formatting guidelines.
 - **Session Persistence**: CLI runs persist conversation transcripts to `.ogent/sessions/{session_id}.jsonl` on exit.
 - **Run Completion**: A run terminates when the agent returns a final message without calling any more tools.
 
 ---
 
-## Worker Tools Reference
+## Agent Tools Reference
 
-Every worker run receives the full worker toolset:
+Every agent run receives the full agent toolset:
 
 * **Filesystem & Editing**:
   - `read_file`: Reads a file from the workspace (line-indexed, optional start/end bounds).

@@ -83,10 +83,10 @@ pub fn all_tools() -> &'static [ToolDef] {
   ALL_TOOLS.get_or_init(build_all_tools)
 }
 
-static WORKER_TOOLS: OnceLock<Vec<Tool>> = OnceLock::new();
+static AGENT_TOOLS: OnceLock<Vec<Tool>> = OnceLock::new();
 
-pub fn configured_worker_tools() -> Vec<Tool> {
-  WORKER_TOOLS
+pub fn configured_agent_tools() -> Vec<Tool> {
+  AGENT_TOOLS
     .get_or_init(|| all_tools().iter().map(|t| t.schema()).collect())
     .clone()
 }
@@ -109,8 +109,8 @@ mod tests {
   use super::*;
 
   #[test]
-  fn configured_worker_tools_includes_expected() {
-    let tools = configured_worker_tools();
+  fn configured_agent_tools_includes_expected() {
+    let tools = configured_agent_tools();
     let names: Vec<_> = tools.iter().map(|t| t.function.name.as_str()).collect();
     assert!(names.contains(&"read_file"));
     assert!(names.contains(&"write_file"));

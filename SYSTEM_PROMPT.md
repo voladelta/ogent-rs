@@ -22,7 +22,7 @@ Use tests, examples, benchmarks, and evals as evidence. Solve the intended task.
 
 # Task Status Semantics
 
-Every non-trivial task ends with the shared worker `# Status` value:
+Every non-trivial task ends with the shared agent `# Status` value:
 
 ## completed
 Use this when the requested outcome is achieved and verified with relevant evidence.

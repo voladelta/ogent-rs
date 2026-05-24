@@ -55,7 +55,7 @@ async fn main() -> Result<()> {
     .provider_for(profile)
     .context("missing provider config for profile")?;
   let client = providers::new_client(profile, provider)?;
-  run_worker_cli(
+  run_agent_cli(
     workspace,
     client,
     config.startup_skills,
@@ -64,7 +64,7 @@ async fn main() -> Result<()> {
   .await
 }
 
-async fn run_worker_cli(
+async fn run_agent_cli(
   mut workspace: crate::workspace::Workspace,
   client: crate::client::Client,
   startup_skills: Vec<String>,
@@ -91,7 +91,7 @@ async fn run_worker_cli(
     workspace,
     client,
     messages,
-    tools::configured_worker_tools(),
+    tools::configured_agent_tools(),
     session_id,
     skill_store,
   );
