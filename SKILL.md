@@ -32,6 +32,9 @@ Scope:
 Constraints:
 <edit permission, public API boundaries, safety boundaries, secrets/destructive-action limits, and runtime limits>
 
+Reasoning allocation:
+<where ogent should spend thought: decision points, invariants, failure modes, simulations, skip conditions, and stop criteria>
+
 Stop when:
 <exact condition that ends ogent's run>
 
@@ -45,7 +48,9 @@ Claim standard:
 For security, sandbox, parser, validation, or correctness claims, give one concrete input, trace the validation/check path, trace the runtime/effect path, and name the invariant satisfied or violated before classifying the issue.
 ```
 
-Strong contracts name the target state, acceptance criteria, relevant paths, permitted changes, constraints, evidence, and stop condition. Use relative paths. Keep the `task` argument focused on task-specific outcomes and evidence requirements.
+Strong contracts name the target state, acceptance criteria, relevant paths, permitted changes, constraints, reasoning allocation, evidence, and stop condition. Use relative paths. Keep the `task` argument focused on task-specific outcomes and evidence requirements.
+
+Use the reasoning allocation field to aim effort at the highest-value uncertainty. Tell `ogent` where careful thought changes the outcome: boundary checks, state transitions, parser or security invariants, root-cause branches, irreversible edits, and edge cases that follow from the contract. Name the skip condition for planning: when the next step is cheap, reversible, and directly verifiable.
 
 ### Optional Precision Blocks
 
@@ -79,11 +84,14 @@ Use one of: bug, limitation, contract mismatch, non-issue.
 Validation note:
 For claims about parsing, repair, escaping, serialization, security, or execution, name the exact before/after value and whether the relevant parser/check accepts it.
 
+Reasoning budget:
+Spend deep reasoning on <specific decision, invariant, or failure mode>. Use direct inspection or verification for <obvious next action>. Stop simulating once <evidence threshold> is met.
+
 Edge-case check:
 After tests pass, inspect the changed logic against one or two nearby untested edge cases that follow from the same contract. Report whether the implementation handles them, or list them under # Risks without broadening the task.
 ```
 
-Use the precision blocks to reduce guessing. Prefer them when the task asks for bounded findings, compares models, reviews parser/security behavior, or depends on a narrow definition of what counts as in scope.
+Use the precision blocks to reduce guessing and allocate reasoning. Prefer them when the task asks for bounded findings, compares models, reviews parser/security behavior, or depends on a narrow definition of what counts as in scope.
 
 Before invoking `ogent`, check the contract:
 - Goal names one outcome.
@@ -91,6 +99,7 @@ Before invoking `ogent`, check the contract:
 - Context gives enough facts for an independent run.
 - Scope names the relevant files, directories, commands, or topics.
 - Constraints state edit permission and hard boundaries.
+- Reasoning allocation names the few places where simulation, tradeoff analysis, or inversion is useful.
 - Stop condition tells `ogent` when to finish.
 - Evidence requirements are inspectable by you after the run.
 - Review or investigation tasks include a candidate filter that defines what counts as an in-scope finding.
@@ -134,6 +143,9 @@ src/parser.rs, src/lexer.rs, parser tests, and commands needed to reproduce the 
 
 Constraints:
 Treat tests as intended-behavior evidence. Edit source only after identifying the root cause. Edit tests when evidence shows the test encodes stale behavior. Keep parser public APIs unchanged.
+
+Reasoning allocation:
+Spend thought on reproducing the failure, tracing token normalization into parser behavior, and distinguishing stale-test evidence from a source regression. Use direct file reads and the failing test output for obvious next steps. Stop simulating once the root cause has source/test evidence and one minimal fix path.
 
 Stop when:
 The root cause and smallest justified next step are clear, or the run reaches a specific blocker.
