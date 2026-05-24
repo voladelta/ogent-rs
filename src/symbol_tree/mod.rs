@@ -1,8 +1,11 @@
 use anyhow::{Result, bail};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use tree_sitter::Node;
 
+mod c_sharp;
+mod cpp;
 mod go;
 mod python;
 mod rust;
@@ -17,6 +20,91 @@ pub struct Symbol {
   pub children: Vec<Symbol>,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Language {
+  Rust,
+  Go,
+  TypeScript,
+  Python,
+  Cpp,
+  CSharp,
+}
+
+struct ExtensionMapping {
+  exts: &'static [&'static str],
+  lang: Language,
+  help_desc: &'static str,
+}
+
+const SUPPORTED_LANGUAGES: &[ExtensionMapping] = &[
+  ExtensionMapping {
+    exts: &["rs"],
+    lang: Language::Rust,
+    help_desc: ".rs",
+  },
+  ExtensionMapping {
+    exts: &["go"],
+    lang: Language::Go,
+    help_desc: ".go",
+  },
+  ExtensionMapping {
+    exts: &["ts", "tsx", "js", "jsx", "mjs", "cjs"],
+    lang: Language::TypeScript,
+    help_desc: ".ts, .tsx, .js, .jsx, .mjs, .cjs",
+  },
+  ExtensionMapping {
+    exts: &["py"],
+    lang: Language::Python,
+    help_desc: ".py",
+  },
+  ExtensionMapping {
+    exts: &["cpp", "cc", "cxx", "c++", "h", "hpp", "hxx"],
+    lang: Language::Cpp,
+    help_desc: "C++ extensions",
+  },
+  ExtensionMapping {
+    exts: &["cs"],
+    lang: Language::CSharp,
+    help_desc: ".cs",
+  },
+];
+
+fn language_for_ext(ext: &str) -> Option<Language> {
+  SUPPORTED_LANGUAGES
+    .iter()
+    .find(|m| m.exts.contains(&ext))
+    .map(|m| m.lang)
+}
+
+impl Language {
+  fn parse(self, source: &str, ext: &str) -> Result<Vec<Symbol>> {
+    match self {
+      Language::Rust => rust::parse(source),
+      Language::Go => go::parse(source),
+      Language::TypeScript => typescript::parse(source, ext),
+      Language::Python => python::parse(source),
+      Language::Cpp => cpp::parse(source),
+      Language::CSharp => c_sharp::parse(source),
+    }
+  }
+}
+
+fn expected_extensions_desc() -> &'static str {
+  static DESC: OnceLock<String> = OnceLock::new();
+  DESC.get_or_init(|| {
+    let descs: Vec<&str> = SUPPORTED_LANGUAGES.iter().map(|m| m.help_desc).collect();
+    if descs.is_empty() {
+      "expected none".to_string()
+    } else {
+      let mut res = String::from("expected ");
+      res.push_str(&descs[..descs.len() - 1].join(", "));
+      res.push_str(", or ");
+      res.push_str(descs.last().unwrap());
+      res
+    }
+  })
+}
+
 pub fn collect_source_files(path: &Path) -> Vec<PathBuf> {
   let mut files = Vec::new();
   if let Err(e) = collect_files_inner(path, &mut files) {
@@ -28,10 +116,8 @@ pub fn collect_source_files(path: &Path) -> Vec<PathBuf> {
 fn collect_files_inner(path: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
   if path.is_file() {
     if let Some(ext) = path.extension()
-      && matches!(
-        ext.to_str().unwrap_or(""),
-        "rs" | "go" | "ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs" | "py"
-      )
+      && let Some(ext_str) = ext.to_str()
+      && language_for_ext(ext_str).is_some()
     {
       files.push(path.to_path_buf());
     }
@@ -53,8 +139,9 @@ pub fn format_path(path: &Path) -> Result<String> {
   let files = collect_source_files(path);
   if files.is_empty() {
     bail!(
-      "no supported source files found at {} (expected .rs, .go, .ts, .tsx, .js, .jsx, .mjs, .cjs, or .py)",
-      path.display()
+      "no supported source files found at {} ({})",
+      path.display(),
+      expected_extensions_desc()
     );
   }
   let mut out = String::new();
@@ -70,13 +157,9 @@ pub fn format_path(path: &Path) -> Result<String> {
 fn process_file(path: &Path) -> Result<String> {
   let source = fs::read_to_string(path)?;
   let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-  let syms = match ext {
-    "rs" => rust::parse(&source)?,
-    "go" => go::parse(&source)?,
-    "ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs" => typescript::parse(&source, ext)?,
-    "py" => python::parse(&source)?,
-    _ => bail!("unsupported extension: {}", ext),
-  };
+  let lang =
+    language_for_ext(ext).ok_or_else(|| anyhow::anyhow!("unsupported extension: {}", ext))?;
+  let syms = lang.parse(&source, ext)?;
   let mut out = String::new();
   out.push_str(&format!("{}\n", path.display()));
   for sym in syms {
@@ -430,6 +513,8 @@ def main():
     std::fs::write(dir.join("a.ts"), "export function typed(): void {}\n").unwrap();
     std::fs::write(dir.join("b.js"), "function scripted() {}\n").unwrap();
     std::fs::write(dir.join("c.py"), "def scripted_py():\n    pass\n").unwrap();
+    std::fs::write(dir.join("d.cpp"), "int main() {}\n").unwrap();
+    std::fs::write(dir.join("e.cs"), "class App {}\n").unwrap();
     std::fs::write(dir.join("ignored.txt"), "def ignored():\n    pass\n").unwrap();
 
     let out = format_path(&dir).unwrap();
@@ -441,6 +526,10 @@ def main():
     assert!(out.contains("scripted"));
     assert!(out.contains("c.py"));
     assert!(out.contains("scripted_py"));
+    assert!(out.contains("d.cpp"));
+    assert!(out.contains("main"));
+    assert!(out.contains("e.cs"));
+    assert!(out.contains("App"));
     assert!(!out.contains("ignored.txt"));
   }
 }

@@ -136,10 +136,10 @@ fn collect_variable_declarators(source: &str, node: Node) -> Vec<Symbol> {
   let mut out = Vec::new();
   let mut cursor = node.walk();
   for child in node.children(&mut cursor) {
-    if child.kind() == "variable_declarator" {
-      if let Some(sym) = variable_declarator_to_symbol(source, child) {
-        out.push(sym);
-      }
+    if child.kind() == "variable_declarator"
+      && let Some(sym) = variable_declarator_to_symbol(source, child)
+    {
+      out.push(sym);
     }
   }
   out

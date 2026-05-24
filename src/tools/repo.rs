@@ -16,7 +16,7 @@ pub fn tools() -> Vec<ToolDef> {
     },
     ToolDef {
       name: "code_map",
-      description: "Display a symbol map of source files (Rust, Go, TypeScript, JavaScript, and Python), showing structs, enums, traits, impls, functions, interfaces, types, classes, variables, and modules with line ranges. Use to understand the shape and contents of source files before deciding which files or line ranges to read. For a single file, pass its path; for a directory, pass the directory path to map all supported source files inside. Use before read_file to target exact line ranges.",
+      description: "Display a symbol map of source files (Rust, Go, TypeScript, JavaScript, Python, C++, and C#), showing structs, enums, traits, impls, functions, interfaces, types, classes, variables, namespaces, and modules with line ranges. Use to understand the shape and contents of source files before deciding which files or line ranges to read. For a single file, pass its path; for a directory, pass the directory path to map all supported source files inside. Use before read_file to target exact line ranges.",
       parameters: json!({"type":"object","properties":{"path":{"type":"string","description":"File or directory path relative to workspace root. Default: \".\""}},"additionalProperties":false}),
       handler: Handler::Sync(code_map),
     },
