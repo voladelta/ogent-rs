@@ -5,198 +5,123 @@ description: Use ogent as an external coding agent for focused software engineer
 
 # ogent
 
-Use `ogent` when an independent coding agent would help make concrete progress in the current repository.
-
-Run `ogent` from the repository root or the intended workspace. Its workspace is the process current directory.
+Use `ogent` to delegate one focused repository task to an external coding agent. You remain responsible for framing, scope, verification, and final judgment.
 
 ## Task Contract
 
-Write the prompt sent to `ogent` in this field order. Fill every field with task-specific content. Keep the contract compact, concrete, and self-contained.
+Give ogent a concrete contract, not a loose request. Put these fields in order:
 
 ```text
 Goal:
-<one sentence naming the desired outcome for ogent>
-
 Success means:
-- <observable result>
-- <acceptance criteria>
-- <required evidence>
-- <required verification or inspection>
-
 Context:
-<facts already known; include user intent, prior findings, relevant files, and branch state when useful>
-
 Scope:
-<files, directories, commands, topics, and allowed change area>
-
 Constraints:
-<edit permission, public API boundaries, safety boundaries, secrets/destructive-action limits, and runtime limits>
-
 Reasoning allocation:
-<where ogent should spend thought: decision points, invariants, failure modes, simulations, skip conditions, and stop criteria>
-
 Stop when:
-<exact condition that ends ogent's run>
-
 Evidence required:
-<commands, files, diffs, logs, traces, or reasoning ogent must report>
-
 Expected output:
-Use exactly these top-level sections: # Status, # Summary, # Changed Files, # Verification, # Evidence, # Risks, # Question, # Next Action.
-
 Claim standard:
-For security, sandbox, parser, validation, or correctness claims, give one concrete input, trace the validation/check path, trace the runtime/effect path, and name the invariant satisfied or violated before classifying the issue.
 ```
 
-Strong contracts name the target state, acceptance criteria, relevant paths, permitted changes, constraints, reasoning allocation, evidence, and stop condition. Use relative paths. Keep the `task` argument focused on task-specific outcomes and evidence requirements.
+Field guidance:
+- `Goal`: one outcome, stated as behavior or artifact.
+- `Success means`: observable acceptance criteria.
+- `Context`: facts the agent should rely on before exploring.
+- `Scope`: allowed files, commands, topics, and artifacts.
+- `Constraints`: what must be preserved or avoided.
+- `Reasoning allocation`: where to think deeply, and where to act directly.
+- `Stop when`: completed, partial, blocked, or question condition.
+- `Evidence required`: tests, commands, diffs, examples, or traces needed for a claim.
+- `Expected output`: concise report shape.
+- `Claim standard`: no success claim without matching evidence.
 
-Use the reasoning allocation field to aim effort at the highest-value uncertainty. Tell `ogent` where careful thought changes the outcome: boundary checks, state transitions, parser or security invariants, root-cause branches, irreversible edits, and edge cases that follow from the contract. Name the skip condition for planning: when the next step is cheap, reversible, and directly verifiable.
+## Contract Nudges
 
-### Optional Precision Blocks
+Use these nudges in contracts when they fit the task:
 
-Add these blocks when the task is subtle, review-like, or likely to produce adjacent findings.
+- For implementation: make the smallest correct version work, verify it, make it right, then stop.
+- For optimization or broad cleanup: defer until the requested behavior works and is correct.
+- For stale anchors: plan all same-file edits from one fresh snapshot when possible; after editing a file, re-read anchors before another edit round.
+- For reasoning: spend thought on invariants, failure modes, validation paths, public behavior, and irreversible choices; act directly on obvious reversible steps.
+- For failed checks: read the exact error, inspect implicated code, make one targeted edit, rerun the focused check, then reassess.
+- For reviews: report only findings tied to the requested goal; put adjacent concerns under risks or next action.
+
+For security, sandbox, parser, validation, execution, or correctness claims, require a concrete trace: one input through the check path and runtime/effect path, the protected invariant, and the classification.
+
+## Optional Precision Blocks
+
+Add these only when they reduce ambiguity:
 
 ```text
 Role:
-<one sentence naming the lens ogent should use, such as Rust parser reviewer, security reviewer, implementation agent, or verification agent>
-
 Procedure:
-1. <first concrete inspection or action>
-2. <second concrete inspection or action>
-3. <candidate filter or decision rule>
-4. <keep, move-to-risks, or stop rule>
-
 Candidate filter:
-Keep a finding only when <specific condition>. Move adjacent, duplicate, speculative, or downstream-only observations to # Risks.
-
 Finding template:
-- Input:
-- Check/parser path:
-- Runtime/effect path:
-- Invariant:
-- Classification:
-- Confidence:
-- File refs:
-
 Classification labels:
-Use one of: bug, limitation, contract mismatch, non-issue.
-
 Validation note:
-For claims about parsing, repair, escaping, serialization, security, or execution, name the exact before/after value and whether the relevant parser/check accepts it.
-
-Reasoning budget:
-Spend deep reasoning on <specific decision, invariant, or failure mode>. Use direct inspection or verification for <obvious next action>. Stop simulating once <evidence threshold> is met.
-
 Edge-case check:
-After tests pass, inspect the changed logic against one or two nearby untested edge cases that follow from the same contract. Report whether the implementation handles them, or list them under # Risks without broadening the task.
 ```
 
-Use the precision blocks to reduce guessing and allocate reasoning. Prefer them when the task asks for bounded findings, compares models, reviews parser/security behavior, or depends on a narrow definition of what counts as in scope.
+Useful review labels:
+- `must-fix-now`: breaks the requested behavior, invariant, security boundary, data contract, or maintainability threshold.
+- `can-let-slip`: real but not blocking for this task.
+- `missing-precursor`: cannot judge without named evidence.
+- `reject`: change should not land.
 
-Before invoking `ogent`, check the contract:
-- Goal names one outcome.
-- Success criteria are observable.
-- Context gives enough facts for an independent run.
-- Scope names the relevant files, directories, commands, or topics.
-- Constraints state edit permission and hard boundaries.
-- Reasoning allocation names the few places where simulation, tradeoff analysis, or inversion is useful.
-- Stop condition tells `ogent` when to finish.
-- Evidence requirements are inspectable by you after the run.
-- Review or investigation tasks include a candidate filter that defines what counts as an in-scope finding.
-- Parser, repair, escaping, serialization, security, or execution tasks include exact value validation when a claim depends on transformation correctness.
-- Editing tasks include an edge-case check when visible tests cover parser, escaping, serialization, state machines, concurrency, or security boundaries.
+## Invocation
 
-## Invocation Patterns
-
-General task:
+Run from the repository root:
 
 ```bash
-ogent "<task contract>"
-```
-
-With a specific model/profile when the caller requires it:
-
-```bash
-ogent --profile kimi "<task contract>"
-```
-
-Available profiles: `glm`, `kimi`, `ds-flash`, `ds-flash-max`, `ds-pro`, `ds-pro-max`
-
-For multiline contracts, use a heredoc so the task is readable and reproducible:
-
-```bash
-task_contract=$(cat <<'TASK'
+ogent --profile kimi "$(cat <<'TASK'
 Goal:
-Find the root cause of the failing parser test.
 
 Success means:
-- The failing behavior is reproduced or a specific blocker is reported.
-- The root cause is supported by source or test evidence.
-- The smallest justified next step is identified.
-- Verification evidence or the reason verification is unavailable is reported.
 
 Context:
-The failure appears after changing token normalization.
 
 Scope:
-src/parser.rs, src/lexer.rs, parser tests, and commands needed to reproduce the parser failure.
 
 Constraints:
-Treat tests as intended-behavior evidence. Edit source only after identifying the root cause. Edit tests when evidence shows the test encodes stale behavior. Keep parser public APIs unchanged.
 
 Reasoning allocation:
-Spend thought on reproducing the failure, tracing token normalization into parser behavior, and distinguishing stale-test evidence from a source regression. Use direct file reads and the failing test output for obvious next steps. Stop simulating once the root cause has source/test evidence and one minimal fix path.
 
 Stop when:
-The root cause and smallest justified next step are clear, or the run reaches a specific blocker.
 
 Evidence required:
-Reproduction command, relevant failing output, source/test trace, root-cause evidence, and minimal fix path.
 
 Expected output:
-Use exactly these top-level sections: # Status, # Summary, # Changed Files, # Verification, # Evidence, # Risks, # Question, # Next Action.
+- Status: completed | partial | blocked | question
+- Summary
+- Changed files or reviewed files
+- Verification
+- Risks or uncertainty
+- Next action, only if useful
 
 Claim standard:
-For security, sandbox, parser, validation, or correctness claims, give one concrete input, trace the validation/check path, trace the runtime/effect path, and name the invariant satisfied or violated before classifying the issue.
+- Claim only what was observed.
+- Include failing output when it affects the result.
 TASK
-)
-
-ogent "$task_contract"
+)"
 ```
+
+Use `--profile kimi` when the user asks for the kimi profile. Otherwise choose the profile that matches the task or the user's request.
+
+Keep contracts short. Include repo-specific commands and file paths only when they are relevant evidence or scope boundaries.
 
 ## Handling Results
 
-Treat `ogent` output as a collaborator report. Verify its evidence before relying on its conclusions.
+After ogent returns:
+1. Read its report and inspect any changed files or claimed evidence.
+2. Verify important claims yourself with the strongest practical check.
+3. Classify the outcome as completed, partial, blocked, or question.
+4. Summarize what you accept, what remains uncertain, and the next useful step.
 
-After it finishes:
-- read the status and evidence
-- inspect changed files or cited files before relying on them
-- run the relevant verification yourself when the result affects user-facing claims
-- summarize only the useful result back to the user
-- preserve uncertainty, blockers, and failed checks
-- grade the report against the original contract: outcome, scope, evidence, verification, format, and repo hygiene
+For long sessions, inspect the `.ogent/sessions/*.jsonl` trace when behavior quality matters. Look for scope drift, excessive narration, stale-anchor edits, missing verification, or claims without evidence; then tighten the next task contract.
 
-Expected final sections from `ogent` are:
+## Safety
 
-```text
-# Status
-# Summary
-# Changed Files
-# Verification
-# Evidence
-# Risks
-# Question
-# Next Action
-```
+Do not delegate secrets, credentials, destructive git operations, deployment, or broad rewrites unless explicitly requested and scoped.
 
-The `# Status` body is one of: `completed`, `partial`, `blocked`, `question`.
-
-If status is `question`, answer the missing question yourself if possible, then rerun `ogent` with the new context. If status is `partial` or `blocked`, decide whether to continue directly, rerun with a narrower contract, or ask the user.
-
-## Safety and Repo Hygiene
-
-- Check `git status` before and after delegated edit tasks.
-- Keep delegation scoped; request broad refactors only when the user requested them.
-- Ask `ogent` to preserve tests, surface failures, keep acceptance criteria stable, and leave destructive operations to explicit user requests.
-- Treat `.ogent/sessions/` and build outputs as runtime artifacts; read them only when needed and edit them only when requested.
-- Claim `ogent` ran checks or changed files only after you observed the output or inspected the repository state.
+Do not let ogent's conclusion replace your judgment. Treat it as an independent worker whose output needs synthesis and verification.
