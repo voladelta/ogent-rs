@@ -44,10 +44,14 @@ enum WebReadMode {
   Text,
 }
 
+fn default_num_results() -> usize {
+  10
+}
+
 #[derive(Deserialize)]
 struct WebSearchArgs {
   query: String,
-  #[serde(default)]
+  #[serde(default = "default_num_results")]
   num_results: usize,
   #[serde(default, rename = "type")]
   search_type: SearchType,
@@ -179,3 +183,15 @@ async fn exa_post(url: &str, body: Value) -> Result<Value> {
   }
   Ok(v)
 }
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn test_web_search_args_default_num_results() {
+    let args: WebSearchArgs = serde_json::from_str(r#"{"query": "hello"}"#).unwrap();
+    assert_eq!(args.num_results, 10);
+  }
+}
+
