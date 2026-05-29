@@ -84,11 +84,12 @@ fn fnv1a64(bytes: &[u8]) -> u64 {
 
 #[derive(Clone, Deserialize)]
 pub struct EditOp {
-  pub anchor: String,
+  pub start_at: String,
   #[serde(default)]
-  pub end_anchor: String,
+  pub end_at: String,
   pub action: String,
-  pub new_string: String,
+  #[serde(default)]
+  pub content: String,
 }
 
 #[derive(Clone)]
@@ -121,19 +122,19 @@ pub fn apply_anchor_edits(source: &str, ops: &[EditOp]) -> Result<String> {
 }
 
 fn resolve_edit(lines: &[String], op: &EditOp) -> Result<ResolvedEdit> {
-  let start = parse_anchor(&op.anchor)?;
+  let start = parse_anchor(&op.start_at)?;
   validate_anchor(lines, start)?;
-  let end = if op.end_anchor.is_empty() {
+  let end = if op.end_at.is_empty() {
     None
   } else {
-    let ea = parse_anchor(&op.end_anchor)?;
+    let ea = parse_anchor(&op.end_at)?;
     validate_anchor(lines, ea)?;
     if ea.line < start.line {
       bail!("end anchor precedes start anchor");
     }
     Some(ea)
   };
-  let replacement = source_lines(&op.new_string);
+  let replacement = source_lines(&op.content);
   let start_idx = start.line - 1;
   Ok(match op.action.as_str() {
     "insert_before" => {
@@ -164,7 +165,13 @@ fn resolve_edit(lines: &[String], op: &EditOp) -> Result<ResolvedEdit> {
       replacement,
       mode: InsertMode::Replace,
     },
-    other => bail!("action must be replace, insert_before, or insert_after, got: {other}"),
+    "delete" => ResolvedEdit {
+      start_idx,
+      end_idx: Some(end.map_or(start_idx, |a| a.line - 1)),
+      replacement: Vec::new(),
+      mode: InsertMode::Replace,
+    },
+    other => bail!("action must be replace, delete, insert_before, or insert_after, got: {other}"),
   })
 }
 
@@ -246,9 +253,9 @@ mod tests {
   #[test]
   fn edit_op_allows_missing_end_anchor_for_inserts() {
     let op: EditOp =
-      serde_json::from_str(r#"{"anchor":"1:a430","action":"insert_after","new_string":"world"}"#)
-        .expect("missing end_anchor should default to empty");
+      serde_json::from_str(r#"{"start_at":"1:a430","action":"insert_after","content":"world"}"#)
+        .expect("missing end_at should default to empty");
 
-    assert!(op.end_anchor.is_empty());
+    assert!(op.end_at.is_empty());
   }
 }

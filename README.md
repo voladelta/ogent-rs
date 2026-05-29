@@ -47,23 +47,29 @@ ogent --profile kimi "Review the staged diff"
 
 ## Agent Tools Reference
 
-Every agent run receives the full agent toolset:
+The outer LLM agent loop is strictly limited to exactly two tools:
+* `exec`: Executes a stateless, one-off Lua 5.5 script.
+* `eval`: Executes a stateful Lua 5.5 script within the persistent session (retains globals/functions).
 
-* **Filesystem & Editing**:
-  - `read_file`: Reads a file from the workspace (line-indexed, optional start/end bounds).
-  - `write_file`: Writes content to a new file.
-  - `read_hash_anchors`: Reads a file with line hashes prefixed (e.g. `<line>:<hash>|content`).
-  - `edit_hash_anchors`: Performs safe edits using FNV-1a line-content hashes.
-* **Code Search & Mapping**:
-  - `repo_map`: Displays the directory structure tree of the workspace.
-  - `code_map`: Renders a symbol map (structs, functions, enums, etc.) using tree-sitter for Rust, Go, TypeScript, JavaScript, Python, C++, and C#.
-  - `bash`: Runs bounded commands (max 600s) inside the workspace root (e.g. cargo test, git diff).
-* **Web Search**:
-  - `web_search`: Queries the web for excerpts via Exa.
-  - `web_read`: Reads key highlights or raw text from web URLs.
-  - `web_code_context`: Searches real-world code for syntax/API context.
-* **Utilities**:
-  - `load_skill`: Dynamically loads pre-configured skill prompt/resources.
+Within the Lua execution sandbox, scripts can invoke workspace operations directly using positional global functions or standard table-argument functions:
+
+### Filesystem & Editing
+* `read_file(path, offset, limit)`: Reads a file from the workspace starting at a byte offset with a max byte limit.
+* `write_file{path=..., content=..., overwrite_existing=...}`: Writes content to a file.
+* `read_hash_anchors(path, offset, limit)`: Reads a file with line FNV-1a hashes prefixed (e.g. `<line>:<hash>|content`).
+* `apply_anchor_edits(ops)` or `apply_anchor_edits(path, ops)`: Applies a batch array of `EditOp` tables all at once without re-calculating anchors (infers path from the last `read_hash_anchors` call if omitted).
+
+### Skills & Asset Loading
+* `list_skills()`: Lists all discovered skills in Markdown format with their names, root directories, and descriptions.
+* `load_skill(name)`: Loads a pre-configured skill prompt template.
+* `load_skill_asset(root, path)`: Securely reads asset files from a whitelisted skill directory (under `cwd/` or `~/`), rejecting traversal attempts.
+
+### Shell & Repository Maps
+* `shell{command=..., timeout_seconds=...}`: Runs bounded commands (max 600s) inside the workspace root (e.g. `cargo test`, `git diff`).
+* `repo_map{}` / `repo_map()`: Displays the directory structure tree of the workspace.
+
+### Web Search (Exa)
+* `web_search{query=...}` / `web_read{url=...}` / `web_code_context{query=...}`: Queries the web, reads highlight summaries, or fetches real-world code snippets.
 
 ---
 
@@ -85,10 +91,6 @@ colgrep -e "<exact text>" "<intent>"
 
 # Exact string search via ripgrep
 rg "<exact symbol>"
-
-# Structure maps via code_map
-code_map {"path": "src"}           # Map workspace/directory symbols
-code_map {"path": "src/main.rs"}   # Map single file symbols
 ```
 
 ## Development Commands

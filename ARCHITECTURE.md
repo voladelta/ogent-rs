@@ -9,9 +9,8 @@ main.rs
     -> workspace.rs
     -> client.rs + providers.rs + sse.rs
     -> tools/ + session.rs
+      -> lua.rs (exec/eval VM sandbox)
       -> hashline.rs
-    -> symbol_tree/
-      -> mod.rs, rust.rs, go.rs, typescript.rs, python.rs, cpp.rs, c_sharp.rs
 ```
 
 ## Module Ownership
@@ -31,20 +30,18 @@ main.rs
   - LLM client initialization, provider payload generation, Server-Sent Events (SSE) parsing, and partial JSON argument repair.
 - [src/tools/mod.rs](file:///Users/mbp/Codehub/ogent-rs/src/tools/mod.rs)
   - Tool registry (`ToolDef`), dispatch, and schema collection. Submodules own each domain:
+    - `lua.rs` — Sandboxed Lua 5.5 environment (`exec` and `eval` tools), dynamic tool wrappers, and positional helper functions.
     - `fs.rs` — read_file, write_file, hash-anchor read/edit.
-    - `shell.rs` — bash execution and cd policy.
-    - `repo.rs` — repo_map and code_map.
+    - `shell.rs` — shell command execution and cd policy.
+    - `repo.rs` — repo_map.
     - `web.rs` — Exa web API client.
-    - `skills.rs` — load_skill.
+    - `skills.rs` — load_skill, list_skills, load_skill_asset.
 - [src/session.rs](file:///Users/mbp/Codehub/ogent-rs/src/session.rs)
   - Transcript persistence and workspace-scoped session state routing.
 - [src/prompts.rs](file:///Users/mbp/Codehub/ogent-rs/src/prompts.rs)
   - Standard agent instructions, skill loading, and startup skill discovery injection.
 - [src/hashline.rs](file:///Users/mbp/Codehub/ogent-rs/src/hashline.rs)
   - Implementation of safe editing via FNV-1a line hashing and validation.
-- [src/symbol_tree/mod.rs](file:///Users/mbp/Codehub/ogent-rs/src/symbol_tree/mod.rs)
-  - Tree-sitter powered AST symbol extraction for Rust, Go, TypeScript, JavaScript, Python, C++, and C# files (used by the `code_map` tool).
-  - `rust.rs`, `go.rs`, `typescript.rs`, `python.rs`, `cpp.rs`, and `c_sharp.rs` contain the language-specific parsers.
 
 ---
 
@@ -57,23 +54,26 @@ Use this map to locate source files for specific request areas:
 | CLI flags and agent process launch | [src/main.rs](file:///Users/mbp/Codehub/ogent-rs/src/main.rs) | [README.md](file:///Users/mbp/Codehub/ogent-rs/README.md) |
 | Agent loop and execution | [src/agent.rs](file:///Users/mbp/Codehub/ogent-rs/src/agent.rs) | [SYSTEM_PROMPT.md](file:///Users/mbp/Codehub/ogent-rs/SYSTEM_PROMPT.md) |
 | Tool schemas and behavior | [src/tools/mod.rs](file:///Users/mbp/Codehub/ogent-rs/src/tools/mod.rs) | [src/hashline.rs](file:///Users/mbp/Codehub/ogent-rs/src/hashline.rs) |
+| Lua VM scripting sandbox | [src/tools/lua.rs](file:///Users/mbp/Codehub/ogent-rs/src/tools/lua.rs) | [src/tools/mod.rs](file:///Users/mbp/Codehub/ogent-rs/src/tools/mod.rs) |
 | System prompt and initial messages | [src/prompts.rs](file:///Users/mbp/Codehub/ogent-rs/src/prompts.rs) | [SYSTEM_PROMPT.md](file:///Users/mbp/Codehub/ogent-rs/SYSTEM_PROMPT.md) |
 | Session routing | [src/session.rs](file:///Users/mbp/Codehub/ogent-rs/src/session.rs) | [src/workspace.rs](file:///Users/mbp/Codehub/ogent-rs/src/workspace.rs) |
 | Workspace path validation | [src/workspace.rs](file:///Users/mbp/Codehub/ogent-rs/src/workspace.rs) | [src/tools/fs.rs](file:///Users/mbp/Codehub/ogent-rs/src/tools/fs.rs) |
 | Anchored editing mechanics | [src/hashline.rs](file:///Users/mbp/Codehub/ogent-rs/src/hashline.rs) | [src/tools/fs.rs](file:///Users/mbp/Codehub/ogent-rs/src/tools/fs.rs) |
-| Symbol mapping & AST parsing | [src/symbol_tree/mod.rs](file:///Users/mbp/Codehub/ogent-rs/src/symbol_tree/mod.rs) | [src/tools/repo.rs](file:///Users/mbp/Codehub/ogent-rs/src/tools/repo.rs) |
+| Skills discovery and loading | [src/skills.rs](file:///Users/mbp/Codehub/ogent-rs/src/skills.rs) | [src/tools/skills.rs](file:///Users/mbp/Codehub/ogent-rs/src/tools/skills.rs) |
 
 ---
 
 ## Key Invariants
 
 1. **Single CLI Agent Process**: CLI launches exactly one agent process.
-2. **Agent Prompt & Tool Scope**: Agent runs use only agent prompts and the full agent toolset.
+2. **Agent Prompt & Tool Scope**: The LLM agent loop is strictly limited to `exec` and `eval` tools. All workspace tools (filesystem, shell commands, skills, and web search) are exposed solely through the Lua execution sandbox via positional or table-argument functions.
 3. **Immutable Workspace**: Every Agent owns a single, immutable `Workspace` root derived from the process's current directory at startup.
-4. **Workspace Sandboxing**: Tool executions, bash directories, and session file operations must resolve strictly within the active `Workspace` root.
-5. **Agent-Only Edits**: All agent file modifications must occur via the `write_file` or `edit_hash_anchors` tools.
+4. **Workspace Sandboxing**: Tool executions, shell command execution directories, and session file operations must resolve strictly within the active `Workspace` root.
+5. **Agent-Only Edits**: All agent file modifications must occur via the `write_file` or `apply_anchor_edits` tools.
 6. **Graceful Exit**: An agent run terminates once the model emits a final text response with no pending tool calls.
 7. **Skill Injection**: Startup skill discovery and injection remain fully enabled.
+8. **Lua Sandbox Safety**: The Lua execution engine restricts scripts to safe libraries (no `os`, `io`, `debug`, or `package`), limits memory to **32MB**, and caps CPU cycles to **32,000 instructions**.
+9. **Skill Path Whitelisting**: Skills are searched for and loaded from exactly five whitelisted directories (under `cwd/` and `~/`), and skill assets loaded via `load_skill_asset` undergo strict path traversal verification to prevent arbitrary file read access.
 
 ---
 

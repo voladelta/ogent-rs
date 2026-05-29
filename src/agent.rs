@@ -53,11 +53,38 @@ impl AgentOutputSink for CliOutputSink {
   }
 
   fn tool_call(&self, tool_call: &ToolCall) {
+    if tool_call.function.name == "exec" || tool_call.function.name == "eval" {
+      if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&tool_call.function.arguments) {
+        let reason = parsed.get("reason").and_then(|r| r.as_str()).unwrap_or("");
+        let code = parsed.get("code").and_then(|c| c.as_str()).unwrap_or("");
+        if !reason.is_empty() {
+          println!("[{}] {}", tool_call.function.name, reason);
+        } else {
+          println!("[{}]", tool_call.function.name);
+        }
+        println!("{}", code);
+        return;
+      }
+    }
     let args = truncate_for_cli(&tool_call.function.arguments, 180);
     eprintln!("[tool] {} {args}", tool_call.function.name);
   }
 
   fn tool_result(&self, tool_name: &str, content: &str, failed: bool) {
+    if tool_name == "exec" || tool_name == "eval" {
+      if failed {
+        println!("--- Tool Execution Failed ---");
+        println!("{}", content);
+      } else {
+        let lines: Vec<&str> = content.lines().collect();
+        let display = lines.iter().take(5).copied().collect::<Vec<_>>().join("\n");
+        println!("{}", display);
+        if lines.len() > 5 {
+          println!("... (truncated)");
+        }
+      }
+      return;
+    }
     if failed {
       eprintln!("[tool:error] {tool_name}: {}", first_line(content));
     } else {
@@ -81,6 +108,7 @@ pub struct Agent {
   pub session_id: String,
   output_sink: Option<Arc<dyn AgentOutputSink>>,
   pub skill_store: Arc<crate::skills::SkillStore>,
+  pub lua_session: Arc<std::sync::Mutex<Option<mlua::Lua>>>,
 }
 
 impl Agent {
@@ -100,6 +128,7 @@ impl Agent {
       session_id,
       output_sink: None,
       skill_store,
+      lua_session: Arc::new(std::sync::Mutex::new(None)),
     }
   }
 
@@ -179,10 +208,12 @@ impl Agent {
         self.emit_tool_call(&tool_call);
         let workspace = self.workspace.clone();
         let skill_store = self.skill_store.clone();
+        let lua_session = self.lua_session.clone();
         let result = execute_tool(
           ToolContext {
             workspace,
             skill_store,
+            lua_session,
           },
           &tool_call.function.name,
           &tool_call.function.arguments,
@@ -235,9 +266,9 @@ mod tests {
 
   #[test]
   fn tool_result_content_reports_errors_to_model() {
-    let content = tool_result_content("bash", Err(anyhow::anyhow!("exit err: exit status: 127")));
+    let content = tool_result_content("shell", Err(anyhow::anyhow!("exit err: exit status: 127")));
 
-    assert!(content.contains("tool `bash` failed"));
+    assert!(content.contains("tool `shell` failed"));
     assert!(content.contains("exit status: 127"));
     assert!(content.contains("adjust the next tool call"));
   }

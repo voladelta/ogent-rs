@@ -333,7 +333,7 @@ mod tests {
     let mut acc = ChatAccumulator::default();
     apply_data_line(
       &mut acc,
-      r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"x","type":"function","function":{"name":"bash","arguments":"{\"command\""}}]}}]}"#,
+      r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"x","type":"function","function":{"name":"shell","arguments":"{\"command\""}}]}}]}"#,
     );
     apply_data_line(
       &mut acc,

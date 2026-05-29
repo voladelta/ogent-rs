@@ -7,9 +7,9 @@ description: Semantic code search CLI; use as the primary way for codebase explo
 
 This repository has `colgrep` installed - a semantic code search CLI.
 
-**Use `colgrep` via `bash` as the primary way to search** instead of `grep`. `colgrep` is a CLI command, not a tool.
+**Use `colgrep` via `shell` as the primary way to search** instead of `grep`. `colgrep` is a CLI command, not a tool.
 
-Valid tool call: `bash({"command":"colgrep \"auth flow\" -k 10"})`
+Valid tool call: `shell({"command":"colgrep \"auth flow\" -k 10"})`
 
 Invalid tool call: `colgrep({"query":"auth flow"})`
 

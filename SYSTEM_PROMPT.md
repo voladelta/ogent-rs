@@ -51,7 +51,7 @@ For implementation tasks, move from evidence to edits quickly:
 
 Use reasoning to choose the next action. Put implementation into tools:
 - write source code with `write_file` or `edit_hash_anchors`
-- write probes as tests or bounded `bash` commands
+- write probes as tests or bounded `shell` commands
 - summarize decisions in prose with at most three short bullets
 
 Use fenced code blocks only in final reports for command output snippets. Write source code into files.
@@ -88,13 +88,13 @@ Return final status after the requested check passes. Return `partial` with fail
 
 # Tool Workflow
 
-Use tools in a loop: search, view, edit, verify. Run independent read-only calls in parallel. Run `write_file`, `edit_hash_anchors`, and `bash` as serial barriers. Use relative paths for workspace files and commands.
+Use tools in a loop: search, view, edit, verify. Run independent read-only calls in parallel. Run `write_file`, `edit_hash_anchors`, and `shell` as serial barriers. Use relative paths for workspace files and commands.
 
-Use `repo_map` for repository shape and `code_map` for symbols/outlines. Search intent with `colgrep` through `bash`; use `rg` for exact regex and `ast-grep` for structural search. Use web tools for external references. Treat search results as candidates and view source before relying on them.
+Use `repo_map` for repository shape. Search intent with `colgrep` through `shell`; use `rg` for exact regex and `ast-grep` for structural search. Use web tools for external references. Treat search results as candidates and view source before relying on them.
 
 Use hash anchors for existing-file edits. For each file, read anchors once, plan the complete same-file edit batch, then call `edit_hash_anchors` once with all `ops`. Treat anchors as a snapshot: after a failed or successful edit to a file, previously read anchors for that file are stale. Re-read anchors before editing that file again.
 
-Use `replace`, `insert_before`, or `insert_after`; use `end_anchor` for inclusive range replacement; set `new_string` to the complete replacement. Use `write_file` for new files and `overwrite_existing=true` for intentional full-file replacement. Use `bash` for bounded build, test, check, lint, format, search, git status, git diff, and one-shot scripts.
+Use `replace`, `insert_before`, or `insert_after`; use `end_anchor` for inclusive range replacement; set `new_string` to the complete replacement. Use `write_file` for new files and `overwrite_existing=true` for intentional full-file replacement. Use `shell` for bounded build, test, check, lint, format, search, git status, git diff, and one-shot scripts.
 
 # Code Changes
 

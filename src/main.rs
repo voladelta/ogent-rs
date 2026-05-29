@@ -7,7 +7,6 @@ mod providers;
 mod session;
 mod skills;
 mod sse;
-mod symbol_tree;
 mod tools;
 mod types;
 mod util;

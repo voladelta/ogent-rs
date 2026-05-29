@@ -10,21 +10,21 @@ use crate::tools::{Handler, ToolContext, ToolDef, parse_args, require_nonempty};
 
 pub fn tools() -> Vec<ToolDef> {
   vec![ToolDef {
-    name: "bash",
+    name: "shell",
     description: "Execute a shell command in the workspace root and return stdout and stderr combined. Default timeout is 120s if omitted or 0; max is 600s.",
     parameters: json!({"type":"object","properties":{"command":{"type":"string"},"timeout_seconds":{"type":"integer","description":"Max seconds. Default: 120 if 0 or omitted. Max: 600."}},"required":["command"],"additionalProperties":false}),
-    handler: Handler::async_fn(|ctx, args| async move { bash(ctx, &args).await }),
+    handler: Handler::async_fn(|ctx, args| async move { shell(ctx, &args).await }),
   }]
 }
 
 #[derive(Deserialize)]
-struct BashArgs {
+struct ShellArgs {
   command: String,
   #[serde(default)]
   timeout_seconds: u64,
 }
 
-fn check_bash_cds(workspace: &crate::workspace::Workspace, command: &str) -> Result<()> {
+fn check_shell_cds(workspace: &crate::workspace::Workspace, command: &str) -> Result<()> {
   let cmd = strip_heredoc_bodies(command);
   let cmd = split_shell_separators(&cmd);
   let base = workspace.root();
@@ -115,10 +115,10 @@ fn resolve_cd_target(base: &Path, path: &str) -> Result<PathBuf> {
   Ok(base.join(path))
 }
 
-async fn bash(ctx: ToolContext, args: &str) -> Result<String> {
-  let args: BashArgs = parse_args(args)?;
+async fn shell(ctx: ToolContext, args: &str) -> Result<String> {
+  let args: ShellArgs = parse_args(args)?;
   require_nonempty(&args.command, "command")?;
-  check_bash_cds(&ctx.workspace, &args.command)?;
+  check_shell_cds(&ctx.workspace, &args.command)?;
   let secs = if args.timeout_seconds == 0 {
     120
   } else {
@@ -159,34 +159,34 @@ mod tests {
   }
 
   #[test]
-  fn check_bash_cds_tracks_cwd_after_tmp_cd() {
+  fn check_shell_cds_tracks_cwd_after_tmp_cd() {
     let ws = test_workspace("/tmp/demo");
 
-    let err = check_bash_cds(&ws, "cd /tmp && cd ..").unwrap_err();
+    let err = check_shell_cds(&ws, "cd /tmp && cd ..").unwrap_err();
 
     assert!(err.to_string().contains("cd to .. is not allowed"));
   }
 
   #[test]
-  fn check_bash_cds_allows_relative_tmp_child_after_tmp_cd() {
+  fn check_shell_cds_allows_relative_tmp_child_after_tmp_cd() {
     let ws = test_workspace("/workspace/project");
 
-    assert!(check_bash_cds(&ws, "cd /tmp && cd src").is_ok());
+    assert!(check_shell_cds(&ws, "cd /tmp && cd src").is_ok());
   }
 
   #[test]
-  fn check_bash_cds_tracks_workspace_relative_cd_chain() {
+  fn check_shell_cds_tracks_workspace_relative_cd_chain() {
     let ws = test_workspace("/workspace/project");
 
-    assert!(check_bash_cds(&ws, "cd src && cd ..").is_ok());
-    assert!(check_bash_cds(&ws, "cd src && cd ../..").is_err());
+    assert!(check_shell_cds(&ws, "cd src && cd ..").is_ok());
+    assert!(check_shell_cds(&ws, "cd src && cd ../..").is_err());
   }
 
   #[test]
-  fn check_bash_cds_ignores_heredoc_body_examples() {
+  fn check_shell_cds_ignores_heredoc_body_examples() {
     let ws = test_workspace("/workspace/project");
     let command = "cat <<'EOF'\ncd /tmp && cd ..\nEOF";
 
-    assert!(check_bash_cds(&ws, command).is_ok());
+    assert!(check_shell_cds(&ws, command).is_ok());
   }
 }

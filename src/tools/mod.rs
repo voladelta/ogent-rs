@@ -7,14 +7,17 @@ use std::sync::OnceLock;
 use crate::types::{Tool, ToolFunction};
 
 pub mod fs;
+pub mod lua;
 pub mod repo;
 pub mod shell;
 pub mod skills;
 pub mod web;
 
+#[derive(Clone)]
 pub struct ToolContext {
   pub workspace: crate::workspace::Workspace,
   pub skill_store: std::sync::Arc<crate::skills::SkillStore>,
+  pub lua_session: std::sync::Arc<std::sync::Mutex<Option<mlua::Lua>>>,
 }
 
 pub type AsyncHandler = Box<
@@ -73,6 +76,7 @@ pub fn all_tools() -> &'static [ToolDef] {
   ALL_TOOLS.get_or_init(|| {
     let mut tools = Vec::new();
     tools.extend(fs::tools());
+    tools.extend(lua::tools());
     tools.extend(shell::tools());
     tools.extend(repo::tools());
     tools.extend(web::tools());
@@ -85,7 +89,13 @@ static AGENT_TOOLS: OnceLock<Vec<Tool>> = OnceLock::new();
 
 pub fn configured_agent_tools() -> Vec<Tool> {
   AGENT_TOOLS
-    .get_or_init(|| all_tools().iter().map(|t| t.schema()).collect())
+    .get_or_init(|| {
+      all_tools()
+        .iter()
+        .filter(|t| t.name == "exec" || t.name == "eval")
+        .map(|t| t.schema())
+        .collect()
+    })
     .clone()
 }
 
@@ -110,11 +120,9 @@ mod tests {
   fn configured_agent_tools_includes_expected() {
     let tools = configured_agent_tools();
     let names: Vec<_> = tools.iter().map(|t| t.function.name.as_str()).collect();
-    assert!(names.contains(&"read_file"));
-    assert!(names.contains(&"write_file"));
-    assert!(names.contains(&"read_hash_anchors"));
-    assert!(names.contains(&"code_map"));
-    assert!(names.contains(&"edit_hash_anchors"));
+    assert_eq!(names.len(), 2);
+    assert!(names.contains(&"exec"));
+    assert!(names.contains(&"eval"));
   }
 
   #[tokio::test]
@@ -126,6 +134,7 @@ mod tests {
       ToolContext {
         workspace,
         skill_store,
+        lua_session: std::sync::Arc::new(std::sync::Mutex::new(None)),
       },
       "nonexistent_tool",
       "{}",

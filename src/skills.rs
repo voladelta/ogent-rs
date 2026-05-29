@@ -82,10 +82,16 @@ pub struct SkillStore {
 
 impl SkillStore {
   pub fn new(workspace_root: &Path, startup_skills: Vec<String>) -> Self {
-    let repo_roots = vec![workspace_root.join(".ogent/skills")];
+    let repo_roots = vec![
+      workspace_root.join(".skills"),
+      workspace_root.join(".agents/skills"),
+      workspace_root.join(".ogent/skills"),
+    ];
     let mut home_roots = Vec::new();
     if let Some(home) = std::env::var_os("HOME") {
-      home_roots.push(PathBuf::from(home).join(".ogent/skills"));
+      let home_path = PathBuf::from(home);
+      home_roots.push(home_path.join(".agents/skills"));
+      home_roots.push(home_path.join(".ogent/skills"));
     }
     let all_roots: Vec<PathBuf> = repo_roots
       .iter()

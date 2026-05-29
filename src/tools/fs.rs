@@ -10,8 +10,8 @@ pub fn tools() -> Vec<ToolDef> {
   vec![
     ToolDef {
       name: "read_file",
-      description: "Read a file from the local filesystem. Use start and end as 1-indexed line numbers; omit both for the full file.",
-      parameters: json!({"type":"object","properties":{"path":{"type":"string"},"start":{"type":"integer","description":"1-indexed start line (inclusive)"},"end":{"type":"integer","description":"1-indexed end line (inclusive)"}},"required":["path"],"additionalProperties":false}),
+      description: "Read a file from the local filesystem with optional byte offset and limit.",
+      parameters: json!({"type":"object","properties":{"path":{"type":"string"},"offset":{"type":"integer","description":"0-indexed byte offset (inclusive)"},"limit":{"type":"integer","description":"max bytes to read"}},"required":["path"],"additionalProperties":false}),
       handler: Handler::Sync(read_file),
     },
     ToolDef {
@@ -22,14 +22,34 @@ pub fn tools() -> Vec<ToolDef> {
     },
     ToolDef {
       name: "read_hash_anchors",
-      description: "Read a file with each line prefixed as <line>:<hash>|content, where the 4-char hash is derived from line content. Use before edit_hash_anchors to generate stable anchors.",
-      parameters: json!({"type":"object","properties":{"path":{"type":"string"},"start":{"type":"integer","description":"1-indexed start line (inclusive)"},"end":{"type":"integer","description":"1-indexed end line (inclusive)"}},"required":["path"],"additionalProperties":false}),
+      description: "Read a file with each line prefixed as <line>:<hash>|content, filtered by optional byte offset and limit.",
+      parameters: json!({"type":"object","properties":{"path":{"type":"string"},"offset":{"type":"integer","description":"0-indexed byte offset (inclusive)"},"limit":{"type":"integer","description":"max bytes to read"}},"required":["path"],"additionalProperties":false}),
       handler: Handler::Sync(read_hash_anchors),
     },
     ToolDef {
       name: "edit_hash_anchors",
-      description: "Edit a file using hashline anchors from read_hash_anchors. Anchors must be <line>:<4-char-hash> (e.g., \"15:af63\"); use end_anchor for multi-line ranges. new_string replaces the entire anchored line(s).",
-      parameters: json!({"type":"object","properties":{"path":{"type":"string"},"ops":{"type":"array","items":{"type":"object","properties":{"anchor":{"type":"string","description":"Anchor in <line-number>:<4-char-hash> format (e.g., 15:af63)"},"end_anchor":{"type":"string","description":"Optional end anchor in <line-number>:<4-char-hash> format for range replacement"},"action":{"type":"string","enum":["replace","insert_before","insert_after"]},"new_string":{"type":"string"}},"required":["anchor","action","new_string"]}}},"required":["path","ops"],"additionalProperties":false}),
+      description: "Edit a file using hashline anchors from read_hash_anchors. Anchors must be <line>:<4-char-hash> (e.g., \"15:af63\"); use end_at for multi-line ranges.",
+      parameters: json!({
+        "type": "object",
+        "properties": {
+          "path": {"type": "string"},
+          "ops": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "start_at": {"type": "string", "description": "Anchor in <line-number>:<4-char-hash> format (e.g., 15:af63)"},
+                "end_at": {"type": "string", "description": "Optional end anchor in <line-number>:<4-char-hash> format for range replacement"},
+                "action": {"type": "string", "enum": ["replace", "delete", "insert_before", "insert_after"]},
+                "content": {"type": "string", "description": "new content to insert/replace"}
+              },
+              "required": ["start_at", "action"]
+            }
+          }
+        },
+        "required": ["path", "ops"],
+        "additionalProperties": false
+      }),
       handler: Handler::Sync(edit_hash_anchors),
     },
   ]
@@ -38,8 +58,15 @@ pub fn tools() -> Vec<ToolDef> {
 #[derive(Deserialize)]
 pub struct ReadFileArgs {
   pub path: String,
-  pub start: Option<usize>,
-  pub end: Option<usize>,
+  pub offset: Option<usize>,
+  pub limit: Option<usize>,
+}
+
+#[derive(Deserialize)]
+pub struct ReadHashAnchorsArgs {
+  pub path: String,
+  pub offset: Option<usize>,
+  pub limit: Option<usize>,
 }
 
 fn read_file(ctx: ToolContext, args: &str) -> Result<String> {
@@ -55,25 +82,11 @@ fn read_file(ctx: ToolContext, args: &str) -> Result<String> {
       1 << 20
     );
   }
-  let content = fs::read_to_string(&path).with_context(|| format!("read {}", args.path))?;
-  if args.start.is_none() && args.end.is_none() {
-    return Ok(content);
-  }
-  let lines: Vec<&str> = content.split('\n').collect();
-  if args.start == Some(0) {
-    bail!("start line must be >= 1 (lines are 1-indexed)");
-  }
-  if args.end == Some(0) {
-    bail!("end line must be >= 1 (lines are 1-indexed)");
-  }
-  let start = args.start.unwrap_or(1);
-  let end = args.end.unwrap_or(lines.len());
-  let slice_start = (start - 1).min(lines.len());
-  let slice_end = end.min(lines.len());
-  if slice_start > slice_end {
-    bail!("start line {start} exceeds end line {end}");
-  }
-  Ok(lines[slice_start..slice_end].join("\n"))
+  let bytes = fs::read(&path).with_context(|| format!("read {}", args.path))?;
+  let offset = args.offset.unwrap_or(0).min(bytes.len());
+  let limit = args.limit.unwrap_or(bytes.len()).min(bytes.len() - offset);
+  let slice = &bytes[offset..(offset + limit)];
+  Ok(String::from_utf8_lossy(slice).into_owned())
 }
 
 #[derive(Deserialize)]
@@ -106,14 +119,33 @@ fn write_file(ctx: ToolContext, args: &str) -> Result<String> {
 }
 
 fn read_hash_anchors(ctx: ToolContext, args: &str) -> Result<String> {
-  let args: ReadFileArgs = parse_args(args)?;
+  let args: ReadHashAnchorsArgs = parse_args(args)?;
   require_nonempty(&args.path, "path")?;
-  if args.start == Some(0) || args.end == Some(0) {
-    bail!("start and end line numbers must be >= 1 (1-indexed)");
-  }
   let path = ctx.workspace.workspace_path(&args.path)?;
-  let source = fs::read_to_string(&path).with_context(|| format!("read {}", args.path))?;
-  Ok(render_hashlines(&source, args.start, args.end))
+  let bytes = fs::read(&path).with_context(|| format!("read {}", args.path))?;
+  let source = String::from_utf8_lossy(&bytes);
+
+  let offset = args.offset.unwrap_or(0).min(bytes.len());
+  let limit = args.limit.unwrap_or(bytes.len()).min(bytes.len() - offset);
+  let end_byte = offset + limit;
+
+  let mut start_line = None;
+  let mut end_line = None;
+  let mut current_byte_idx = 0;
+  for (i, line) in source.split('\n').enumerate() {
+    let line_len = line.len() + 1; // +1 for the \n
+    let next_byte_idx = current_byte_idx + line_len;
+
+    if current_byte_idx < end_byte && next_byte_idx > offset {
+      if start_line.is_none() {
+        start_line = Some(i + 1);
+      }
+      end_line = Some(i + 1);
+    }
+    current_byte_idx = next_byte_idx;
+  }
+
+  Ok(render_hashlines(&source, start_line, end_line))
 }
 
 #[derive(Deserialize)]
