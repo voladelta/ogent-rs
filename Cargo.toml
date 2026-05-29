@@ -7,6 +7,7 @@ edition = "2024"
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 futures-util = "0.3"
+ignore = "0.4.25"
 mimalloc = "0.1"
 mlua = { version = "0.11", features = ["lua55", "vendored", "async", "serde", "anyhow", "send"] }
 reqwest = { version = "0.13", features = ["json", "stream"] }
@@ -19,6 +20,7 @@ tokio-util = "0.7"
 
 [dev-dependencies]
 criterion = "0.5"
+tempfile = "3.27.0"
 
 [[bench]]
 name = "hashline_bench"

@@ -98,7 +98,7 @@ Applies a batch array of range-based edits (replacements, insertions, deletions)
 ### 2. Workspace Exploration & Shell
 
 #### `repo_map{path=..., levels=...}` or `repo_map()`
-Displays the repository directory structure tree. Respects `.gitignore`.
+Displays the repository directory structure tree. Automatically respects `.gitignore` rules and ignores hidden files/directories (starting with `.`).
 - **Parameters** (table, optional):
   - `path` (string, optional): Directory relative to the workspace. Defaults to `"."`.
   - `levels` (integer, optional): Max depth. Defaults to `3`.
