@@ -33,7 +33,7 @@ All functions return `(result, nil)` on success or `(nil, error_string)` on fail
 #### `read_file(path, offset, limit)`
 Reads a file's contents from the workspace.
 - **Parameters** (positional):
-  - `path` (string): Relative path to the file.
+  - `path` (string): Relative path to the file. (Max file size limit is 1MB / 1,048,576 bytes; attempting to read larger files returns an error).
   - `offset` (integer, optional): 0-indexed byte offset. Defaults to `0`.
   - `limit` (integer, optional): Max bytes to read. Defaults to the remaining file size.
 - **Returns**: `(content_string, nil)` or `(nil, error)`
@@ -45,9 +45,9 @@ Reads a file's contents from the workspace.
   ```
 
 #### `write_file{path=..., content=..., overwrite_existing=...}`
-Writes content to a file. Creates parent directories if they do not exist.
+Writes content to a file.
 - **Parameters** (table):
-  - `path` (string): Relative path to write.
+  - `path` (string): Relative path to write. Automatically creates any missing parent directories.
   - `content` (string): Complete file content.
   - `overwrite_existing` (boolean, optional): If `true`, overwrites existing files. If `false` or omitted, fails if the file already exists.
 - **Returns**: `(success_msg, nil)` or `(nil, error)`
@@ -59,7 +59,7 @@ Writes content to a file. Creates parent directories if they do not exist.
 
 #### `read_hash_anchors(path, offset, limit)`
 Reads a file with each line prefixed by its 1-indexed line number and 4-character FNV-1a hash (e.g. `15:af63|line content`). Use this to obtain anchors before editing.
-- **Parameters** (positional): Same as `read_file`.
+- **Parameters** (positional): Same as `read_file` (under the same 1MB size limit constraint).
 - **Returns**: `(anchors_string, nil)` or `(nil, error)`
 - **Side Effect**: Saves the file path in a global session variable so subsequent `apply_anchor_edits` calls do not require repeating the path.
 - **Example**:
@@ -116,9 +116,9 @@ Executes a command inside the workspace root.
   - `command` (string): Shell command to execute (e.g. `"cargo test"`, `"git diff"`).
   - `timeout_seconds` (integer, optional): Bounded timeout (1-600 seconds). Defaults to `120`.
 - **Returns**: `(stdout_stderr_combined, nil)` or `(nil, error)`
-- **Rules**:
+- **Rules & Guidelines**:
   - `cd` commands must target paths inside the workspace root or `/tmp`.
-  - Direct filesystem modification utilities (like `cp`, `mv`, `rm`) are not allowed; use Lua `write_file` or `apply_anchor_edits` instead.
+  - **Recommendation**: Prefer using `write_file` or `apply_anchor_edits` over running shell-based filesystem modification commands (such as `cp`, `mv`, `rm`).
 - **Example**:
   ```lua
   local output, err = shell{command = "cargo test"}
