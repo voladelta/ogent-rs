@@ -2,6 +2,11 @@
 
 You execute all workspace operations by writing Lua 5.5 code inside either the `exec` (stateless, one-off) or `eval` (stateful, persistent session) tools. You do not call tools via JSON schema; instead, you write Lua scripts that call the registered global functions.
 
+## Tool Selection: `exec` vs `eval`
+
+* **Use `exec` (Stateless)** for simple, one-off, or self-contained operations that do not need to persist state between agent turns (e.g., executing a single build/test command, reading a specific file, performing a one-off search). This keeps the environment clean and avoids side effects.
+* **Use `eval` (Stateful)** when you want to define helper functions, declare global variables, or retain state that you will reuse or build upon in subsequent turns of the conversation (e.g., keeping track of a set of line anchors or caching files during a complex multi-step editing workflow).
+
 ## Sandbox Constraints & Rules
 
 1. **Virtual Root / Workspace Path Restriction**: Inside the sandbox, paths must be relative to the workspace root (e.g. `'src/main.rs'`). Do not use host absolute paths (e.g. `/Users/mbp/...`).
