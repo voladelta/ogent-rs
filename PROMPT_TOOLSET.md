@@ -143,8 +143,8 @@ Loads a skill's prompt template.
 #### `load_skill_asset(root, path)`
 Securely reads an asset file inside a skill's directory (e.g. reference manual).
 - **Parameters** (positional):
-  - `root` (string): Skill directory root (obtained via `list_skills`).
-  - `path` (string): Relative path inside the skill.
+  - `root` (string): Absolute or workspace-relative root directory of the skill (matching the **Root** path returned by `list_skills()`).
+  - `path` (string): Relative path of the asset file inside the skill root directory.
 - **Returns**: `(asset_content, nil)` or `(nil, error)`
 
 ---
