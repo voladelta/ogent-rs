@@ -88,10 +88,10 @@ colgrep -n 10 "<query>"                           # Show 10 context lines (defau
 
 ## Key Rules
 
-2. **Increase `--results`** (or `-k`) when exploring (20-30 results)
-3. **Use `-e`** for hybrid text+semantic filtering
-4. **Use `-E`** with `-e` for extended regex (alternation `|`, quantifiers `+?`, grouping `()`)
-5. **Use `-F`** with `-e` when pattern contains regex special characters you want literal
-6. **Use `-w`** with `-e` to avoid partial matches (e.g., "test" won't match "testing")
-7. **Use `--exclude`/`--exclude-dir`** to filter out noise (tests, vendors, generated code)
-8. **Use brace expansion** for multiple file types (e.g., `--include="*.{rs,md,py}"`)
+1. **Increase `--results`** (or `-k`) when exploring (20-30 results)
+2. **Use `-e`** for hybrid text+semantic filtering
+3. **Use `-E`** with `-e` for extended regex (alternation `|`, quantifiers `+?`, grouping `()`)
+4. **Use `-F`** with `-e` when pattern contains regex special characters you want literal
+5. **Use `-w`** with `-e` to avoid partial matches (e.g., "test" won't match "testing")
+6. **Use `--exclude`/`--exclude-dir`** to filter out noise (tests, vendors, generated code)
+7. **Use brace expansion** for multiple file types (e.g., `--include="*.{rs,md,py}"`)
