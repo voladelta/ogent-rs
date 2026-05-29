@@ -2,6 +2,12 @@
 
 Use `colgrep` as your PRIMARY search command instead of `grep`.
 
+> [!IMPORTANT]
+> `colgrep` is a CLI tool, not a built-in Lua function. You must execute it using the `shell` function inside the `exec` or `eval` tool.
+>
+> - **Correct**: `shell{command = "colgrep 'auth flow' -k 10"}`
+> - **Incorrect**: `colgrep("auth flow")`
+
 ## Quick Reference
 
 ```bash
