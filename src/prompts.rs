@@ -1,44 +1,24 @@
 use crate::types::{Message, MessageOrigin};
 
-pub const SYSTEM_PROMPT: &str = include_str!("../SYSTEM_PROMPT.md");
+pub const PROMPT_SYSTEM: &str = include_str!("../PROMPT_SYSTEM.md");
+pub const PROMPT_TOOLSET: &str = include_str!("../PROMPT_TOOLSET.md");
+pub const PROMPT_COLGREP: &str = include_str!("../PROMPT_COLGREP.md");
 
 pub(crate) fn build_initial_messages(
   task_prompt: &str,
-  discovered_skills: &[crate::skills::SkillInfo],
-  loaded_skills: &[crate::skills::Skill],
+  _discovered_skills: &[crate::skills::SkillInfo],
+  _loaded_skills: &[crate::skills::Skill],
 ) -> Vec<Message> {
-  let mut messages = vec![Message::system(SYSTEM_PROMPT.trim().to_string())];
-  enrich_initial_messages(&mut messages, discovered_skills, loaded_skills);
+  let mut messages = vec![
+    Message::system(PROMPT_SYSTEM.trim().to_string()),
+    Message::user(PROMPT_TOOLSET.trim().to_string(), MessageOrigin::Internal),
+    Message::user(PROMPT_COLGREP.trim().to_string(), MessageOrigin::Internal),
+  ];
   messages.push(Message::user(task_prompt.trim(), MessageOrigin::Human));
   messages
 }
 
-pub fn format_discover_skills(skills: &[crate::skills::SkillInfo]) -> String {
-  if skills.is_empty() {
-    return String::new();
-  }
-  let mut out = String::from("<skills>\n");
-  for skill in skills {
-    out.push_str("  <skill name=\"");
-    out.push_str(&crate::util::xml_escape(&skill.name));
-    out.push_str("\" description=\"");
-    out.push_str(&crate::util::xml_escape(&skill.description));
-    out.push_str("\" />\n");
-  }
-  out.push_str("</skills>");
-  out
-}
-
-pub fn enrich_initial_messages(
-  messages: &mut Vec<Message>,
-  discovered_skills: &[crate::skills::SkillInfo],
-  loaded_skills: &[crate::skills::Skill],
-) {
-  push_internal_user_message(messages, format_discover_skills(discovered_skills));
-  for skill in loaded_skills {
-    push_internal_user_message(messages, crate::skills::format_loaded_skill(skill));
-  }
-}
+// Skill formatting functions removed as they are no longer used
 
 fn push_internal_user_message(messages: &mut Vec<Message>, content: String) {
   if content.is_empty() {
@@ -49,7 +29,11 @@ fn push_internal_user_message(messages: &mut Vec<Message>, content: String) {
 
 #[cfg(test)]
 pub fn build_messages(prompt: &str) -> Vec<Message> {
-  let mut messages = vec![Message::system(SYSTEM_PROMPT.to_string())];
+  let mut messages = vec![
+    Message::system(PROMPT_SYSTEM.to_string()),
+    Message::user(PROMPT_TOOLSET.trim().to_string(), MessageOrigin::Internal),
+    Message::user(PROMPT_COLGREP.trim().to_string(), MessageOrigin::Internal),
+  ];
   if !prompt.is_empty() {
     messages.push(Message::user(prompt.to_string(), MessageOrigin::Human));
   }
@@ -63,7 +47,7 @@ mod tests {
 
   #[test]
   fn test_compose_system_prompt() {
-    let sys = SYSTEM_PROMPT;
+    let sys = PROMPT_SYSTEM;
     assert!(sys.contains("Core Contract"));
   }
 
@@ -81,13 +65,13 @@ mod tests {
 
     push_internal_user_message(&mut messages, "internal context".into());
 
-    assert_eq!(messages.len(), 3);
-    assert_eq!(messages[1].role, Role::User);
-    assert_eq!(messages[1].origin, MessageOrigin::Human);
-    assert_eq!(messages[1].content, "do the task");
-    assert_eq!(messages[2].role, Role::User);
-    assert_eq!(messages[2].origin, MessageOrigin::Internal);
-    assert_eq!(messages[2].content, "internal context");
+    assert_eq!(messages.len(), 5);
+    assert_eq!(messages[3].role, Role::User);
+    assert_eq!(messages[3].origin, MessageOrigin::Human);
+    assert_eq!(messages[3].content, "do the task");
+    assert_eq!(messages[4].role, Role::User);
+    assert_eq!(messages[4].origin, MessageOrigin::Internal);
+    assert_eq!(messages[4].content, "internal context");
   }
 
   #[test]
@@ -97,11 +81,11 @@ mod tests {
     push_internal_user_message(&mut messages, "first".into());
     push_internal_user_message(&mut messages, "second".into());
 
-    assert_eq!(messages.len(), 4);
-    assert_eq!(messages[2].content, "first");
-    assert_eq!(messages[2].origin, MessageOrigin::Internal);
-    assert_eq!(messages[3].content, "second");
-    assert_eq!(messages[3].origin, MessageOrigin::Internal);
+    assert_eq!(messages.len(), 6);
+    assert_eq!(messages[4].content, "first");
+    assert_eq!(messages[4].origin, MessageOrigin::Internal);
+    assert_eq!(messages[5].content, "second");
+    assert_eq!(messages[5].origin, MessageOrigin::Internal);
   }
 
   #[test]
@@ -110,6 +94,6 @@ mod tests {
 
     push_internal_user_message(&mut messages, String::new());
 
-    assert_eq!(messages.len(), 2);
+    assert_eq!(messages.len(), 4);
   }
 }

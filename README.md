@@ -39,7 +39,7 @@ ogent --profile kimi "Review the staged diff"
 ## Agent Runtime & Key Behavior
 
 - **Agent Process**: Each invocation runs one standalone CLI agent process.
-- **System Prompt**: It relies on [SYSTEM_PROMPT.md](SYSTEM_PROMPT.md) for its prompt loop, state, and result formatting guidelines.
+- **System Prompt**: It relies on [PROMPT_SYSTEM.md](PROMPT_SYSTEM.md) for its prompt loop, state, and result formatting guidelines.
 - **Session Persistence**: CLI runs persist conversation transcripts to `.ogent/sessions/{session_id}.jsonl` on exit.
 - **Run Completion**: A run terminates when the agent returns a final message without calling any more tools.
 
