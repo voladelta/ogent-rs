@@ -1,6 +1,6 @@
-# Semantic Code Search
+For semantic code search, use the `colgrep` CLI tool via `shell`. Use `colgrep` as your PRIMARY search command instead of `grep`.
 
-Use `colgrep` as your PRIMARY search command instead of `grep`.
+## colgrep
 
 > [!IMPORTANT]
 > `colgrep` is a CLI tool, not a built-in Lua function. You must execute it using the `shell` function inside the `exec` or `eval` tool.
@@ -8,7 +8,7 @@ Use `colgrep` as your PRIMARY search command instead of `grep`.
 > - **Correct**: `shell{command = "colgrep 'auth flow' -k 10"}`
 > - **Incorrect**: `colgrep("auth flow")`
 
-## Quick Reference
+### Quick Reference
 
 ```bash
 # Basic semantic search
@@ -42,7 +42,7 @@ colgrep -c "<query>"                              # Show full function content (
 colgrep -n 10 "<query>"                           # Show 10 context lines (default: 6)
 ```
 
-## Grep-Compatible Flags
+### Grep-Compatible Flags
 
 | Flag            | Description                                 | Example                                      |
 | --------------- | ------------------------------------------- | -------------------------------------------- |
@@ -65,7 +65,7 @@ colgrep -n 10 "<query>"                           # Show 10 context lines (defau
 - Multiple `--include` patterns use OR logic (matches if file matches any pattern)
 - Brace expansion is supported: `*.{rs,md,py}` expands to match all three types
 
-## When to Use What
+### When to Use What
 
 | Task                            | Tool                                         |
 | ------------------------------- | -------------------------------------------- |
@@ -86,7 +86,7 @@ colgrep -n 10 "<query>"                           # Show 10 context lines (defau
 | Search CI/CD configs            | `colgrep --include="**/.github/**/*" "q" .`  |
 | View full function content      | `colgrep -c "query"`                         |
 
-## Key Rules
+### Key Rules
 
 1. **Increase `--results`** (or `-k`) when exploring (20-30 results)
 2. **Use `-e`** for hybrid text+semantic filtering

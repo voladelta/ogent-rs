@@ -31,6 +31,16 @@ profiles:
     model: glm-5.1
     effort: ""
     context_limit: 200000
+  mimo:
+    backend: xaomi
+    model: mimo-v2.5
+    effort: ""
+    context_limit: 1000000
+  mimo-pro:
+    backend: xaomi
+    model: mimo-v2.5-pro
+    effort: ""
+    context_limit: 1000000
 
 providers:
   deepseek:
@@ -42,3 +52,6 @@ providers:
   z:
     base_url: https://api.z.ai/api/coding/paas/v4/chat/completions
     key_env: Z_API_KEY
+  xaomi:
+    base_url: https://token-plan-sgp.xiaomimimo.com/v1/chat/completions
+    key_env: XAOMI_API_KEY

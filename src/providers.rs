@@ -54,6 +54,16 @@ struct ZRequest<'a> {
 }
 
 #[derive(Serialize)]
+struct Xaomi<'a> {
+  model: &'a str,
+  messages: Vec<ProviderMessage<'a>>,
+  #[serde(skip_serializing_if = "<[Tool]>::is_empty")]
+  tools: &'a [Tool],
+  stream: bool,
+  max_tokens: i32,
+}
+
+#[derive(Serialize)]
 struct ZThinking {
   #[serde(rename = "type")]
   kind: &'static str,
@@ -128,6 +138,24 @@ pub fn new_client(profile: &Profile, provider: &ProviderConfig) -> Result<Client
               kind: "enabled",
               clear_thinking: false,
             },
+          })
+        },
+        600,
+      )?)
+    }
+    "xaomi" => {
+      let model = profile.model.clone();
+      Ok(Client::new(
+        url,
+        api_key,
+        move |messages, tools| {
+          let provider_messages: Vec<_> = messages.iter().map(ProviderMessage::from).collect();
+          serde_json::to_value(Xaomi {
+            model: &model,
+            messages: provider_messages,
+            tools,
+            stream: true,
+            max_tokens: 131_072,
           })
         },
         600,
