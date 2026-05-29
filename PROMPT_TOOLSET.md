@@ -118,7 +118,9 @@ Executes a command inside the workspace root.
 - **Returns**: `(stdout_stderr_combined, nil)` or `(nil, error)`
 - **Rules & Guidelines**:
   - `cd` commands must target paths inside the workspace root or `/tmp`.
-  - **Recommendation**: Prefer using `write_file` or `apply_anchor_edits` over running shell-based filesystem modification commands (such as `cp`, `mv`, `rm`).
+  - **Guidelines**:
+    - For copying, moving/renaming, or deleting files/directories, run standard shell commands (such as `cp`, `mv`, `rm`) within the workspace.
+    - For creating new files or editing existing files, prefer the built-in `write_file` and `apply_anchor_edits` functions over shell command redirects (e.g. `echo ... > file`) or shell-based text editors.
 - **Example**:
   ```lua
   local output, err = shell{command = "cargo test"}
