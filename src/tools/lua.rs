@@ -114,19 +114,14 @@ async fn spawn_subagent(
   );
   subagent.set_output_sink(ctx.output_sink.clone());
 
-  let run_res = subagent.run_loop().await;
-  match run_res {
-    Ok(_) => {
-      let last_msg = subagent
-        .messages
-        .iter()
-        .rfind(|m| m.role == crate::types::Role::Assistant);
-      Ok(last_msg.map(|m| m.content.clone()).unwrap_or_default())
-    }
-    Err(e) => Err(mlua::Error::RuntimeError(format!(
-      "subagent run loop failed: {e}"
-    ))),
-  }
+  subagent.run_loop().await.map_err(|e| {
+    mlua::Error::RuntimeError(format!("subagent run loop failed: {e}"))
+  })?;
+  let last_msg = subagent
+    .messages
+    .iter()
+    .rfind(|m| m.role == crate::types::Role::Assistant);
+  Ok(last_msg.map(|m| m.content.clone()).unwrap_or_default())
 }
 
 fn register_tools_in_lua(lua: &Lua, ctx: ToolContext) -> Result<()> {
@@ -650,7 +645,6 @@ mod tests {
     .unwrap();
     assert!(list_res.contains("my_test_skill"));
     assert!(list_res.contains("A test skill for Lua"));
-    assert!(list_res.contains("my_test_skill"));
 
     // Test load_skill("my_test_skill")
     let load_res = exec_tool(ctx.clone(), r#"{"code": "local res, err = load_skill('my_test_skill'); if not res then error(err) end; return res"}"#).await.unwrap();
