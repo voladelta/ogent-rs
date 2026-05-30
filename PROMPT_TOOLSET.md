@@ -46,7 +46,7 @@ Returns metadata for a file without reading its contents.
   local info, err = file_info("src/main.rs")
   if not info then error(err) end
   print(info.size_bytes, info.line_count)
-  -- If size_bytes > 1048576, read_file will refuse it; use read_hash_anchors with offset/limit instead
+  -- If size_bytes > 1048576, read_file and read_hash_anchors will refuse it; page through with offset/limit instead
   ```
 
 #### `read_file(path, offset, limit)`

@@ -73,6 +73,15 @@ pub fn read_hash_anchors(ctx: ToolContext, args: &str) -> Result<String> {
   let args: ReadHashAnchorsArgs = parse_args(args)?;
   require_nonempty(&args.path, "path")?;
   let path = ctx.workspace.workspace_path(&args.path)?;
+  let meta = fs::metadata(&path).with_context(|| format!("stat {}", args.path))?;
+  if meta.len() > (1 << 20) {
+    bail!(
+      "file {} exceeds size limit ({} > {} bytes)",
+      args.path,
+      meta.len(),
+      1 << 20
+    );
+  }
   let bytes = fs::read(&path).with_context(|| format!("read {}", args.path))?;
   let source = String::from_utf8_lossy(&bytes);
 

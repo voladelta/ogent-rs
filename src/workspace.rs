@@ -1,26 +1,37 @@
 use anyhow::{Result, bail};
+use std::fs;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone)]
 pub struct Workspace {
   root: PathBuf,
+  canonical_root: PathBuf,
   allowed_roots: Vec<PathBuf>,
+  canonical_allowed_roots: Vec<PathBuf>,
 }
 
 impl Workspace {
   pub fn from_current_dir() -> Self {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let root = normalize(&cwd);
+    let canonical_root = canonicalize_for_check(&root);
     Self {
-      root: normalize(&cwd),
+      root,
+      canonical_root,
       allowed_roots: Vec::new(),
+      canonical_allowed_roots: Vec::new(),
     }
   }
 
   #[cfg(test)]
   pub fn from_root(root: PathBuf) -> Self {
+    let root = normalize(&root);
+    let canonical_root = canonicalize_for_check(&root);
     Self {
-      root: normalize(&root),
+      root,
+      canonical_root,
       allowed_roots: Vec::new(),
+      canonical_allowed_roots: Vec::new(),
     }
   }
 
@@ -29,7 +40,10 @@ impl Workspace {
   }
 
   pub fn add_allowed_root(&mut self, path: PathBuf) {
-    self.allowed_roots.push(normalize(&path));
+    let normalized = normalize(&path);
+    let canonical = canonicalize_for_check(&normalized);
+    self.allowed_roots.push(normalized);
+    self.canonical_allowed_roots.push(canonical);
   }
 
   pub fn workspace_path(&self, path: &str) -> Result<PathBuf> {
@@ -45,12 +59,13 @@ impl Workspace {
       bail!("path is required");
     }
     let abs = self.resolve_absolute_path(path);
-    if self.path_in_workspace(&abs) {
+    let check = canonicalize_for_check(&abs);
+    if self.path_in_workspace(&check) {
       return Ok(abs);
     }
     if allow_extra_roots {
-      for root in &self.allowed_roots {
-        if abs == *root || abs.starts_with(root) {
+      for root in &self.canonical_allowed_roots {
+        if check == *root || check.starts_with(root) {
           return Ok(abs);
         }
       }
@@ -73,9 +88,23 @@ impl Workspace {
   }
 
   fn path_in_workspace(&self, path: &Path) -> bool {
-    let path = normalize(path);
-    path == self.root || path.starts_with(&self.root)
+    path == self.canonical_root || path.starts_with(&self.canonical_root)
   }
+}
+
+fn canonicalize_for_check(path: &Path) -> PathBuf {
+  if let Ok(c) = fs::canonicalize(path) {
+    return c;
+  }
+  let mut current = path;
+  while let Some(parent) = current.parent() {
+    if let Ok(canonical_parent) = fs::canonicalize(parent) {
+      let suffix = path.strip_prefix(parent).unwrap();
+      return canonical_parent.join(suffix);
+    }
+    current = parent;
+  }
+  normalize(path)
 }
 
 pub fn normalize(path: &Path) -> PathBuf {
@@ -172,5 +201,46 @@ mod tests {
     let p = Path::new("../a/b");
     let n = normalize(p);
     assert_eq!(n, Path::new("a/b"));
+  }
+
+  #[test]
+  #[cfg(unix)]
+  fn readable_path_rejects_symlink_escape() {
+    use std::os::unix::fs::symlink;
+
+    let tmp = std::env::temp_dir().join(format!("ogent-test-symlink-read-{}", std::process::id()));
+    fs::create_dir_all(&tmp).unwrap();
+    let ws = Workspace::from_root(tmp.clone());
+
+    // Create a symlink inside the workspace that points outside
+    let outside = tmp.parent().unwrap().parent().unwrap();
+    let evil_link = tmp.join("evil_link");
+    symlink(outside, &evil_link).unwrap();
+
+    // Attempting to read through the symlink should be rejected
+    let result = ws.readable_path("evil_link/passwd");
+    assert!(result.is_err(), "symlink traversal should be rejected");
+
+    // Cleanup
+    let _ = fs::remove_dir_all(&tmp);
+  }
+
+  #[test]
+  #[cfg(unix)]
+  fn workspace_path_rejects_symlink_escape() {
+    use std::os::unix::fs::symlink;
+
+    let tmp = std::env::temp_dir().join(format!("ogent-test-symlink-write-{}", std::process::id()));
+    fs::create_dir_all(&tmp).unwrap();
+    let ws = Workspace::from_root(tmp.clone());
+
+    let outside = tmp.parent().unwrap().parent().unwrap();
+    let evil_link = tmp.join("evil_link");
+    symlink(outside, &evil_link).unwrap();
+
+    let result = ws.workspace_path("evil_link/passwd");
+    assert!(result.is_err(), "symlink traversal should be rejected");
+
+    let _ = fs::remove_dir_all(&tmp);
   }
 }

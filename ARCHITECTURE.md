@@ -209,6 +209,12 @@ Used for reading skills and loading role prompt files.
 Path normalization (`.` and `..` resolution) happens at the boundary inside `normalize()`,
 before any comparison. This blocks `../../../etc/passwd`-style traversal.
 
+**Security note on symlinks:** Before checking the boundary, the path is canonicalized by
+walking up to the deepest existing ancestor, resolving symlinks via `fs::canonicalize`, and
+reconstructing the full real path. This prevents a symlink inside the workspace from
+pointing outside it (e.g. `workspace/evil_link -> /etc`) and being followed to escape the
+sandbox.
+
 **Architecture Invariant:** `workspace_path` and `readable_path` are the only two path
 resolution entry points. No tool resolves paths independently. If you add a new tool that
 touches the filesystem, it must go through one of these two functions.
@@ -319,8 +325,11 @@ insert a newline, preventing two actors from interleaving on the same line.
 ### Path Security
 
 Two resolution modes exist:
-- **Write mode** (`workspace_path`): only `workspace.root` is accepted.
-- **Read mode** (`readable_path`): `workspace.root` plus `allowed_roots` are accepted.
+- **Write mode** (`workspace_path`): only paths under `workspace.root` are accepted.
+- **Read mode** (`readable_path`): paths under `workspace.root` plus `allowed_roots` are accepted.
+
+Paths are canonicalized (symlinks resolved to real paths) before the boundary check, so a
+symlink pointing outside the workspace is rejected even if its lexical path appears inside.
 
 `allowed_roots` is built at startup: `~/.ogent` (global config) and each skill root directory
 are added. No runtime code can add new allowed roots.
