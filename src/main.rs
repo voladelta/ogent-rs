@@ -25,6 +25,8 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 struct Args {
   #[arg(long)]
   profile: Option<String>,
+  #[arg(short, long)]
+  verbose: bool,
   prompt: Vec<String>,
 }
 
@@ -59,6 +61,7 @@ async fn main() -> Result<()> {
     client,
     config.startup_skills,
     &args.prompt.join(" "),
+    args.verbose,
   )
   .await
 }
@@ -68,6 +71,7 @@ async fn run_agent_cli(
   client: crate::client::Client,
   startup_skills: Vec<String>,
   task: &str,
+  verbose: bool,
 ) -> Result<()> {
   let skill_store = std::sync::Arc::new(skills::SkillStore::new(workspace.root(), startup_skills));
   for root in skill_store.skill_roots() {
@@ -90,6 +94,8 @@ async fn run_agent_cli(
     tools::configured_agent_tools(),
     session::generate_session_id(),
     skill_store,
+    "director".to_string(),
+    verbose,
   );
   agent.set_output_sink(Some(agent::cli_output_sink()));
   let loop_result = agent.run_loop().await;

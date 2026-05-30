@@ -77,23 +77,52 @@ mod tests {
 
     let workspace = Workspace::from_root(root.to_path_buf());
     let skill_store = Arc::new(SkillStore::new(workspace.root(), Vec::new()));
+    let client = crate::client::Client::new(
+      "http://localhost",
+      "dummy".into(),
+      |_, _| Ok(serde_json::Value::Null),
+      30,
+    )
+    .unwrap();
     let ctx = ToolContext {
       workspace,
       skill_store,
       lua_session: Arc::new(std::sync::Mutex::new(None)),
+      client,
+      output_sink: None,
+      verbose: false,
+      actor_id: "director".to_string(),
     };
 
     let args = r#"{"path":"","levels":3}"#;
     let res = repo_map(ctx, args)?;
 
-    assert!(!res.contains("ignored_dir"), "should not contain ignored_dir: \n{}", res);
-    assert!(!res.contains("test.tmp"), "should not contain test.tmp: \n{}", res);
-    assert!(res.contains("allowed_dir"), "should contain allowed_dir: \n{}", res);
-    assert!(res.contains("file.txt"), "should contain file.txt: \n{}", res);
-    assert!(res.contains("test.txt"), "should contain test.txt: \n{}", res);
+    assert!(
+      !res.contains("ignored_dir"),
+      "should not contain ignored_dir: \n{}",
+      res
+    );
+    assert!(
+      !res.contains("test.tmp"),
+      "should not contain test.tmp: \n{}",
+      res
+    );
+    assert!(
+      res.contains("allowed_dir"),
+      "should contain allowed_dir: \n{}",
+      res
+    );
+    assert!(
+      res.contains("file.txt"),
+      "should contain file.txt: \n{}",
+      res
+    );
+    assert!(
+      res.contains("test.txt"),
+      "should contain test.txt: \n{}",
+      res
+    );
 
     Ok(())
   }
 }
-
-

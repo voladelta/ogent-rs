@@ -18,6 +18,10 @@ pub struct ToolContext {
   pub workspace: crate::workspace::Workspace,
   pub skill_store: std::sync::Arc<crate::skills::SkillStore>,
   pub lua_session: std::sync::Arc<std::sync::Mutex<Option<mlua::Lua>>>,
+  pub client: crate::client::Client,
+  pub output_sink: Option<std::sync::Arc<dyn crate::agent::AgentOutputSink>>,
+  pub verbose: bool,
+  pub actor_id: String,
 }
 
 pub type AsyncHandler = Box<
@@ -130,11 +134,22 @@ mod tests {
     let workspace = crate::workspace::Workspace::from_current_dir();
     let skill_store =
       std::sync::Arc::new(crate::skills::SkillStore::new(workspace.root(), Vec::new()));
+    let client = crate::client::Client::new(
+      "http://localhost",
+      "dummy".into(),
+      |_, _| Ok(serde_json::Value::Null),
+      30,
+    )
+    .unwrap();
     let result = execute_tool(
       ToolContext {
         workspace,
         skill_store,
         lua_session: std::sync::Arc::new(std::sync::Mutex::new(None)),
+        client,
+        output_sink: None,
+        verbose: false,
+        actor_id: "director".to_string(),
       },
       "nonexistent_tool",
       "{}",

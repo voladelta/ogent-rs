@@ -73,11 +73,159 @@ fn register_tools_in_lua(lua: &Lua, ctx: ToolContext) -> Result<()> {
   let globals = lua.globals();
   let handle = tokio::runtime::Handle::current();
 
+  // Register task_update with: task_update(status, summary)
+  let ctx_clone = ctx.clone();
+  let task_update_fn = lua.create_function(move |_lua, args: mlua::MultiValue| {
+    let status: String = match args.front() {
+      Some(Value::String(s)) => s.to_str()?.to_string(),
+      _ => {
+        return Err(mlua::Error::RuntimeError(
+          "first argument status must be a string".to_string(),
+        ));
+      }
+    };
+    let summary: String = match args.get(1) {
+      Some(Value::String(s)) => s.to_str()?.to_string(),
+      _ => {
+        return Err(mlua::Error::RuntimeError(
+          "second argument summary must be a string".to_string(),
+        ));
+      }
+    };
+    if let Some(sink) = &ctx_clone.output_sink {
+      sink.task_update(&ctx_clone.actor_id, &status, &summary);
+    }
+    Ok(())
+  })?;
+  globals.set("task_update", task_update_fn)?;
+
+  // Register agent with positional/table argument
+  let ctx_clone = ctx.clone();
+  let agent_fn = lua.create_async_function(move |lua, args: Value| {
+    let ctx = ctx_clone.clone();
+    async move {
+      let args_val: serde_json::Value = match lua.from_value(args) {
+        Ok(v) => v,
+        Err(e) => return Err(mlua::Error::RuntimeError(format!("invalid arguments to agent: {e}"))),
+      };
+      let role = args_val.get("role").and_then(|r| r.as_str()).unwrap_or("subagent").to_string();
+      let task = match args_val.get("task").and_then(|t| t.as_str()) {
+        Some(t) => t.to_string(),
+        None => return Err(mlua::Error::RuntimeError("missing 'task' parameter in agent call".to_string())),
+      };
+      let profile_override = args_val.get("profile").and_then(|p| p.as_str()).map(|s| s.to_string());
+
+      let client = if let Some(p_name) = profile_override {
+        let config = crate::config::load_or_exit(ctx.workspace.root());
+        let profile = match config.get_profile(&p_name) {
+          Some(p) => p,
+          None => return Err(mlua::Error::RuntimeError(format!("unknown profile: {p_name}"))),
+        };
+        let provider = match config.provider_for(profile) {
+          Some(p) => p,
+          None => return Err(mlua::Error::RuntimeError(format!("missing provider config for profile: {p_name}"))),
+        };
+        match crate::providers::new_client(profile, provider) {
+          Ok(c) => c,
+          Err(e) => return Err(mlua::Error::RuntimeError(format!("failed to construct client: {e}"))),
+        }
+      } else {
+        ctx.client.clone()
+      };
+
+      let system_prompt_with_role = format!(
+        "{}\n\nYou are a developer acting as: {role}. Follow these instructions to perform your task.",
+        crate::prompts::PROMPT_SYSTEM.trim()
+      );
+
+      let messages = vec![
+        crate::types::Message::system(system_prompt_with_role),
+        crate::types::Message::user(crate::prompts::PROMPT_TOOLSET.trim().to_string(), crate::types::MessageOrigin::Internal),
+        crate::types::Message::user(crate::prompts::PROMPT_COLGREP.trim().to_string(), crate::types::MessageOrigin::Internal),
+        crate::types::Message::user(task, crate::types::MessageOrigin::Human),
+      ];
+
+      let mut subagent = crate::agent::Agent::new(
+        ctx.workspace.clone(),
+        client,
+        messages,
+        crate::tools::configured_agent_tools(),
+        crate::session::generate_session_id(),
+        ctx.skill_store.clone(),
+        role.clone(),
+        ctx.verbose,
+      );
+      subagent.set_output_sink(ctx.output_sink.clone());
+
+      let run_res = subagent.run_loop().await;
+      match run_res {
+        Ok(_) => {
+          let last_msg = subagent.messages.iter().rfind(|m| m.role == crate::types::Role::Assistant);
+          let content = last_msg.map(|m| m.content.clone()).unwrap_or_default();
+          Ok(content)
+        }
+        Err(e) => Err(mlua::Error::RuntimeError(format!("subagent run loop failed: {e}"))),
+      }
+    }
+  })?;
+  globals.set("agent", agent_fn)?;
+
+  // Register parallel with: parallel({func1, func2, ...})
+  let parallel_fn = lua.create_async_function(move |lua, args: Value| async move {
+    let tasks: Vec<mlua::Function> = match args {
+      Value::Table(t) => {
+        let mut list = Vec::new();
+        let mut i = 1;
+        while let Ok(v) = t.get::<Value>(i) {
+          match v {
+            Value::Function(f) => list.push(f),
+            Value::Nil => break,
+            _ => {
+              return Err(mlua::Error::RuntimeError(format!(
+                "expected function at index {i} in parallel list"
+              )));
+            }
+          }
+          i += 1;
+        }
+        list
+      }
+      _ => {
+        return Err(mlua::Error::RuntimeError(
+          "expected an array of functions to parallel".to_string(),
+        ));
+      }
+    };
+
+    let mut futures = Vec::new();
+    for task in tasks {
+      let fut = task.call_async::<Value>(());
+      futures.push(fut);
+    }
+    let results = futures_util::future::join_all(futures).await;
+    let out_table = lua.create_table()?;
+    for (i, res) in results.into_iter().enumerate() {
+      match res {
+        Ok(val) => {
+          out_table.set(i + 1, val)?;
+        }
+        Err(e) => {
+          return Err(mlua::Error::RuntimeError(format!(
+            "task {} in parallel failed: {e}",
+            i + 1
+          )));
+        }
+      }
+    }
+    Ok(Value::Table(out_table))
+  })?;
+  globals.set("parallel", parallel_fn)?;
+
   // Register read_file with positional arguments: read_file(path, offset, limit)
   let ctx_clone = ctx.clone();
   let handle_clone = handle.clone();
   let read_file_fn = lua.create_function(move |lua, args: mlua::MultiValue| {
-    let path: String = match args.get(0) {
+    let path: String = match args.front() {
       Some(Value::String(s)) => s.to_str()?.to_string(),
       _ => {
         return Err(mlua::Error::RuntimeError(
@@ -109,7 +257,7 @@ fn register_tools_in_lua(lua: &Lua, ctx: ToolContext) -> Result<()> {
       Ok(output) => Ok((Value::String(lua.create_string(&output)?), Value::Nil)),
       Err(e) => Ok((
         Value::Nil,
-        Value::String(lua.create_string(&e.to_string())?),
+        Value::String(lua.create_string(e.to_string())?),
       )),
     }
   })?;
@@ -119,7 +267,7 @@ fn register_tools_in_lua(lua: &Lua, ctx: ToolContext) -> Result<()> {
   let ctx_clone = ctx.clone();
   let handle_clone = handle.clone();
   let read_hash_anchors_fn = lua.create_function(move |lua, args: mlua::MultiValue| {
-    let path: String = match args.get(0) {
+    let path: String = match args.front() {
       Some(Value::String(s)) => s.to_str()?.to_string(),
       _ => {
         return Err(mlua::Error::RuntimeError(
@@ -154,7 +302,7 @@ fn register_tools_in_lua(lua: &Lua, ctx: ToolContext) -> Result<()> {
       Ok(output) => Ok((Value::String(lua.create_string(&output)?), Value::Nil)),
       Err(e) => Ok((
         Value::Nil,
-        Value::String(lua.create_string(&e.to_string())?),
+        Value::String(lua.create_string(e.to_string())?),
       )),
     }
   })?;
@@ -166,7 +314,7 @@ fn register_tools_in_lua(lua: &Lua, ctx: ToolContext) -> Result<()> {
   let apply_anchor_edits_fn = lua.create_function(move |lua, args: mlua::MultiValue| {
     let (path, ops) = match args.len() {
       1 => {
-        let ops = match args.get(0) {
+        let ops = match args.front() {
           Some(Value::Table(t)) => t.clone(),
           _ => return Err(mlua::Error::RuntimeError("argument ops must be an array of EditOps".to_string())),
         };
@@ -178,7 +326,7 @@ fn register_tools_in_lua(lua: &Lua, ctx: ToolContext) -> Result<()> {
         (last_path, ops)
       }
       2 => {
-        let path: String = match args.get(0) {
+        let path: String = match args.front() {
           Some(Value::String(s)) => s.to_str()?.to_string(),
           _ => return Err(mlua::Error::RuntimeError("first argument path must be a string".to_string())),
         };
@@ -205,7 +353,7 @@ fn register_tools_in_lua(lua: &Lua, ctx: ToolContext) -> Result<()> {
 
     match result {
       Ok(output) => Ok((Value::String(lua.create_string(&output)?), Value::Nil)),
-      Err(e) => Ok((Value::Nil, Value::String(lua.create_string(&e.to_string())?))),
+      Err(e) => Ok((Value::Nil, Value::String(lua.create_string(e.to_string())?))),
     }
   })?;
   globals.set("apply_anchor_edits", apply_anchor_edits_fn)?;
@@ -214,7 +362,7 @@ fn register_tools_in_lua(lua: &Lua, ctx: ToolContext) -> Result<()> {
   let ctx_clone = ctx.clone();
   let handle_clone = handle.clone();
   let load_skill_fn = lua.create_function(move |lua, args: mlua::MultiValue| {
-    let name: String = match args.get(0) {
+    let name: String = match args.front() {
       Some(Value::String(s)) => s.to_str()?.to_string(),
       _ => {
         return Err(mlua::Error::RuntimeError(
@@ -236,7 +384,7 @@ fn register_tools_in_lua(lua: &Lua, ctx: ToolContext) -> Result<()> {
       Ok(output) => Ok((Value::String(lua.create_string(&output)?), Value::Nil)),
       Err(e) => Ok((
         Value::Nil,
-        Value::String(lua.create_string(&e.to_string())?),
+        Value::String(lua.create_string(e.to_string())?),
       )),
     }
   })?;
@@ -253,7 +401,7 @@ fn register_tools_in_lua(lua: &Lua, ctx: ToolContext) -> Result<()> {
       Ok(output) => Ok((Value::String(lua.create_string(&output)?), Value::Nil)),
       Err(e) => Ok((
         Value::Nil,
-        Value::String(lua.create_string(&e.to_string())?),
+        Value::String(lua.create_string(e.to_string())?),
       )),
     }
   })?;
@@ -263,7 +411,7 @@ fn register_tools_in_lua(lua: &Lua, ctx: ToolContext) -> Result<()> {
   let ctx_clone = ctx.clone();
   let handle_clone = handle.clone();
   let load_skill_asset_fn = lua.create_function(move |lua, args: mlua::MultiValue| {
-    let root: String = match args.get(0) {
+    let root: String = match args.front() {
       Some(Value::String(s)) => s.to_str()?.to_string(),
       _ => {
         return Err(mlua::Error::RuntimeError(
@@ -294,7 +442,7 @@ fn register_tools_in_lua(lua: &Lua, ctx: ToolContext) -> Result<()> {
       Ok(output) => Ok((Value::String(lua.create_string(&output)?), Value::Nil)),
       Err(e) => Ok((
         Value::Nil,
-        Value::String(lua.create_string(&e.to_string())?),
+        Value::String(lua.create_string(e.to_string())?),
       )),
     }
   })?;
@@ -309,6 +457,9 @@ fn register_tools_in_lua(lua: &Lua, ctx: ToolContext) -> Result<()> {
       || tool.name == "load_skill"
       || tool.name == "list_skills"
       || tool.name == "load_skill_asset"
+      || tool.name == "task_update"
+      || tool.name == "agent"
+      || tool.name == "parallel"
     {
       continue;
     }
@@ -336,7 +487,7 @@ fn register_tools_in_lua(lua: &Lua, ctx: ToolContext) -> Result<()> {
         Ok(output) => Ok((Value::String(lua.create_string(&output)?), Value::Nil)),
         Err(e) => Ok((
           Value::Nil,
-          Value::String(lua.create_string(&e.to_string())?),
+          Value::String(lua.create_string(e.to_string())?),
         )),
       }
     })?;
@@ -457,10 +608,21 @@ mod tests {
   fn test_context() -> ToolContext {
     let workspace = Workspace::from_current_dir();
     let skill_store = Arc::new(crate::skills::SkillStore::new(workspace.root(), Vec::new()));
+    let client = crate::client::Client::new(
+      "http://localhost",
+      "dummy".into(),
+      |_, _| Ok(serde_json::Value::Null),
+      30,
+    )
+    .unwrap();
     ToolContext {
       workspace,
       skill_store,
       lua_session: Arc::new(std::sync::Mutex::new(None)),
+      client,
+      output_sink: None,
+      verbose: false,
+      actor_id: "director".to_string(),
     }
   }
 
@@ -595,10 +757,21 @@ mod tests {
 
     let workspace = Workspace::from_root(temp.clone());
     let skill_store = Arc::new(crate::skills::SkillStore::new(workspace.root(), Vec::new()));
+    let client = crate::client::Client::new(
+      "http://localhost",
+      "dummy".into(),
+      |_, _| Ok(serde_json::Value::Null),
+      30,
+    )
+    .unwrap();
     let ctx = ToolContext {
       workspace,
       skill_store,
       lua_session: Arc::new(std::sync::Mutex::new(None)),
+      client,
+      output_sink: None,
+      verbose: false,
+      actor_id: "director".to_string(),
     };
 
     // Test list_skills()
@@ -646,5 +819,23 @@ mod tests {
     assert!(bad_res2.contains("not inside a whitelisted"));
 
     let _ = std::fs::remove_dir_all(temp);
+  }
+
+  #[tokio::test]
+  async fn test_parallel_and_task_update_from_lua() {
+    let ctx = test_context();
+    let code = r#"
+      task_update("testing", "running parallel test")
+      local results = parallel({
+        function() return 10 + 20 end,
+        function() return 30 + 40 end
+      })
+      return results
+    "#;
+    let res = exec_tool(ctx, &json!({ "code": code }).to_string())
+      .await
+      .unwrap();
+    assert!(res.contains("30"), "Res was: {res}");
+    assert!(res.contains("70"), "Res was: {res}");
   }
 }

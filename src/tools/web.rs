@@ -194,4 +194,3 @@ mod tests {
     assert_eq!(args.num_results, 10);
   }
 }
-
