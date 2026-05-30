@@ -261,7 +261,9 @@ fn register_tools_in_lua(lua: &Lua, ctx: ToolContext) -> Result<()> {
   registered.insert("exec".to_string());
   registered.insert("eval".to_string());
 
-  // Register generic handlers for every tool from all_tools()
+  // Register generic handlers for every tool from all_tools().
+  // `registered.insert()` returns false if the name was already present (manually
+  // registered above), so we skip duplicates rather than overwriting them.
   for tool in crate::tools::all_tools() {
     if !registered.insert(tool.name.to_string()) {
       continue;
