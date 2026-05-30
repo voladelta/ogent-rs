@@ -565,8 +565,7 @@ async fn run_lua_vm_async(lua: &Lua, code: &str) -> Result<String> {
     const TRUNCATE_MSG: &str = "\n... [truncated] ...\n";
     let half_budget = (MAX_LEN - TRUNCATE_MSG.len()) / 2;
     let head_end = final_response.floor_char_boundary(half_budget);
-    let tail_start =
-      final_response.floor_char_boundary(final_response.len() - half_budget);
+    let tail_start = final_response.floor_char_boundary(final_response.len() - half_budget);
     if tail_start > head_end {
       let mut truncated = String::with_capacity(MAX_LEN);
       truncated.push_str(&final_response[..head_end]);
