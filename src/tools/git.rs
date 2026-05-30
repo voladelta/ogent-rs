@@ -414,8 +414,8 @@ fn parse_unified_diff(text: &str, stat_only: bool) -> Result<Vec<GitDiffDelta>> 
       let parts: Vec<&str> = after.split_whitespace().collect();
       let old_raw = strip_quotes(parts.first().unwrap_or(&""));
       let new_raw = strip_quotes(parts.get(1).unwrap_or(&""));
-      let old_path = strip_prefix(old_raw, "a/").unwrap_or(old_raw).to_string();
-      let new_path = strip_prefix(new_raw, "b/").unwrap_or(new_raw).to_string();
+      let old_path = old_raw.strip_prefix("a/").unwrap_or(old_raw).to_string();
+      let new_path = new_raw.strip_prefix("b/").unwrap_or(new_raw).to_string();
 
       current = Some(GitDiffDelta {
         path: new_path,
@@ -572,10 +572,6 @@ fn strip_quotes(s: &str) -> &str {
   } else {
     s
   }
-}
-
-fn strip_prefix<'a>(s: &'a str, prefix: &str) -> Option<&'a str> {
-  s.strip_prefix(prefix)
 }
 
 fn parse_hunk_header(line: &str) -> Option<GitDiffHunk> {

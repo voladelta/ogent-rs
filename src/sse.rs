@@ -106,14 +106,14 @@ fn decode_sse_line(line: &[u8]) -> Result<SseLine, SseError> {
 }
 
 #[derive(Default)]
-struct AccToolCall {
+struct AccumulatedToolCall {
   id: String,
   kind: String,
   name: String,
   arguments: String,
 }
 
-impl AccToolCall {
+impl AccumulatedToolCall {
   fn into_tool_call(self) -> ToolCall {
     ToolCall::function(self.id, self.name, self.arguments)
   }
@@ -122,7 +122,7 @@ impl AccToolCall {
 #[derive(Default)]
 struct ChatAccumulator {
   response: ChatResponse,
-  tool_calls: Vec<AccToolCall>,
+  tool_calls: Vec<AccumulatedToolCall>,
   emitted_tool_calling: bool,
 }
 
@@ -149,7 +149,7 @@ impl ChatAccumulator {
         if tc.index >= self.tool_calls.len() {
           self
             .tool_calls
-            .resize_with(tc.index + 1, AccToolCall::default);
+            .resize_with(tc.index + 1, AccumulatedToolCall::default);
         }
         let a = &mut self.tool_calls[tc.index];
         if !tc.id.is_empty() {
@@ -175,7 +175,7 @@ impl ChatAccumulator {
     self.response.tool_calls.extend(
       std::mem::take(&mut self.tool_calls)
         .into_iter()
-        .map(AccToolCall::into_tool_call),
+        .map(AccumulatedToolCall::into_tool_call),
     );
     self.response
   }

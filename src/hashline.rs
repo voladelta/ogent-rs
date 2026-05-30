@@ -23,7 +23,7 @@ pub fn render_hashlines(source: &str, start: Option<usize>, end: Option<usize>) 
   for (i, line) in slice.iter().enumerate() {
     let line_no = slice_start + i + 1;
     line_hash_into(line, &mut hbuf);
-    push_usize(&mut out, line_no);
+    append_decimal(&mut out, line_no);
     out.push(':');
     out.push_str(std::str::from_utf8(&hbuf).unwrap());
     out.push('|');
@@ -33,7 +33,7 @@ pub fn render_hashlines(source: &str, start: Option<usize>, end: Option<usize>) 
   out
 }
 
-fn push_usize(out: &mut String, mut n: usize) {
+fn append_decimal(out: &mut String, mut n: usize) {
   if n == 0 {
     out.push('0');
     return;

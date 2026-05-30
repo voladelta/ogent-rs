@@ -44,7 +44,7 @@ impl Workspace {
     if path.is_empty() {
       bail!("path is required");
     }
-    let abs = self.absolute_tool_path(path);
+    let abs = self.resolve_absolute_path(path);
     if self.path_in_workspace(&abs) {
       return Ok(abs);
     }
@@ -58,7 +58,7 @@ impl Workspace {
     bail!("path {path} is outside workspace {}", self.root.display())
   }
 
-  fn absolute_tool_path(&self, path: &str) -> PathBuf {
+  fn resolve_absolute_path(&self, path: &str) -> PathBuf {
     if let Some(rest) = path.strip_prefix("~/")
       && let Some(home) = std::env::var_os("HOME")
     {

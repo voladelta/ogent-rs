@@ -14,7 +14,7 @@ struct ShellArgs {
   timeout_seconds: u64,
 }
 
-fn check_shell_cds(workspace: &crate::workspace::Workspace, command: &str) -> Result<()> {
+fn validate_cd_commands(workspace: &crate::workspace::Workspace, command: &str) -> Result<()> {
   let cmd = strip_heredoc_bodies(command);
   let cmd = split_shell_separators(&cmd);
   let base = workspace.root();
@@ -108,7 +108,7 @@ fn resolve_cd_target(base: &Path, path: &str) -> Result<PathBuf> {
 pub async fn shell(ctx: ToolContext, args: &str) -> Result<String> {
   let args: ShellArgs = parse_args(args)?;
   require_nonempty(&args.command, "command")?;
-  check_shell_cds(&ctx.workspace, &args.command)?;
+  validate_cd_commands(&ctx.workspace, &args.command)?;
   let secs = if args.timeout_seconds == 0 {
     120
   } else {
@@ -149,34 +149,34 @@ mod tests {
   }
 
   #[test]
-  fn check_shell_cds_tracks_cwd_after_tmp_cd() {
+  fn validate_cd_commands_tracks_cwd_after_tmp_cd() {
     let ws = test_workspace("/tmp/demo");
 
-    let err = check_shell_cds(&ws, "cd /tmp && cd ..").unwrap_err();
+    let err = validate_cd_commands(&ws, "cd /tmp && cd ..").unwrap_err();
 
     assert!(err.to_string().contains("cd to .. is not allowed"));
   }
 
   #[test]
-  fn check_shell_cds_allows_relative_tmp_child_after_tmp_cd() {
+  fn validate_cd_commands_allows_relative_tmp_child_after_tmp_cd() {
     let ws = test_workspace("/workspace/project");
 
-    assert!(check_shell_cds(&ws, "cd /tmp && cd src").is_ok());
+    assert!(validate_cd_commands(&ws, "cd /tmp && cd src").is_ok());
   }
 
   #[test]
-  fn check_shell_cds_tracks_workspace_relative_cd_chain() {
+  fn validate_cd_commands_tracks_workspace_relative_cd_chain() {
     let ws = test_workspace("/workspace/project");
 
-    assert!(check_shell_cds(&ws, "cd src && cd ..").is_ok());
-    assert!(check_shell_cds(&ws, "cd src && cd ../..").is_err());
+    assert!(validate_cd_commands(&ws, "cd src && cd ..").is_ok());
+    assert!(validate_cd_commands(&ws, "cd src && cd ../..").is_err());
   }
 
   #[test]
-  fn check_shell_cds_ignores_heredoc_body_examples() {
+  fn validate_cd_commands_ignores_heredoc_body_examples() {
     let ws = test_workspace("/workspace/project");
     let command = "cat <<'EOF'\ncd /tmp && cd ..\nEOF";
 
-    assert!(check_shell_cds(&ws, command).is_ok());
+    assert!(validate_cd_commands(&ws, command).is_ok());
   }
 }

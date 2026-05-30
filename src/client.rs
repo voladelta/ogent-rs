@@ -7,7 +7,8 @@ use crate::types::{ChatResponse, Message, Tool};
 
 const MAX_RETRIES: usize = 5;
 
-type BuildReq = Arc<dyn Fn(&[Message], &[Tool]) -> Result<Value, serde_json::Error> + Send + Sync>;
+type BuildRequestBody =
+  Arc<dyn Fn(&[Message], &[Tool]) -> Result<Value, serde_json::Error> + Send + Sync>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ClientError {
@@ -39,7 +40,7 @@ pub struct Client {
   http: reqwest::Client,
   url: String,
   api_key: String,
-  build_req: BuildReq,
+  build_request_body: BuildRequestBody,
 }
 
 impl Client {
@@ -62,7 +63,7 @@ impl Client {
         .map_err(ClientError::Http)?,
       url: url.to_string(),
       api_key,
-      build_req: Arc::new(build_req),
+      build_request_body: Arc::new(build_req),
     })
   }
 
@@ -72,7 +73,7 @@ impl Client {
     tools: &[Tool],
     stream_tx: Option<tokio::sync::mpsc::Sender<crate::sse::StreamEvent>>,
   ) -> Result<ChatResponse, ClientError> {
-    let req_body = (self.build_req)(messages, tools).map_err(ClientError::BuildRequest)?;
+    let req_body = (self.build_request_body)(messages, tools).map_err(ClientError::BuildRequest)?;
     let streaming = stream_tx.is_some();
     let mut last_err = None;
     for attempt in 0..=MAX_RETRIES {
