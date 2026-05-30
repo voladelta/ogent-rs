@@ -80,12 +80,11 @@ fn glob(ctx: ToolContext, args: &str) -> Result<String> {
 
   for entry in walker {
     let entry = entry?;
-    if entry.file_type().map(|ft| ft.is_file()).unwrap_or(false) {
-      if let Ok(rel_path) = entry.path().strip_prefix(root) {
-        if matcher.is_match(rel_path) {
-          matches.push(rel_path.to_string_lossy().into_owned());
-        }
-      }
+    if entry.file_type().map(|ft| ft.is_file()).unwrap_or(false)
+      && let Ok(rel_path) = entry.path().strip_prefix(root)
+      && matcher.is_match(rel_path)
+    {
+      matches.push(rel_path.to_string_lossy().into_owned());
     }
   }
 
