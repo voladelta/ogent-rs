@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use mlua::{HookTriggers, Lua, LuaSerdeExt, StdLib, Value};
 use serde::Deserialize;
 use serde_json::json;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use crate::tools::{Handler, ToolContext, ToolDef, parse_args};
 
@@ -356,11 +356,11 @@ end
 
 async fn run_lua_vm_async(lua: &Lua, code: &str) -> Result<String> {
   // 1. Capture stdout via print override
-  let stdout_buffer = Arc::new(Mutex::new(String::new()));
+  let stdout_buffer = Arc::new(parking_lot::Mutex::new(String::new()));
   let buffer_clone = stdout_buffer.clone();
 
   let print_fn = lua.create_function(move |_, args: mlua::MultiValue| {
-    let mut buffer = buffer_clone.lock().unwrap();
+    let mut buffer = buffer_clone.lock();
     let parts: Vec<String> = args
       .iter()
       .map(|v| v.to_string().unwrap_or_else(|_| "nil".to_string()))
@@ -392,7 +392,7 @@ async fn run_lua_vm_async(lua: &Lua, code: &str) -> Result<String> {
 
   // 4. Format the final output
   let mut final_response = String::new();
-  let stdout = stdout_buffer.lock().unwrap().clone();
+  let stdout = stdout_buffer.lock().clone();
   if !stdout.is_empty() {
     final_response.push_str("--- Stdout Output ---\n");
     final_response.push_str(&stdout);
