@@ -269,7 +269,9 @@ impl Agent {
       // Always drain the streaming task before propagating errors: dropping
       // stream_tx (inside chat) closes the channel, so the task exits promptly.
       if let Some(handle) = stream_handle {
-        let _ = handle.await;
+        handle
+          .await
+          .expect("streaming output task should not panic");
       }
       let resp = resp?;
 

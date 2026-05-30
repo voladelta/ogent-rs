@@ -87,12 +87,10 @@ async fn run_agent_cli(
   );
   agent.set_output_sink(Some(agent::cli_output_sink()));
   let loop_result = agent.run_loop().await;
-  if let Err(e) = loop_result {
-    agent.persist()?;
-    return Err(e.into());
+  if let Err(pe) = agent.persist() {
+    eprintln!("warning: failed to persist session: {pe}");
   }
-  agent.persist()?;
-  Ok(())
+  loop_result.map_err(Into::into)
 }
 
 fn parse_args() -> Args {

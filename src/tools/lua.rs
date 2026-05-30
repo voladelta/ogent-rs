@@ -500,7 +500,7 @@ mod tests {
     assert!(res.contains("4"));
 
     // Verify it is stateless (variables don't persist)
-    let _ = exec_tool(ctx.clone(), r#"{"code": "global_var = 42"}"#)
+    exec_tool(ctx.clone(), r#"{"code": "global_var = 42"}"#)
       .await
       .unwrap();
     let res2 = exec_tool(ctx, r#"{"code": "return global_var"}"#)
