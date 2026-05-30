@@ -51,11 +51,10 @@ fn repo_map(ctx: ToolContext, args: &str) -> Result<String> {
       out.push_str(&"  ".repeat(depth));
       out.push_str(&name);
       // Append human-readable size for files only
-      if entry.file_type().map(|ft| ft.is_file()).unwrap_or(false) {
-        if let Ok(meta) = entry.metadata() {
+      if entry.file_type().map(|ft| ft.is_file()).unwrap_or(false)
+        && let Ok(meta) = entry.metadata() {
           out.push_str(&format!("  {}", human_size(meta.len())));
         }
-      }
       out.push('\n');
     }
   }
