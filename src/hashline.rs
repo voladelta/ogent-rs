@@ -12,10 +12,10 @@ struct Anchor<'a> {
 pub fn render_hashlines(source: &str, start: Option<usize>, end: Option<usize>) -> String {
   let lines = source_lines_ref(source);
   let slice_start = start
-    .map(|s| if s > 0 { s - 1 } else { 0 })
+    .map(|s| s.saturating_sub(1))
     .unwrap_or(0)
     .min(lines.len());
-  let slice_end = end.unwrap_or(lines.len()).min(lines.len()).max(slice_start);
+  let slice_end = end.unwrap_or(lines.len()).clamp(slice_start, lines.len());
   let slice = &lines[slice_start..slice_end];
   let estimated: usize = slice.iter().map(|l| l.len() + 12).sum();
   let mut out = String::with_capacity(estimated);

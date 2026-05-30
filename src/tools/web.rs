@@ -1,6 +1,7 @@
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 use serde_json::{Value, json};
+use std::fmt::Write;
 use tokio::time::Duration;
 
 use crate::tools::{Handler, ToolContext, ToolDef, parse_args, require_nonempty};
@@ -69,15 +70,11 @@ async fn web_search(_ctx: ToolContext, args: &str) -> Result<String> {
   let v = exa_post("https://api.exa.ai/search", body).await?;
   let mut out = String::new();
   for (i, r) in v["results"].as_array().into_iter().flatten().enumerate() {
-    out.push_str(&format!(
-      "{}. {}\n",
-      i + 1,
-      r["title"].as_str().unwrap_or("")
-    ));
-    out.push_str(&format!("   {}\n", r["url"].as_str().unwrap_or("")));
+    writeln!(out, "{}. {}", i + 1, r["title"].as_str().unwrap_or(""))?;
+    writeln!(out, "   {}", r["url"].as_str().unwrap_or(""))?;
     if let Some(highlights) = r["highlights"].as_array() {
       for h in highlights {
-        out.push_str(&format!("   > {}\n", h.as_str().unwrap_or("")));
+        writeln!(out, "   > {}", h.as_str().unwrap_or(""))?;
       }
     }
     out.push('\n');
@@ -105,8 +102,8 @@ async fn web_read(_ctx: ToolContext, args: &str) -> Result<String> {
   let v = exa_post("https://api.exa.ai/contents", body).await?;
   let mut out = String::new();
   for r in v["results"].as_array().into_iter().flatten() {
-    out.push_str(&format!("--- {} ---\n", r["title"].as_str().unwrap_or("")));
-    out.push_str(&format!("{}\n", r["url"].as_str().unwrap_or("")));
+    writeln!(out, "--- {} ---", r["title"].as_str().unwrap_or(""))?;
+    writeln!(out, "{}", r["url"].as_str().unwrap_or(""))?;
     out.push('\n');
     match mode {
       WebReadMode::Text => {
@@ -116,7 +113,7 @@ async fn web_read(_ctx: ToolContext, args: &str) -> Result<String> {
       WebReadMode::Highlights => {
         if let Some(highlights) = r["highlights"].as_array() {
           for h in highlights {
-            out.push_str(&format!("> {}\n", h.as_str().unwrap_or("")));
+            writeln!(out, "> {}", h.as_str().unwrap_or(""))?;
           }
           out.push('\n');
         }
@@ -142,16 +139,14 @@ async fn web_code_context(_ctx: ToolContext, args: &str) -> Result<String> {
   Ok(v["response"].as_str().unwrap_or("").to_string())
 }
 
-fn exa_client() -> Result<&'static reqwest::Client> {
+fn exa_client() -> &'static reqwest::Client {
   static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
-  if let Some(c) = CLIENT.get() {
-    return Ok(c);
-  }
-  let client = reqwest::Client::builder()
-    .timeout(Duration::from_secs(60))
-    .build()
-    .context("build exa client")?;
-  Ok(CLIENT.get_or_init(|| client))
+  CLIENT.get_or_init(|| {
+    reqwest::Client::builder()
+      .timeout(Duration::from_secs(60))
+      .build()
+      .expect("build exa client")
+  })
 }
 
 pub fn ensure_exa_api_key_set() -> Result<()> {
@@ -164,7 +159,7 @@ pub fn ensure_exa_api_key_set() -> Result<()> {
 
 async fn exa_post(url: &str, body: Value) -> Result<Value> {
   let key = std::env::var("EXA_API_KEY").unwrap_or_default();
-  let resp = exa_client()?
+  let resp = exa_client()
     .post(url)
     .header("x-api-key", key)
     .json(&body)

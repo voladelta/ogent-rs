@@ -89,32 +89,26 @@ impl AgentOutputSink for CliOutputSink {
     }
   }
 
-  #[allow(clippy::collapsible_if)]
   fn tool_call(&self, actor_id: &str, verbose: bool, tool_call: &ToolCall) {
-    if tool_call.function.name == "exec" || tool_call.function.name == "eval" {
-      if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&tool_call.function.arguments) {
-        let reason = parsed.get("reason").and_then(|r| r.as_str()).unwrap_or("");
-        let code = parsed.get("code").and_then(|c| c.as_str()).unwrap_or("");
-        if !reason.is_empty() {
-          print_actor_text(
-            actor_id,
-            &format!("[{}] {}\n", tool_call.function.name, reason),
-          );
-        } else {
-          print_actor_text(actor_id, &format!("[{}]\n", tool_call.function.name));
-        }
-        if verbose && !code.is_empty() {
-          print_actor_text(actor_id, &format!("-- Code:\n{}\n", code));
-        }
-        return;
+    let name = &tool_call.function.name;
+    if (name == "exec" || name == "eval")
+      && let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&tool_call.function.arguments)
+    {
+      let reason = parsed.get("reason").and_then(|r| r.as_str()).unwrap_or("");
+      let code = parsed.get("code").and_then(|c| c.as_str()).unwrap_or("");
+      if !reason.is_empty() {
+        print_actor_text(actor_id, &format!("[{name}] {reason}\n"));
+      } else {
+        print_actor_text(actor_id, &format!("[{name}]\n"));
       }
+      if verbose && !code.is_empty() {
+        print_actor_text(actor_id, &format!("-- Code:\n{code}\n"));
+      }
+      return;
     }
     let args = truncate_for_cli(&tool_call.function.arguments, 180);
     if verbose {
-      print_actor_text(
-        actor_id,
-        &format!("[tool] {} {args}\n", tool_call.function.name),
-      );
+      print_actor_text(actor_id, &format!("[tool] {name} {args}\n"));
     }
   }
 

@@ -1,6 +1,7 @@
 use anyhow::Result;
 use serde::Deserialize;
 use serde_json::json;
+use std::fmt::Write;
 
 use crate::tools::{Handler, ToolContext, ToolDef, parse_args, require_nonempty};
 
@@ -60,8 +61,8 @@ fn list_skills(ctx: ToolContext, _args: &str) -> Result<String> {
   }
 
   let mut out = String::new();
-  out.push_str("# Available Skills\n");
-  out.push_str("Use `load_skill(name)` to load a skill.\n\n");
+  writeln!(out, "# Available Skills")?;
+  writeln!(out, "Use `load_skill(name)` to load a skill.\n")?;
 
   for info in &infos {
     let root_path = match ctx.skill_store.load_skill(&info.name) {
@@ -69,9 +70,10 @@ fn list_skills(ctx: ToolContext, _args: &str) -> Result<String> {
       Err(_) => "unknown".to_string(),
     };
 
-    out.push_str(&format!("## {}\n", info.name));
-    out.push_str(&format!("- **Root**: `{}`\n", root_path));
-    out.push_str(&format!("- **Description**: {}\n\n", info.description));
+    writeln!(out, "## {}", info.name)?;
+    writeln!(out, "- **Root**: `{}`", root_path)?;
+    writeln!(out, "- **Description**: {}", info.description)?;
+    out.push('\n');
   }
 
   Ok(out.trim_end().to_string())
@@ -85,10 +87,9 @@ fn load_skill_asset(ctx: ToolContext, args: &str) -> Result<String> {
   require_nonempty(&args.root, "root")?;
   require_nonempty(&args.path, "path")?;
 
-  let root_abs = if args.root.starts_with("~/") {
+  let root_abs = if let Some(rest) = args.root.strip_prefix("~/") {
     let home = std::env::var("HOME").context("HOME env var not set")?;
-    let path_str = args.root.replacen("~/", "", 1);
-    PathBuf::from(home).join(path_str)
+    PathBuf::from(home).join(rest)
   } else {
     let p = PathBuf::from(&args.root);
     if p.is_absolute() {
@@ -100,14 +101,10 @@ fn load_skill_asset(ctx: ToolContext, args: &str) -> Result<String> {
   let root_abs = crate::workspace::normalize(&root_abs);
 
   // Check if root_abs is inside one of the skill_roots
-  let mut whitelisted = false;
-  for skill_root in ctx.skill_store.skill_roots() {
+  let whitelisted = ctx.skill_store.skill_roots().any(|skill_root| {
     let skill_root_abs = crate::workspace::normalize(skill_root);
-    if root_abs.starts_with(&skill_root_abs) && root_abs != skill_root_abs {
-      whitelisted = true;
-      break;
-    }
-  }
+    root_abs.starts_with(&skill_root_abs) && root_abs != skill_root_abs
+  });
 
   if !whitelisted {
     bail!(

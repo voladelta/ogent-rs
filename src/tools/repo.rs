@@ -64,12 +64,18 @@ fn repo_map(ctx: ToolContext, args: &str) -> Result<String> {
 }
 
 fn human_size(bytes: u64) -> String {
+  const KB: f64 = 1024.0;
+  const MB: f64 = KB * 1024.0;
+  const GB: f64 = MB * 1024.0;
+
   if bytes < 1024 {
     format!("{} B", bytes)
   } else if bytes < 1024 * 1024 {
-    format!("{:.1} KB", bytes as f64 / 1024.0)
+    format!("{:.1} KB", bytes as f64 / KB)
+  } else if bytes < 1024 * 1024 * 1024 {
+    format!("{:.1} MB", bytes as f64 / MB)
   } else {
-    format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
+    format!("{:.1} GB", bytes as f64 / GB)
   }
 }
 fn path_or_root(path: &str) -> &str {
