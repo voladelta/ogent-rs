@@ -561,9 +561,23 @@ async fn run_lua_vm_async(lua: &Lua, code: &str) -> Result<String> {
   }
 
   if final_response.len() > 16384 {
-    let end = final_response.floor_char_boundary(16384);
-    final_response.truncate(end);
-    final_response.push_str("\n... [Output truncated to 16k limit] ...");
+    const MAX_LEN: usize = 16384;
+    const TRUNCATE_MSG: &str = "\n... [truncated] ...\n";
+    let half_budget = (MAX_LEN - TRUNCATE_MSG.len()) / 2;
+    let head_end = final_response.floor_char_boundary(half_budget);
+    let tail_start =
+      final_response.floor_char_boundary(final_response.len() - half_budget);
+    if tail_start > head_end {
+      let mut truncated = String::with_capacity(MAX_LEN);
+      truncated.push_str(&final_response[..head_end]);
+      truncated.push_str(TRUNCATE_MSG);
+      truncated.push_str(&final_response[tail_start..]);
+      final_response = truncated;
+    } else {
+      let end = final_response.floor_char_boundary(MAX_LEN);
+      final_response.truncate(end);
+      final_response.push_str("\n... [Output truncated to 16k limit] ...");
+    }
   }
 
   Ok(final_response)
