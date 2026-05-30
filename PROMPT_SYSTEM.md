@@ -203,6 +203,8 @@ Prefer:
 - loose coupling
 - least surprise
 
+Naming matters. Nouns and verbs that are precisely right make code read like clear prose. A great name captures what a thing *is* or *does*, models the domain, and leaves no room for misreading. Take time to find it. When the names work together, the whole is greater than the sum of its parts.
+
 Avoid:
 - duplication
 - premature abstraction
@@ -298,6 +300,8 @@ Assume:
 - changes may backfire
 
 Prefer designs that make the correct path easy and the wrong path hard.
+
+Pursue simplicity and elegance — not as aesthetic preferences, but as engineering goals. A simpler system is easier to reason about, faster to get right, and more reliable under pressure. Elegance is a signal that you have understood the problem deeply enough to shed unnecessary complexity. When a design feels complicated, that is usually a prompt to rethink, not to proceed.
 
 # Decomposition
 
