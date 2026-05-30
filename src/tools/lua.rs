@@ -71,7 +71,6 @@ fn create_sandboxed_vm() -> Result<Lua> {
 
 fn register_tools_in_lua(lua: &Lua, ctx: ToolContext) -> Result<()> {
   let globals = lua.globals();
-  let handle = tokio::runtime::Handle::current();
 
   // Register task_update with: task_update(status, summary)
   let ctx_clone = ctx.clone();
@@ -106,44 +105,61 @@ fn register_tools_in_lua(lua: &Lua, ctx: ToolContext) -> Result<()> {
     async move {
       let args_val: serde_json::Value = match lua.from_value(args) {
         Ok(v) => v,
-        Err(e) => return Err(mlua::Error::RuntimeError(format!("invalid arguments to agent: {e}"))),
+        Err(e) => {
+          return Err(mlua::Error::RuntimeError(format!(
+            "invalid arguments to agent: {e}"
+          )));
+        }
       };
-      let role = args_val.get("role").and_then(|r| r.as_str()).unwrap_or("subagent").to_string();
+      let role = args_val
+        .get("role")
+        .and_then(|r| r.as_str())
+        .unwrap_or("subagent")
+        .to_string();
       let task = match args_val.get("task").and_then(|t| t.as_str()) {
         Some(t) => t.to_string(),
-        None => return Err(mlua::Error::RuntimeError("missing 'task' parameter in agent call".to_string())),
+        None => {
+          return Err(mlua::Error::RuntimeError(
+            "missing 'task' parameter in agent call".to_string(),
+          ));
+        }
       };
-      let profile_override = args_val.get("profile").and_then(|p| p.as_str()).map(|s| s.to_string());
+      let profile_override = args_val
+        .get("profile")
+        .and_then(|p| p.as_str())
+        .map(|s| s.to_string());
 
       let client = if let Some(p_name) = profile_override {
         let config = crate::config::load_or_exit(ctx.workspace.root());
         let profile = match config.get_profile(&p_name) {
           Some(p) => p,
-          None => return Err(mlua::Error::RuntimeError(format!("unknown profile: {p_name}"))),
+          None => {
+            return Err(mlua::Error::RuntimeError(format!(
+              "unknown profile: {p_name}"
+            )));
+          }
         };
         let provider = match config.provider_for(profile) {
           Some(p) => p,
-          None => return Err(mlua::Error::RuntimeError(format!("missing provider config for profile: {p_name}"))),
+          None => {
+            return Err(mlua::Error::RuntimeError(format!(
+              "missing provider config for profile: {p_name}"
+            )));
+          }
         };
         match crate::providers::new_client(profile, provider) {
           Ok(c) => c,
-          Err(e) => return Err(mlua::Error::RuntimeError(format!("failed to construct client: {e}"))),
+          Err(e) => {
+            return Err(mlua::Error::RuntimeError(format!(
+              "failed to construct client: {e}"
+            )));
+          }
         }
       } else {
         ctx.client.clone()
       };
 
-      let system_prompt_with_role = format!(
-        "{}\n\nYou are a developer acting as: {role}. Follow these instructions to perform your task.",
-        crate::prompts::PROMPT_SYSTEM.trim()
-      );
-
-      let messages = vec![
-        crate::types::Message::system(system_prompt_with_role),
-        crate::types::Message::user(crate::prompts::PROMPT_TOOLSET.trim().to_string(), crate::types::MessageOrigin::Internal),
-        crate::types::Message::user(crate::prompts::PROMPT_COLGREP.trim().to_string(), crate::types::MessageOrigin::Internal),
-        crate::types::Message::user(task, crate::types::MessageOrigin::Human),
-      ];
+      let messages = crate::prompts::build_subagent_messages(&ctx.workspace, &role, task);
 
       let mut subagent = crate::agent::Agent::new(
         ctx.workspace.clone(),
@@ -160,11 +176,16 @@ fn register_tools_in_lua(lua: &Lua, ctx: ToolContext) -> Result<()> {
       let run_res = subagent.run_loop().await;
       match run_res {
         Ok(_) => {
-          let last_msg = subagent.messages.iter().rfind(|m| m.role == crate::types::Role::Assistant);
+          let last_msg = subagent
+            .messages
+            .iter()
+            .rfind(|m| m.role == crate::types::Role::Assistant);
           let content = last_msg.map(|m| m.content.clone()).unwrap_or_default();
           Ok(content)
         }
-        Err(e) => Err(mlua::Error::RuntimeError(format!("subagent run loop failed: {e}"))),
+        Err(e) => Err(mlua::Error::RuntimeError(format!(
+          "subagent run loop failed: {e}"
+        ))),
       }
     }
   })?;
@@ -223,227 +244,213 @@ fn register_tools_in_lua(lua: &Lua, ctx: ToolContext) -> Result<()> {
 
   // Register read_file with positional arguments: read_file(path, offset, limit)
   let ctx_clone = ctx.clone();
-  let handle_clone = handle.clone();
-  let read_file_fn = lua.create_function(move |lua, args: mlua::MultiValue| {
-    let path: String = match args.front() {
-      Some(Value::String(s)) => s.to_str()?.to_string(),
-      _ => {
-        return Err(mlua::Error::RuntimeError(
-          "first argument path must be a string".to_string(),
-        ));
+  let read_file_fn = lua.create_async_function(move |lua, args: mlua::MultiValue| {
+    let ctx = ctx_clone.clone();
+    async move {
+      let path: String = match args.front() {
+        Some(Value::String(s)) => s.to_str()?.to_string(),
+        _ => {
+          return Err(mlua::Error::RuntimeError(
+            "first argument path must be a string".to_string(),
+          ));
+        }
+      };
+      let offset: Option<usize> = match args.get(1) {
+        Some(Value::Integer(i)) => Some(*i as usize),
+        _ => None,
+      };
+      let limit: Option<usize> = match args.get(2) {
+        Some(Value::Integer(i)) => Some(*i as usize),
+        _ => None,
+      };
+
+      let args_json = json!({
+        "path": path,
+        "offset": offset,
+        "limit": limit,
+      })
+      .to_string();
+
+      let result = crate::tools::execute_tool(ctx, "read_file", &args_json).await;
+
+      match result {
+        Ok(output) => Ok((Value::String(lua.create_string(output)?), Value::Nil)),
+        Err(e) => Ok((Value::Nil, Value::String(lua.create_string(e.to_string())?))),
       }
-    };
-    let offset: Option<usize> = match args.get(1) {
-      Some(Value::Integer(i)) => Some(*i as usize),
-      _ => None,
-    };
-    let limit: Option<usize> = match args.get(2) {
-      Some(Value::Integer(i)) => Some(*i as usize),
-      _ => None,
-    };
-
-    let args_json = json!({
-      "path": path,
-      "offset": offset,
-      "limit": limit,
-    })
-    .to_string();
-
-    let result = handle_clone.block_on(async {
-      crate::tools::execute_tool(ctx_clone.clone(), "read_file", &args_json).await
-    });
-
-    match result {
-      Ok(output) => Ok((Value::String(lua.create_string(&output)?), Value::Nil)),
-      Err(e) => Ok((
-        Value::Nil,
-        Value::String(lua.create_string(e.to_string())?),
-      )),
     }
   })?;
   globals.set("read_file", read_file_fn)?;
 
   // Register read_hash_anchors with positional arguments: read_hash_anchors(path, offset, limit)
   let ctx_clone = ctx.clone();
-  let handle_clone = handle.clone();
-  let read_hash_anchors_fn = lua.create_function(move |lua, args: mlua::MultiValue| {
-    let path: String = match args.front() {
-      Some(Value::String(s)) => s.to_str()?.to_string(),
-      _ => {
-        return Err(mlua::Error::RuntimeError(
-          "first argument path must be a string".to_string(),
-        ));
+  let read_hash_anchors_fn = lua.create_async_function(move |lua, args: mlua::MultiValue| {
+    let ctx = ctx_clone.clone();
+    async move {
+      let path: String = match args.front() {
+        Some(Value::String(s)) => s.to_str()?.to_string(),
+        _ => {
+          return Err(mlua::Error::RuntimeError(
+            "first argument path must be a string".to_string(),
+          ));
+        }
+      };
+      let offset: Option<usize> = match args.get(1) {
+        Some(Value::Integer(i)) => Some(*i as usize),
+        _ => None,
+      };
+      let limit: Option<usize> = match args.get(2) {
+        Some(Value::Integer(i)) => Some(*i as usize),
+        _ => None,
+      };
+
+      // Save path for apply_anchor_edits
+      lua.globals().set("_last_hash_anchor_path", path.clone())?;
+
+      let args_json = json!({
+        "path": path,
+        "offset": offset,
+        "limit": limit,
+      })
+      .to_string();
+
+      let result = crate::tools::execute_tool(ctx, "read_hash_anchors", &args_json).await;
+
+      match result {
+        Ok(output) => Ok((Value::String(lua.create_string(output)?), Value::Nil)),
+        Err(e) => Ok((Value::Nil, Value::String(lua.create_string(e.to_string())?))),
       }
-    };
-    let offset: Option<usize> = match args.get(1) {
-      Some(Value::Integer(i)) => Some(*i as usize),
-      _ => None,
-    };
-    let limit: Option<usize> = match args.get(2) {
-      Some(Value::Integer(i)) => Some(*i as usize),
-      _ => None,
-    };
-
-    // Save path for apply_anchor_edits
-    lua.globals().set("_last_hash_anchor_path", path.clone())?;
-
-    let args_json = json!({
-      "path": path,
-      "offset": offset,
-      "limit": limit,
-    })
-    .to_string();
-
-    let result = handle_clone.block_on(async {
-      crate::tools::execute_tool(ctx_clone.clone(), "read_hash_anchors", &args_json).await
-    });
-
-    match result {
-      Ok(output) => Ok((Value::String(lua.create_string(&output)?), Value::Nil)),
-      Err(e) => Ok((
-        Value::Nil,
-        Value::String(lua.create_string(e.to_string())?),
-      )),
     }
   })?;
   globals.set("read_hash_anchors", read_hash_anchors_fn)?;
 
   // Register apply_anchor_edits with positional arguments: apply_anchor_edits([path,] ops)
   let ctx_clone = ctx.clone();
-  let handle_clone = handle.clone();
-  let apply_anchor_edits_fn = lua.create_function(move |lua, args: mlua::MultiValue| {
-    let (path, ops) = match args.len() {
-      1 => {
-        let ops = match args.front() {
-          Some(Value::Table(t)) => t.clone(),
-          _ => return Err(mlua::Error::RuntimeError("argument ops must be an array of EditOps".to_string())),
-        };
-        let last_path: Option<String> = lua.globals().get("_last_hash_anchor_path")?;
-        let last_path = match last_path {
-          Some(p) => p,
-          None => return Err(mlua::Error::RuntimeError("no path specified and no previous read_hash_anchors call to infer path from".to_string())),
-        };
-        (last_path, ops)
+  let apply_anchor_edits_fn = lua.create_async_function(move |lua, args: mlua::MultiValue| {
+    let ctx = ctx_clone.clone();
+    async move {
+      let (path, ops) = match args.len() {
+        1 => {
+          let ops = match args.front() {
+            Some(Value::Table(t)) => t.clone(),
+            _ => return Err(mlua::Error::RuntimeError("argument ops must be an array of EditOps".to_string())),
+          };
+          let last_path: Option<String> = lua.globals().get("_last_hash_anchor_path")?;
+          let last_path = match last_path {
+            Some(p) => p,
+            None => return Err(mlua::Error::RuntimeError("no path specified and no previous read_hash_anchors call to infer path from".to_string())),
+          };
+          (last_path, ops)
+        }
+        2 => {
+          let path: String = match args.front() {
+            Some(Value::String(s)) => s.to_str()?.to_string(),
+            _ => return Err(mlua::Error::RuntimeError("first argument path must be a string".to_string())),
+          };
+          let ops = match args.get(1) {
+            Some(Value::Table(t)) => t.clone(),
+            _ => return Err(mlua::Error::RuntimeError("second argument ops must be an array of EditOps".to_string())),
+          };
+          lua.globals().set("_last_hash_anchor_path", path.clone())?;
+          (path, ops)
+        }
+        _ => return Err(mlua::Error::RuntimeError("invalid number of arguments to apply_anchor_edits, expected apply_anchor_edits(ops) or apply_anchor_edits(path, ops)".to_string())),
+      };
+
+      let ops_val: serde_json::Value = lua.from_value(Value::Table(ops))?;
+
+      let args_json = json!({
+        "path": path,
+        "ops": ops_val,
+      }).to_string();
+
+      let result = crate::tools::execute_tool(ctx, "edit_hash_anchors", &args_json).await;
+
+      match result {
+        Ok(output) => Ok((Value::String(lua.create_string(output)?), Value::Nil)),
+        Err(e) => Ok((Value::Nil, Value::String(lua.create_string(e.to_string())?))),
       }
-      2 => {
-        let path: String = match args.front() {
-          Some(Value::String(s)) => s.to_str()?.to_string(),
-          _ => return Err(mlua::Error::RuntimeError("first argument path must be a string".to_string())),
-        };
-        let ops = match args.get(1) {
-          Some(Value::Table(t)) => t.clone(),
-          _ => return Err(mlua::Error::RuntimeError("second argument ops must be an array of EditOps".to_string())),
-        };
-        lua.globals().set("_last_hash_anchor_path", path.clone())?;
-        (path, ops)
-      }
-      _ => return Err(mlua::Error::RuntimeError("invalid number of arguments to apply_anchor_edits, expected apply_anchor_edits(ops) or apply_anchor_edits(path, ops)".to_string())),
-    };
-
-    let ops_val: serde_json::Value = lua.from_value(Value::Table(ops))?;
-
-    let args_json = json!({
-      "path": path,
-      "ops": ops_val,
-    }).to_string();
-
-    let result = handle_clone.block_on(async {
-      crate::tools::execute_tool(ctx_clone.clone(), "edit_hash_anchors", &args_json).await
-    });
-
-    match result {
-      Ok(output) => Ok((Value::String(lua.create_string(&output)?), Value::Nil)),
-      Err(e) => Ok((Value::Nil, Value::String(lua.create_string(e.to_string())?))),
     }
   })?;
   globals.set("apply_anchor_edits", apply_anchor_edits_fn)?;
 
   // Register load_skill with positional arguments: load_skill(name)
   let ctx_clone = ctx.clone();
-  let handle_clone = handle.clone();
-  let load_skill_fn = lua.create_function(move |lua, args: mlua::MultiValue| {
-    let name: String = match args.front() {
-      Some(Value::String(s)) => s.to_str()?.to_string(),
-      _ => {
-        return Err(mlua::Error::RuntimeError(
-          "first argument name must be a string".to_string(),
-        ));
+  let load_skill_fn = lua.create_async_function(move |lua, args: mlua::MultiValue| {
+    let ctx = ctx_clone.clone();
+    async move {
+      let name: String = match args.front() {
+        Some(Value::String(s)) => s.to_str()?.to_string(),
+        _ => {
+          return Err(mlua::Error::RuntimeError(
+            "first argument name must be a string".to_string(),
+          ));
+        }
+      };
+
+      let args_json = json!({
+        "name": name,
+      })
+      .to_string();
+
+      let result = crate::tools::execute_tool(ctx, "load_skill", &args_json).await;
+
+      match result {
+        Ok(output) => Ok((Value::String(lua.create_string(output)?), Value::Nil)),
+        Err(e) => Ok((Value::Nil, Value::String(lua.create_string(e.to_string())?))),
       }
-    };
-
-    let args_json = json!({
-      "name": name,
-    })
-    .to_string();
-
-    let result = handle_clone.block_on(async {
-      crate::tools::execute_tool(ctx_clone.clone(), "load_skill", &args_json).await
-    });
-
-    match result {
-      Ok(output) => Ok((Value::String(lua.create_string(&output)?), Value::Nil)),
-      Err(e) => Ok((
-        Value::Nil,
-        Value::String(lua.create_string(e.to_string())?),
-      )),
     }
   })?;
   globals.set("load_skill", load_skill_fn)?;
 
   // Register list_skills with positional arguments: list_skills()
   let ctx_clone = ctx.clone();
-  let handle_clone = handle.clone();
-  let list_skills_fn = lua.create_function(move |lua, _args: mlua::MultiValue| {
-    let result = handle_clone
-      .block_on(async { crate::tools::execute_tool(ctx_clone.clone(), "list_skills", "{}").await });
+  let list_skills_fn = lua.create_async_function(move |lua, _args: mlua::MultiValue| {
+    let ctx = ctx_clone.clone();
+    async move {
+      let result = crate::tools::execute_tool(ctx, "list_skills", "{}").await;
 
-    match result {
-      Ok(output) => Ok((Value::String(lua.create_string(&output)?), Value::Nil)),
-      Err(e) => Ok((
-        Value::Nil,
-        Value::String(lua.create_string(e.to_string())?),
-      )),
+      match result {
+        Ok(output) => Ok((Value::String(lua.create_string(output)?), Value::Nil)),
+        Err(e) => Ok((Value::Nil, Value::String(lua.create_string(e.to_string())?))),
+      }
     }
   })?;
   globals.set("list_skills", list_skills_fn)?;
 
   // Register load_skill_asset with positional arguments: load_skill_asset(root, path)
   let ctx_clone = ctx.clone();
-  let handle_clone = handle.clone();
-  let load_skill_asset_fn = lua.create_function(move |lua, args: mlua::MultiValue| {
-    let root: String = match args.front() {
-      Some(Value::String(s)) => s.to_str()?.to_string(),
-      _ => {
-        return Err(mlua::Error::RuntimeError(
-          "first argument root must be a string".to_string(),
-        ));
+  let load_skill_asset_fn = lua.create_async_function(move |lua, args: mlua::MultiValue| {
+    let ctx = ctx_clone.clone();
+    async move {
+      let root: String = match args.front() {
+        Some(Value::String(s)) => s.to_str()?.to_string(),
+        _ => {
+          return Err(mlua::Error::RuntimeError(
+            "first argument root must be a string".to_string(),
+          ));
+        }
+      };
+      let path: String = match args.get(1) {
+        Some(Value::String(s)) => s.to_str()?.to_string(),
+        _ => {
+          return Err(mlua::Error::RuntimeError(
+            "second argument path must be a string".to_string(),
+          ));
+        }
+      };
+
+      let args_json = json!({
+        "root": root,
+        "path": path,
+      })
+      .to_string();
+
+      let result = crate::tools::execute_tool(ctx, "load_skill_asset", &args_json).await;
+
+      match result {
+        Ok(output) => Ok((Value::String(lua.create_string(output)?), Value::Nil)),
+        Err(e) => Ok((Value::Nil, Value::String(lua.create_string(e.to_string())?))),
       }
-    };
-    let path: String = match args.get(1) {
-      Some(Value::String(s)) => s.to_str()?.to_string(),
-      _ => {
-        return Err(mlua::Error::RuntimeError(
-          "second argument path must be a string".to_string(),
-        ));
-      }
-    };
-
-    let args_json = json!({
-      "root": root,
-      "path": path,
-    })
-    .to_string();
-
-    let result = handle_clone.block_on(async {
-      crate::tools::execute_tool(ctx_clone.clone(), "load_skill_asset", &args_json).await
-    });
-
-    match result {
-      Ok(output) => Ok((Value::String(lua.create_string(&output)?), Value::Nil)),
-      Err(e) => Ok((
-        Value::Nil,
-        Value::String(lua.create_string(e.to_string())?),
-      )),
     }
   })?;
   globals.set("load_skill_asset", load_skill_asset_fn)?;
@@ -465,30 +472,26 @@ fn register_tools_in_lua(lua: &Lua, ctx: ToolContext) -> Result<()> {
     }
     let tool_name = tool.name.to_string();
     let ctx_clone = ctx.clone();
-    let handle_clone = handle.clone();
 
-    let lua_fn = lua.create_function(move |lua, args: Value| {
+    let lua_fn = lua.create_async_function(move |lua, args: Value| {
       let tool_name = tool_name.clone();
       let ctx = ctx_clone.clone();
 
-      let json_args = match args {
-        Value::Nil => "{}".to_string(),
-        _ => {
-          let json_val: serde_json::Value = lua.from_value(args)?;
-          json_val.to_string()
+      async move {
+        let json_args = match args {
+          Value::Nil => "{}".to_string(),
+          _ => {
+            let json_val: serde_json::Value = lua.from_value(args)?;
+            json_val.to_string()
+          }
+        };
+
+        let result = crate::tools::execute_tool(ctx, &tool_name, &json_args).await;
+
+        match result {
+          Ok(output) => Ok((Value::String(lua.create_string(output)?), Value::Nil)),
+          Err(e) => Ok((Value::Nil, Value::String(lua.create_string(e.to_string())?))),
         }
-      };
-
-      // Block on the async execute_tool function using the tokio runtime handle
-      let result = handle_clone
-        .block_on(async move { crate::tools::execute_tool(ctx, &tool_name, &json_args).await });
-
-      match result {
-        Ok(output) => Ok((Value::String(lua.create_string(&output)?), Value::Nil)),
-        Err(e) => Ok((
-          Value::Nil,
-          Value::String(lua.create_string(e.to_string())?),
-        )),
       }
     })?;
     globals.set(tool.name, lua_fn)?;
@@ -496,7 +499,7 @@ fn register_tools_in_lua(lua: &Lua, ctx: ToolContext) -> Result<()> {
   Ok(())
 }
 
-fn run_lua_vm_sync(lua: &Lua, code: &str) -> Result<String> {
+async fn run_lua_vm_async(lua: &Lua, code: &str) -> Result<String> {
   // 1. Capture stdout via print override
   let stdout_buffer = Arc::new(Mutex::new(String::new()));
   let buffer_clone = stdout_buffer.clone();
@@ -515,8 +518,12 @@ fn run_lua_vm_sync(lua: &Lua, code: &str) -> Result<String> {
   })?;
   lua.globals().set("print", print_fn)?;
 
-  // 2. Set instruction hook to abort infinite loops (abort after 32,000 instructions)
-  lua.set_hook(
+  // 2. Wrap the chunk in a function and run it inside a thread (coroutine)
+  let func = lua.load(code).into_function()?;
+  let thread = lua.create_thread(func)?;
+
+  // Set instruction hook on the thread to abort infinite loops (abort after 32,000 instructions)
+  thread.set_hook(
     HookTriggers::new().every_nth_instruction(32000),
     |_lua, _debug| {
       Err(mlua::Error::RuntimeError(
@@ -525,11 +532,8 @@ fn run_lua_vm_sync(lua: &Lua, code: &str) -> Result<String> {
     },
   )?;
 
-  // 3. Execute the chunk synchronously
-  let execution_result: Result<Value, _> = lua.load(code).eval();
-
-  // Remove hook after execution is done
-  lua.remove_hook();
+  // 3. Execute the thread asynchronously
+  let execution_result: Result<Value, _> = thread.into_async(())?.await;
 
   // 4. Format the final output
   let mut final_response = String::new();
@@ -576,7 +580,8 @@ async fn exec_tool(ctx: ToolContext, args: &str) -> Result<String> {
   tokio::task::spawn_blocking(move || {
     let lua = create_sandboxed_vm()?;
     register_tools_in_lua(&lua, ctx)?;
-    run_lua_vm_sync(&lua, &args.code)
+    let handle = tokio::runtime::Handle::current();
+    handle.block_on(async { run_lua_vm_async(&lua, &args.code).await })
   })
   .await
   .context("spawn_blocking panicked")?
@@ -593,7 +598,8 @@ async fn eval_tool(ctx: ToolContext, args: &str) -> Result<String> {
       *guard = Some(lua);
     }
     let lua = guard.as_ref().unwrap();
-    run_lua_vm_sync(lua, &args.code)
+    let handle = tokio::runtime::Handle::current();
+    handle.block_on(async { run_lua_vm_async(lua, &args.code).await })
   })
   .await
   .context("spawn_blocking panicked")?

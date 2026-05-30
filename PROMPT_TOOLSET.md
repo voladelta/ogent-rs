@@ -181,6 +181,31 @@ Queries Exa for code snippets, library details, or API signatures.
 
 ---
 
+### 5. Subagent Workflows & DSL
+
+#### `task_update(status, summary)`
+Sends a task status or progress update message. In non-verbose mode, these updates are printed directly to standard output, allowing progress monitoring of complex orchestrations.
+- **Parameters** (positional):
+  - `status` (string): Current phase or state name (e.g. `'init'`, `'review'`, `'fixing'`).
+  - `summary` (string): Human-readable progress description or update summary.
+- **Returns**: `(nil, nil)`
+
+#### `agent{role=..., task=..., profile=...}`
+Spawns a subagent in a fresh, isolated Lua VM sandbox sharing the parent's general configuration and system prompt, augmented by the subagent's specific role.
+- **Parameters** (table):
+  - `task` (string): The description of the task for the subagent to perform.
+  - `role` (string, optional): Soft-skill profile name, which dynamically loads custom instructions from `PROMPT_ROLE_<ROLE>.md` (e.g. `RUST_GURU`, `GO_GURU`). Defaults to `'subagent'`.
+  - `profile` (string, optional): Overrides the model profile (e.g. `'kimi'`). Defaults to the parent's model profile.
+- **Returns**: `(response_markdown_string, nil)` or `(nil, error)`
+
+#### `parallel{func1, func2, ...}`
+Runs multiple Lua functions concurrently inside the async executor, using cooperative multitasking, and waits for all of them to complete.
+- **Parameters** (array/list of functions):
+  - An array of anonymous functions or function names to execute in parallel.
+- **Returns**: `(array_of_results, nil)` or `(nil, error)`. If any task fails, it aborts and returns the failure error.
+
+---
+
 ## Edit Cycle: Read → Plan → Batch Apply
 
 Edits to code files should always follow a precise flow:

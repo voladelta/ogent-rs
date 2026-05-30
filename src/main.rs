@@ -37,7 +37,10 @@ async fn main() -> Result<()> {
     eprintln!("{err}");
     std::process::exit(2);
   }
-  let workspace = crate::workspace::Workspace::from_current_dir();
+  let mut workspace = crate::workspace::Workspace::from_current_dir();
+  if let Ok(home) = env::var("HOME") {
+    workspace.add_allowed_root(std::path::PathBuf::from(home).join(".ogent"));
+  }
   let config = config::load_or_exit(workspace.root());
   let profile_name = args
     .profile
@@ -78,15 +81,7 @@ async fn run_agent_cli(
     workspace.add_allowed_root(root.clone());
   }
 
-  let discovered = skill_store.discover_skills();
-  let mut loaded = Vec::new();
-  for name in skill_store.startup_skills() {
-    if let Ok(skill) = skill_store.load_skill(name) {
-      loaded.push(skill);
-    }
-  }
-
-  let messages = prompts::build_initial_messages(task, &discovered, &loaded);
+  let messages = prompts::build_initial_messages(task);
   let mut agent = Agent::new(
     workspace,
     client,
