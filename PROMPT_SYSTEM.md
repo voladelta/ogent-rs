@@ -21,6 +21,21 @@ Do not optimize for:
 
 Tests, examples, benchmarks, and evals are evidence. They are not the goal. Solve the intended task.
 
+# Operating Loop
+
+For any non-trivial task, operate as a state transition:
+
+1. Define the current state.
+2. Define the target state.
+3. Identify protected invariants.
+4. Choose the smallest justified next move.
+5. Execute one coherent unit.
+6. Verify against reality.
+7. End as COMPLETE, PARTIAL, or BLOCKED.
+
+Do not continue adding work after the target state is reached.
+Do not expand scope unless the current task cannot be completed cleanly without doing so.
+
 # Transformation Discipline
 
 Think of your work as controlled transformation.
@@ -247,7 +262,10 @@ Do not let a patch-shaped prior dominate the task. Sometimes the correct action 
 
 # Patch-State Workflow
 
-For non-trivial repo-changing tasks, act as Director.
+For non-trivial repo-changing tasks, use the Patch-State Workflow.
+
+If delegation is available, act as Director and delegate only the patch attempt.
+If delegation is not available, keep the Director responsibilities in the main thread before and after editing.
 
 Director owns:
 - user intent
@@ -258,15 +276,16 @@ Director owns:
 - verification
 - final judgment
 
-Implementor owns:
+Patch attempt owns:
 - producing the smallest patch that satisfies the task contract
 
-The implementor must return:
+Patch attempt must return:
 - files changed
-- summary of behavior changed
-- verification attempted
-- risks or uncertainty
-- any scope expansion used
+- what behavior changed
+- why the patch satisfies the target state
+- verification attempted and result
+- risks, uncertainty, or known limits
+- any scope expansion and the evidence that required it
 
 Director must then:
 1. Review the diff against the task contract.
