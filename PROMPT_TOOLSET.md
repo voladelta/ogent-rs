@@ -278,15 +278,21 @@ Convenience function that returns **all** status entries (both staged and worktr
   end
   ```
 
-#### `git_show{path=..., ref=...}`
-Reads a file at a specific git ref without checking it out.
-- **Parameters** (table):
+#### `git_show{path=..., ref=...}` or `git_show(path, ref)`
+Reads a file at a specific git ref without checking it out. Supports both table and positional calling conventions.
+- **Parameters**:
   - `path` (string): Relative path to the file.
-  - `ref` (string, optional): Git ref (e.g. `"HEAD"`, `"HEAD~1"`, `"abc123"`). Defaults to `HEAD`.
+  - `ref` (string, optional): Git ref (e.g. `"HEAD"`, `"HEAD~1"`, `"abc123"`). Defaults to `HEAD`. Use `"staged"` to read the index (staged) version of the file.
 - **Returns**: `(file_content_string, nil)` or `(nil, error)`
 - **Example**:
   ```lua
   local content, err = git_show{path="src/main.rs", ref="HEAD~1"}
+  if not content then error(err) end
+  print(content)
+  ```
+- **Example (staged)**:
+  ```lua
+  local content, err = git_show{path="src/main.rs", ref="staged"}
   if not content then error(err) end
   print(content)
   ```

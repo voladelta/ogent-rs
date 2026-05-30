@@ -40,7 +40,7 @@ struct GitChangesArgs {
 #[derive(Deserialize)]
 struct GitShowArgs {
   path: String,
-  #[serde(default = "default_head")]
+  #[serde(default = "default_head", alias = "ref")]
   git_ref: String,
 }
 
@@ -681,10 +681,32 @@ pub async fn git_changes(ctx: ToolContext, args: &str) -> Result<String> {
 pub async fn git_show(ctx: ToolContext, args: &str) -> Result<String> {
   let args: GitShowArgs = parse_args(args)?;
 
-  let spec = format!("{}:{}", args.git_ref, args.path);
-  let output = run_git(ctx.workspace.root(), &["show", &spec]).await?;
-  let content = String::from_utf8_lossy(&output.stdout);
-  Ok(content.into_owned())
+  let git_ref = if args.git_ref == "staged" {
+    ":0".to_string()
+  } else {
+    args.git_ref
+  };
+
+  let spec = format!("{}:{}", git_ref, args.path);
+  let output = run_git(ctx.workspace.root(), &["show", &spec]).await;
+  match output {
+    Ok(out) => {
+      let content = String::from_utf8_lossy(&out.stdout);
+      Ok(content.into_owned())
+    }
+    Err(e) => {
+      let err_str = e.to_string();
+      if err_str.contains("exists on disk, but not in")
+        || err_str.contains("does not exist")
+        || err_str.contains("Not a valid object name")
+        || err_str.contains("Path")
+      {
+        bail!("file '{}' not found at ref '{}'", args.path, git_ref)
+      } else {
+        Err(e)
+      }
+    }
+  }
 }
 
 pub async fn git_log(ctx: ToolContext, args: &str) -> Result<String> {

@@ -466,8 +466,14 @@ function git_changes(opts)
   if ok then ok = json_decode(ok) end
   return ok, err
 end
-function git_show(path, git_ref)
-  local ok, err = _t.git_show({path=path, ref=git_ref})
+function git_show(opts_or_path, git_ref)
+  local opts
+  if type(opts_or_path) == "table" then
+    opts = opts_or_path
+  else
+    opts = {path = opts_or_path, ref = git_ref}
+  end
+  local ok, err = _t.git_show(opts)
   return ok, err
 end
 function git_log(opts)
@@ -1040,14 +1046,68 @@ mod tests {
       "git_changes expected staged diff on staged.txt: {res}"
     );
 
-    // Test git_show
+    // Test git_show (positional syntax)
     let res = exec(
       ctx.clone(),
       r#"{"code": "local content, err = git_show('test.txt', 'HEAD'); if not content then error(err) end; return content:find('hello') ~= nil"}"#,
     )
     .await
     .unwrap();
-    assert!(res.contains("true"), "git_show result: {res}");
+    assert!(res.contains("true"), "git_show positional result: {res}");
+
+    // Test git_show (table syntax)
+    let res = exec(
+      ctx.clone(),
+      r#"{"code": "local content, err = git_show{path='test.txt', ref='HEAD'}; if not content then error(err) end; return content:find('hello') ~= nil"}"#,
+    )
+    .await
+    .unwrap();
+    assert!(res.contains("true"), "git_show table syntax result: {res}");
+
+    // Test git_show on staged file using ref='staged'
+    let res = exec(
+      ctx.clone(),
+      r#"{"code": "local content, err = git_show{path='staged.txt', ref='staged'}; if not content then error(err) end; return content:find('staged content') ~= nil"}"#,
+    )
+    .await
+    .unwrap();
+    assert!(res.contains("true"), "git_show staged result: {res}");
+
+    // Test git_show error when file not found at ref
+    let res = exec(
+      ctx.clone(),
+      r#"{"code": "local content, err = git_show{path='nonexistent.txt', ref='HEAD'}; if content then error('expected error') end; return err"}"#,
+    )
+    .await
+    .unwrap();
+    assert!(
+      res.contains("not found at ref"),
+      "git_show missing file error result: {res}"
+    );
+
+    // Make a second commit so HEAD~1 exists for testing non-default ref
+    std::fs::write(root.join("test.txt"), "hello world commit2\n").unwrap();
+    std::process::Command::new("git")
+      .arg("-C")
+      .arg(root)
+      .args(["add", "test.txt"])
+      .output()
+      .unwrap();
+    std::process::Command::new("git")
+      .arg("-C")
+      .arg(root)
+      .args(["commit", "-m", "second"])
+      .output()
+      .unwrap();
+
+    // Test git_show at HEAD~1 (should show 'hello' from first commit)
+    let res = exec(
+      ctx.clone(),
+      r#"{"code": "local content, err = git_show{path='test.txt', ref='HEAD~1'}; if not content then error(err) end; return content:find('hello world commit2') == nil and content:find('hello') ~= nil"}"#,
+    )
+    .await
+    .unwrap();
+    assert!(res.contains("true"), "git_show HEAD~1 result: {res}");
 
     // Test git_log
     let res = exec(
