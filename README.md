@@ -33,6 +33,7 @@ ogent --profile kimi "Review the staged diff"
 | Flag | Meaning |
 | --- | --- |
 | `--profile <name>` | Model/profile selection, overriding the default in `config.yaml`. Available profiles: `ds-flash`, `ds-flash-max`, `ds-pro`, `ds-pro-max`, `kimi`, `glm`, `mimo`, `mimo-pro`. |
+| `-v`, `--verbose`  | Show full thinking reasoning trace (`[thinking]`), Lua execution code, and tool returns. Default mode only prints actor explanation reasons, task updates, and final assistant replies. |
 
 ---
 
@@ -70,6 +71,11 @@ Within the Lua execution sandbox, scripts can invoke workspace operations direct
 
 ### Web Search (Exa)
 * `web_search{query=..., num_results=..., type=...}` / `web_read{urls=..., mode=...}` / `web_code_context{query=...}`: Queries the web, reads highlight summaries, or fetches real-world code snippets.
+
+### Subagent Workflows & DSL
+* `task_update(status, summary)`: Sends a progress/status update (e.g. `'init'`, `'review'`, `'fixing'`) to standard output.
+* `agent{role=..., task=..., profile=...}`: Spawns a subagent concurrently in an isolated sandboxed VM, loading specialized prompts if defined. Falls back to `PROMPT_ROLE_GENERIC.md` if no role prompt file is found in `.ogent/`, `cwd/`, or `~/.ogent/`.
+* `parallel{func1, func2, ...}`: Runs multiple functions concurrently using cooperative multitasking and waits for all of them to complete.
 
 ---
 
