@@ -254,16 +254,18 @@ Returns a JSON-decoded Lua array of file deltas with hunks, line numbers, and ch
   end
   ```
 
-#### `git_changes{paths=..., context=..., stat_only=...}`
+#### `git_changes{paths=..., context=..., stat_only=..., base=...}`
 Convenience function that returns **all** status entries (both staged and worktree) with diff fields attached for files that have content changes. Covers the 90 % use case of "what changed and how".
 - **Parameters** (table, optional):
   - `paths` (array of strings, optional): Restrict to specific relative paths.
   - `context` (integer, optional): Context lines per hunk. Defaults to `3`.
   - `stat_only` (boolean, optional): If `true`, omit `hunks` and return only stat summary.
+  - `base` (string, optional): Compare against a specific ref (e.g. `"HEAD~3"`) instead of the default `HEAD`. Both `diff` (worktree vs base) and `staged_diff` (index vs base) use this ref.
 - **Returns**: `(array_of_entries, nil)` or `(nil, error)`
 - **Note**: Each entry has the same fields as `git_status`, plus:
-  - `diff` (object or nil): worktree changes (index vs worktree), same shape as `git_diff` deltas.
-  - `staged_diff` (object or nil): staged changes (HEAD vs index), same shape.
+  - `diff` (object or nil): worktree changes (worktree vs base, or index vs worktree if no `base`), same shape as `git_diff` deltas.
+  - `staged_diff` (object or nil): staged changes (index vs base, or HEAD vs index if no `base`), same shape.
+- **Output size warning**: Full hunks on large changes can exceed the 16,384-character stdout cap. For large refactors, use `stat_only=true` first to scope the change, then call `git_diff` on specific files.
 - **Example**:
   ```lua
   local changes, err = git_changes()
@@ -298,17 +300,23 @@ Reads a file at a specific git ref without checking it out. Supports both table 
   ```
 
 #### `git_log{paths=..., n=...}`
-Returns brief commit history for a set of paths.
+Returns structured commit history for a set of paths.
 - **Parameters** (table, optional):
   - `paths` (array of strings, optional): Restrict to specific relative paths.
   - `n` (integer, optional): Max number of commits. Defaults to `10`.
-- **Returns**: `(log_text, nil)` or `(nil, error)`
-- **Note**: Returns plain text (one line per commit in `--oneline` format), not JSON.
+- **Returns**: `(array_of_entries, nil)` or `(nil, error)`
+- **Entry fields**:
+  - `sha` (string): Commit hash.
+  - `subject` (string): Commit subject line.
+  - `author` (string): Author name.
+  - `date` (string): Author date.
 - **Example**:
   ```lua
   local log, err = git_log{paths={"src/main.rs"}, n=5}
   if not log then error(err) end
-  print(log)
+  for _, e in ipairs(log) do
+    print(e.sha, e.subject, e.author, e.date)
+  end
   ```
 
 ---

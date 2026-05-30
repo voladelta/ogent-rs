@@ -477,7 +477,9 @@ function git_show(opts_or_path, git_ref)
   return ok, err
 end
 function git_log(opts)
-  return _t.git_log(opts or {})
+  local ok, err = _t.git_log(opts or {})
+  if ok then ok = json_decode(ok) end
+  return ok, err
 end
 "#;
   lua.load(positional_wrappers).exec()?;
@@ -1046,6 +1048,22 @@ mod tests {
       "git_changes expected staged diff on staged.txt: {res}"
     );
 
+    // Test git_changes with base=HEAD (should still show diffs)
+    let res = exec(
+      ctx.clone(),
+      r#"{"code": "local changes, err = git_changes{base='HEAD'}; if not changes then error(err) end; local out = {}; for _, e in ipairs(changes) do if e.diff then table.insert(out, e.path .. ':diff:' .. #e.diff.hunks) end if e.staged_diff then table.insert(out, e.path .. ':staged_diff:' .. #e.staged_diff.hunks) end end; return table.concat(out, ',')"}"#,
+    )
+    .await
+    .unwrap();
+    assert!(
+      res.contains("test.txt:diff:1"),
+      "git_changes base=HEAD expected worktree diff on test.txt: {res}"
+    );
+    assert!(
+      res.contains("staged.txt:staged_diff:1"),
+      "git_changes base=HEAD expected staged diff on staged.txt: {res}"
+    );
+
     // Test git_show (positional syntax)
     let res = exec(
       ctx.clone(),
@@ -1112,7 +1130,7 @@ mod tests {
     // Test git_log
     let res = exec(
       ctx,
-      r#"{"code": "local log, err = git_log({n=5}); if not log then error(err) end; return log:find('init') ~= nil"}"#,
+      r#"{"code": "local log, err = git_log({n=5}); if not log then error(err) end; for _, e in ipairs(log) do if e.subject:find('init') then return true end end; return false"}"#,
     )
     .await
     .unwrap();

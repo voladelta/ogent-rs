@@ -29,6 +29,7 @@ struct GitDiffArgs {
 
 #[derive(Deserialize)]
 struct GitChangesArgs {
+  base: Option<String>,
   #[serde(default)]
   paths: Vec<String>,
   #[serde(default = "default_three")]
@@ -575,6 +576,7 @@ async fn run_diff(
   context: u32,
   staged: bool,
   stat_only: bool,
+  base: Option<&str>,
 ) -> Result<HashMap<String, GitDiffDelta>> {
   let mut git_args: Vec<String> = vec![
     "diff".to_string(),
@@ -583,6 +585,9 @@ async fn run_diff(
   ];
   if staged {
     git_args.push("--cached".to_string());
+  }
+  if let Some(base) = base {
+    git_args.push(base.to_string());
   }
   git_args.push("--".to_string());
   for p in paths {
@@ -639,6 +644,7 @@ pub async fn git_changes(ctx: ToolContext, args: &str) -> Result<String> {
   }
 
   // 3. Run diffs
+  let base = args.base.as_deref();
   let worktree_deltas = if !worktree_paths.is_empty() {
     run_diff(
       ctx.workspace.root(),
@@ -646,6 +652,7 @@ pub async fn git_changes(ctx: ToolContext, args: &str) -> Result<String> {
       args.context,
       false,
       args.stat_only,
+      base,
     )
     .await?
   } else {
@@ -659,6 +666,7 @@ pub async fn git_changes(ctx: ToolContext, args: &str) -> Result<String> {
       args.context,
       true,
       args.stat_only,
+      base,
     )
     .await?
   } else {
@@ -709,12 +717,39 @@ pub async fn git_show(ctx: ToolContext, args: &str) -> Result<String> {
   }
 }
 
+#[derive(Serialize)]
+struct GitLogEntry {
+  sha: String,
+  subject: String,
+  author: String,
+  date: String,
+}
+
+fn parse_git_log(text: &str) -> Result<Vec<GitLogEntry>> {
+  let mut entries = Vec::new();
+  for line in text.lines() {
+    if line.is_empty() {
+      continue;
+    }
+    let parts: Vec<&str> = line.split('\x1E').collect();
+    if parts.len() >= 4 {
+      entries.push(GitLogEntry {
+        sha: parts[0].to_string(),
+        subject: parts[1].to_string(),
+        author: parts[2].to_string(),
+        date: parts[3].to_string(),
+      });
+    }
+  }
+  Ok(entries)
+}
+
 pub async fn git_log(ctx: ToolContext, args: &str) -> Result<String> {
   let args: GitLogArgs = parse_args(args)?;
 
   let mut git_args: Vec<String> = vec![
     "log".to_string(),
-    "--oneline".to_string(),
+    "--format=%H%x1E%s%x1E%an%x1E%ad".to_string(),
     "--no-decorate".to_string(),
     format!("-n{}", args.n),
   ];
@@ -731,7 +766,8 @@ pub async fn git_log(ctx: ToolContext, args: &str) -> Result<String> {
   )
   .await?;
   let text = String::from_utf8_lossy(&output.stdout);
-  Ok(text.into_owned())
+  let entries = parse_git_log(&text)?;
+  Ok(serde_json::to_string(&entries)?)
 }
 
 #[cfg(test)]
