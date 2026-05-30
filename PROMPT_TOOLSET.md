@@ -208,6 +208,7 @@ Returns a JSON-decoded Lua array of file change entries.
   - `index_char` (string): Single-character index state (`" "`, `"A"`, `"D"`, `"M"`, `"R"`, `"C"`, `"T"`, `"U"`, etc.).
   - `worktree_char` (string): Single-character worktree state (same set as `index_char`).
   - `display` (string): Two-letter porcelain code (e.g. `" M"`, `"R "`).
+  - `state_description` (string): Human-readable summary (e.g. `"Modified in worktree"`, `"Added in index, modified in worktree"`, `"Renamed in index"`).
 - **Example**:
   ```lua
   local changes, err = git_status{untracked = true}
@@ -238,6 +239,7 @@ Returns a JSON-decoded Lua array of file deltas with hunks, line numbers, and ch
     - `old_start`, `old_lines`, `new_start`, `new_lines` (integers)
     - `header` (string): The `@@` header line.
     - `lines` (array): Each line has `type` (`"context"`, `"deletion"`, `"addition"`), `text`, `old_line` (integer or nil), `new_line` (integer or nil).
+- **Note**: Renames or copies with identical content (`similarity = 100`) may produce **zero hunks**. This is correct — there are no line-level differences to show.
 - **Example**:
   ```lua
   local deltas, err = git_diff{paths = {"src/main.rs"}, context = 3}
@@ -310,6 +312,7 @@ Returns structured commit history for a set of paths.
   - `subject` (string): Commit subject line.
   - `author` (string): Author name.
   - `date` (string): Author date.
+- **Note**: Returns an empty array `[]` (not an error) when a file has no commit history.
 - **Example**:
   ```lua
   local log, err = git_log{paths={"src/main.rs"}, n=5}

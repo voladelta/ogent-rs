@@ -77,6 +77,7 @@ struct GitStatusEntry {
   index_char: String,
   worktree_char: String,
   display: String,
+  state_description: String,
   #[serde(skip_serializing_if = "Option::is_none")]
   diff: Option<GitDiffDelta>,
   #[serde(skip_serializing_if = "Option::is_none")]
@@ -215,6 +216,7 @@ fn parse_porcelain_v1_z(stdout: &[u8]) -> Result<Vec<GitStatusEntry>> {
           index_char: "?".to_string(),
           worktree_char: "?".to_string(),
           display,
+          state_description: "Untracked".to_string(),
           diff: None,
           staged_diff: None,
         });
@@ -230,6 +232,7 @@ fn parse_porcelain_v1_z(stdout: &[u8]) -> Result<Vec<GitStatusEntry>> {
           index_char: "!".to_string(),
           worktree_char: "!".to_string(),
           display,
+          state_description: "Ignored".to_string(),
           diff: None,
           staged_diff: None,
         });
@@ -266,6 +269,7 @@ fn parse_porcelain_v1_z(stdout: &[u8]) -> Result<Vec<GitStatusEntry>> {
           index_char: x.to_string(),
           worktree_char: y.to_string(),
           display,
+          state_description: state_description(x, y),
           diff: None,
           staged_diff: None,
         });
@@ -308,6 +312,46 @@ fn resolve_status(x: char, y: char) -> String {
     _ => "modified",
   }
   .to_string()
+}
+
+fn state_description(x: char, y: char) -> String {
+  fn side_word(c: char) -> &'static str {
+    match c {
+      'M' => "modified",
+      'A' => "added",
+      'D' => "deleted",
+      'R' => "renamed",
+      'C' => "copied",
+      'U' => "unmerged",
+      'T' => "type changed",
+      '?' => "untracked",
+      '!' => "ignored",
+      _ => "modified",
+    }
+  }
+  if x == '?' && y == '?' {
+    return "Untracked".to_string();
+  }
+  if x == '!' && y == '!' {
+    return "Ignored".to_string();
+  }
+  let index = side_word(x);
+  let worktree = side_word(y);
+  if x == ' ' {
+    format!("{} in worktree", capitalize(worktree))
+  } else if y == ' ' {
+    format!("{} in index", capitalize(index))
+  } else {
+    format!("{} in index, {} in worktree", capitalize(index), worktree)
+  }
+}
+
+fn capitalize(s: &str) -> String {
+  let mut c = s.chars();
+  match c.next() {
+    None => String::new(),
+    Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+  }
 }
 
 pub async fn git_diff(ctx: ToolContext, args: &str) -> Result<String> {
@@ -928,16 +972,19 @@ index abc..def 100644
     assert_eq!(entries[0].index_char, " ");
     assert_eq!(entries[0].worktree_char, "M");
     assert_eq!(entries[0].display, " M");
+    assert_eq!(entries[0].state_description, "Modified in worktree");
 
     assert_eq!(entries[1].path, "untracked.txt");
     assert_eq!(entries[1].status, "untracked");
     assert_eq!(entries[1].index_char, "?");
     assert_eq!(entries[1].worktree_char, "?");
+    assert_eq!(entries[1].state_description, "Untracked");
 
     assert_eq!(entries[2].path, "ignored.txt");
     assert_eq!(entries[2].status, "ignored");
     assert_eq!(entries[2].index_char, "!");
     assert_eq!(entries[2].worktree_char, "!");
+    assert_eq!(entries[2].state_description, "Ignored");
   }
 
   #[test]
@@ -952,6 +999,7 @@ index abc..def 100644
     assert!(!entries[0].worktree);
     assert_eq!(entries[0].index_char, "R");
     assert_eq!(entries[0].worktree_char, " ");
+    assert_eq!(entries[0].state_description, "Renamed in index");
   }
 
   #[test]
@@ -963,6 +1011,10 @@ index abc..def 100644
     assert_eq!(entries[0].status, "modified");
     assert!(entries[0].staged);
     assert!(entries[0].worktree);
+    assert_eq!(
+      entries[0].state_description,
+      "Added in index, modified in worktree"
+    );
   }
 
   #[test]
@@ -978,16 +1030,28 @@ index abc..def 100644
     assert_eq!(entries[0].worktree_char, "U");
     assert!(entries[0].staged);
     assert!(entries[0].worktree);
+    assert_eq!(
+      entries[0].state_description,
+      "Unmerged in index, unmerged in worktree"
+    );
 
     assert_eq!(entries[1].path, "added_by_us.rs");
     assert_eq!(entries[1].status, "unmerged");
     assert_eq!(entries[1].index_char, "A");
     assert_eq!(entries[1].worktree_char, "U");
+    assert_eq!(
+      entries[1].state_description,
+      "Added in index, unmerged in worktree"
+    );
 
     assert_eq!(entries[2].path, "added_by_them.rs");
     assert_eq!(entries[2].status, "unmerged");
     assert_eq!(entries[2].index_char, "U");
     assert_eq!(entries[2].worktree_char, "A");
+    assert_eq!(
+      entries[2].state_description,
+      "Unmerged in index, added in worktree"
+    );
   }
 
   #[test]
@@ -1001,5 +1065,6 @@ index abc..def 100644
     assert_eq!(entries[0].worktree_char, " ");
     assert!(entries[0].staged);
     assert!(!entries[0].worktree);
+    assert_eq!(entries[0].state_description, "Type changed in index");
   }
 }
