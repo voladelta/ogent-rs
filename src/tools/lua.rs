@@ -1,12 +1,12 @@
 use anyhow::{Context, Result};
 use mlua::{HookTriggers, Lua, LuaSerdeExt, StdLib, Value};
 use parking_lot::Mutex;
-use serde::Deserialize;
+
 use serde_json::json;
 use std::sync::Arc;
 
 use crate::tools::ToolContext;
-use crate::tools::parse_args;
+
 use crate::types::{Tool, ToolFunction};
 
 const MAX_AGENT_DEPTH: u32 = 3;
@@ -567,31 +567,18 @@ async fn run_lua_vm_async(lua: &Lua, code: &str) -> Result<String> {
 // With mlua's `send` feature, Lua is Send and the `thread.into_async()` future
 // is also Send, so we can run it directly in async context without burning a
 // blocking thread.
-pub async fn exec(ctx: ToolContext, args: &str) -> Result<String> {
-  #[derive(Deserialize)]
-  struct LuaArgs {
-    code: String,
-    #[allow(dead_code)]
-    reason: Option<String>,
-  }
-  let args: LuaArgs = parse_args(args)?;
+pub async fn exec(ctx: ToolContext, code: &str) -> Result<String> {
   let lua = create_sandboxed_vm()?;
   register_tools_in_lua(&lua, ctx)?;
-  run_lua_vm_async(&lua, &args.code).await
+  run_lua_vm_async(&lua, code).await
 }
 
 // eval is stateful: it reuses the same Lua VM across calls via a session lock.
 // MutexGuard is !Send, so we cannot hold the guard across an await
 // in a Send future. We confine the locked operation to spawn_blocking so the
 // guard never crosses an await boundary.
-pub async fn eval(ctx: ToolContext, args: &str) -> Result<String> {
-  #[derive(Deserialize)]
-  struct LuaArgs {
-    code: String,
-    #[allow(dead_code)]
-    reason: Option<String>,
-  }
-  let args: LuaArgs = parse_args(args)?;
+pub async fn eval(ctx: ToolContext, code: &str) -> Result<String> {
+  let code = code.to_string();
   let session = ctx.lua_session.clone();
   tokio::task::spawn_blocking(move || {
     let mut guard = session.lock();
@@ -602,7 +589,7 @@ pub async fn eval(ctx: ToolContext, args: &str) -> Result<String> {
     }
     let lua = guard.as_ref().unwrap();
     let handle = tokio::runtime::Handle::current();
-    handle.block_on(run_lua_vm_async(lua, &args.code))
+    handle.block_on(run_lua_vm_async(lua, &code))
   })
   .await
   .context("spawn_blocking panicked")?
@@ -650,7 +637,7 @@ mod tests {
   #[tokio::test]
   async fn test_exec_stateless() {
     let ctx = test_context();
-    let res = exec(ctx.clone(), r#"{"code": "print('hello'); return 2 + 2"}"#)
+    let res = exec(ctx.clone(), "print('hello'); return 2 + 2")
       .await
       .unwrap();
     assert!(res.contains("Stdout Output"));
@@ -659,34 +646,27 @@ mod tests {
     assert!(res.contains("4"));
 
     // Verify it is stateless (variables don't persist)
-    exec(ctx.clone(), r#"{"code": "global_var = 42"}"#)
-      .await
-      .unwrap();
-    let res2 = exec(ctx, r#"{"code": "return global_var"}"#).await.unwrap();
+    exec(ctx.clone(), "global_var = 42").await.unwrap();
+    let res2 = exec(ctx, "return global_var").await.unwrap();
     assert!(res2.contains("Nil") || res2.contains("Success (no output or return value)."));
   }
 
   #[tokio::test]
   async fn test_eval_stateful() {
     let ctx = test_context();
-    let res = eval(
-      ctx.clone(),
-      r#"{"code": "persisted_var = 100; return persisted_var"}"#,
-    )
-    .await
-    .unwrap();
-    assert!(res.contains("100"));
-
-    let res2 = eval(ctx, r#"{"code": "return persisted_var + 50"}"#)
+    let res = eval(ctx.clone(), "persisted_var = 100; return persisted_var")
       .await
       .unwrap();
+    assert!(res.contains("100"));
+
+    let res2 = eval(ctx, "return persisted_var + 50").await.unwrap();
     assert!(res2.contains("150"));
   }
 
   #[tokio::test]
   async fn test_infinite_loop_aborts() {
     let ctx = test_context();
-    let res = exec(ctx, r#"{"code": "while true do end"}"#).await.unwrap();
+    let res = exec(ctx, "while true do end").await.unwrap();
     assert!(res.contains("Runtime Error"));
     assert!(res.contains("limit exceeded"));
   }
@@ -694,7 +674,7 @@ mod tests {
   #[tokio::test]
   async fn test_sandbox_restricts_os() {
     let ctx = test_context();
-    let res = exec(ctx, r#"{"code": "return os"}"#).await.unwrap();
+    let res = exec(ctx, "return os").await.unwrap();
     assert!(res.contains("Nil") || res.contains("Success"));
   }
 
@@ -703,7 +683,7 @@ mod tests {
     let ctx = test_context();
     let res = exec(
       ctx,
-      r#"{"code": "local content, err = read_file('Cargo.toml', 0, 100); return content:find('ogent') ~= nil"}"#,
+      "local content, err = read_file('Cargo.toml', 0, 100); return content:find('ogent') ~= nil",
     )
     .await
     .unwrap();
@@ -744,9 +724,7 @@ mod tests {
       return read_file('temp_test_anchors.txt')
     "#;
 
-    let res = exec(ctx, &json!({ "code": lua_code }).to_string())
-      .await
-      .unwrap();
+    let res = exec(ctx, lua_code).await.unwrap();
     let _ = std::fs::remove_file(full_path);
 
     assert!(res.contains("line 1"), "Result was: {}", res);
@@ -795,7 +773,7 @@ mod tests {
     // Test list_skills()
     let list_res = exec(
       ctx.clone(),
-      r#"{"code": "local res, err = list_skills(); if not res then error(err) end; return res"}"#,
+      "local res, err = list_skills(); if not res then error(err) end; return res",
     )
     .await
     .unwrap();
@@ -803,7 +781,12 @@ mod tests {
     assert!(list_res.contains("A test skill for Lua"));
 
     // Test load_skill("my_test_skill")
-    let load_res = exec(ctx.clone(), r#"{"code": "local res, err = load_skill('my_test_skill'); if not res then error(err) end; return res"}"#).await.unwrap();
+    let load_res = exec(
+      ctx.clone(),
+      "local res, err = load_skill('my_test_skill'); if not res then error(err) end; return res",
+    )
+    .await
+    .unwrap();
     assert!(load_res.contains("skill name="));
     assert!(load_res.contains("my_test_skill"));
     assert!(load_res.contains("Hello from skill body!"));
@@ -813,9 +796,7 @@ mod tests {
       r#"local res, err = load_skill_asset('{}', 'references/MANUAL.md'); if not res then error(err) end; return res"#,
       skill_dir.to_string_lossy()
     );
-    let asset_res = exec(ctx.clone(), &json!({ "code": load_asset_code }).to_string())
-      .await
-      .unwrap();
+    let asset_res = exec(ctx.clone(), &load_asset_code).await.unwrap();
     assert!(asset_res.contains("This is MANUAL content."));
 
     // Test load_skill_asset directory traversal rejection
@@ -823,16 +804,12 @@ mod tests {
       r#"local res, err = load_skill_asset('{}', '../../Cargo.toml'); return err"#,
       skill_dir.to_string_lossy()
     );
-    let bad_res = exec(ctx.clone(), &json!({ "code": bad_asset_code }).to_string())
-      .await
-      .unwrap();
+    let bad_res = exec(ctx.clone(), &bad_asset_code).await.unwrap();
     assert!(bad_res.contains("outside the skill root directory"));
 
     // Test load_skill_asset non-whitelisted root rejection
     let bad_root_code = r#"local res, err = load_skill_asset('/tmp', 'foo'); return err"#;
-    let bad_res2 = exec(ctx.clone(), &json!({ "code": bad_root_code }).to_string())
-      .await
-      .unwrap();
+    let bad_res2 = exec(ctx.clone(), bad_root_code).await.unwrap();
     assert!(bad_res2.contains("not inside a whitelisted"));
 
     let _ = std::fs::remove_dir_all(temp);
@@ -849,9 +826,7 @@ mod tests {
       })
       return results
     "#;
-    let res = exec(ctx, &json!({ "code": code }).to_string())
-      .await
-      .unwrap();
+    let res = exec(ctx, code).await.unwrap();
     assert!(res.contains("30"), "Res was: {res}");
     assert!(res.contains("70"), "Res was: {res}");
   }
@@ -867,9 +842,7 @@ mod tests {
       if not files then error(err) end
       return files
     "#;
-    let res = exec(ctx, &json!({ "code": code }).to_string())
-      .await
-      .unwrap();
+    let res = exec(ctx, code).await.unwrap();
     let _ = std::fs::remove_file(temp_file);
 
     assert!(res.contains("temp_test_glob.txt"), "Res was: {res}");
@@ -881,12 +854,9 @@ mod tests {
     // Lua::new_with in mlua loads BASE implicitly even when not specified in StdLib flags,
     // but we keep this test to catch any future regression if the sandbox setup changes.
     let ctx = test_context();
-    let res = exec(
-      ctx,
-      r#"{"code": "for k,v in pairs({a=1}) do return k end"}"#,
-    )
-    .await
-    .unwrap();
+    let res = exec(ctx, "for k,v in pairs({a=1}) do return k end")
+      .await
+      .unwrap();
     assert!(
       res.contains("\"a\""),
       "Expected pairs() to work (BASE lib loaded). Got: {res}"
@@ -929,7 +899,7 @@ mod tests {
     };
 
     // eval should create a fresh VM and succeed despite the previous panic.
-    let res = eval(ctx, r#"{"code": "return 42"}"#).await.unwrap();
+    let res = eval(ctx, "return 42").await.unwrap();
     assert!(
       res.contains("42"),
       "eval should recover after panic. Got: {res}"
@@ -1010,7 +980,7 @@ mod tests {
     // Test git_status
     let res = exec(
       ctx.clone(),
-      r#"{"code": "local status, err = git_status(); if not status then error(err) end; local out = {}; for _, e in ipairs(status) do table.insert(out, e.path .. ':' .. e.status) end; return table.concat(out, ',')"}"#,
+      "local status, err = git_status(); if not status then error(err) end; local out = {}; for _, e in ipairs(status) do table.insert(out, e.path .. ':' .. e.status) end; return table.concat(out, ',')",
     )
     .await
     .unwrap();
@@ -1023,7 +993,7 @@ mod tests {
     // Test git_diff
     let res = exec(
       ctx.clone(),
-      r#"{"code": "local diff, err = git_diff(); if not diff then error(err) end; return diff[1].path .. ':' .. diff[1].change_type .. ':' .. #diff[1].hunks"}"#,
+      "local diff, err = git_diff(); if not diff then error(err) end; return diff[1].path .. ':' .. diff[1].change_type .. ':' .. #diff[1].hunks",
     )
     .await
     .unwrap();
@@ -1035,7 +1005,7 @@ mod tests {
     // Test git_changes — worktree diff on test.txt, staged_diff on staged.txt
     let res = exec(
       ctx.clone(),
-      r#"{"code": "local changes, err = git_changes(); if not changes then error(err) end; local out = {}; for _, e in ipairs(changes) do if e.diff then table.insert(out, e.path .. ':diff:' .. #e.diff.hunks) end if e.staged_diff then table.insert(out, e.path .. ':staged_diff:' .. #e.staged_diff.hunks) end end; return table.concat(out, ',')"}"#,
+      "local changes, err = git_changes(); if not changes then error(err) end; local out = {}; for _, e in ipairs(changes) do if e.diff then table.insert(out, e.path .. ':diff:' .. #e.diff.hunks) end if e.staged_diff then table.insert(out, e.path .. ':staged_diff:' .. #e.staged_diff.hunks) end end; return table.concat(out, ',')",
     )
     .await
     .unwrap();
@@ -1051,7 +1021,7 @@ mod tests {
     // Test git_changes with base=HEAD (should still show diffs)
     let res = exec(
       ctx.clone(),
-      r#"{"code": "local changes, err = git_changes{base='HEAD'}; if not changes then error(err) end; local out = {}; for _, e in ipairs(changes) do if e.diff then table.insert(out, e.path .. ':diff:' .. #e.diff.hunks) end if e.staged_diff then table.insert(out, e.path .. ':staged_diff:' .. #e.staged_diff.hunks) end end; return table.concat(out, ',')"}"#,
+      "local changes, err = git_changes{base='HEAD'}; if not changes then error(err) end; local out = {}; for _, e in ipairs(changes) do if e.diff then table.insert(out, e.path .. ':diff:' .. #e.diff.hunks) end if e.staged_diff then table.insert(out, e.path .. ':staged_diff:' .. #e.staged_diff.hunks) end end; return table.concat(out, ',')",
     )
     .await
     .unwrap();
@@ -1067,7 +1037,7 @@ mod tests {
     // Test git_show (positional syntax)
     let res = exec(
       ctx.clone(),
-      r#"{"code": "local content, err = git_show('test.txt', 'HEAD'); if not content then error(err) end; return content:find('hello') ~= nil"}"#,
+      "local content, err = git_show('test.txt', 'HEAD'); if not content then error(err) end; return content:find('hello') ~= nil",
     )
     .await
     .unwrap();
@@ -1076,7 +1046,7 @@ mod tests {
     // Test git_show (table syntax)
     let res = exec(
       ctx.clone(),
-      r#"{"code": "local content, err = git_show{path='test.txt', ref='HEAD'}; if not content then error(err) end; return content:find('hello') ~= nil"}"#,
+      "local content, err = git_show{path='test.txt', ref='HEAD'}; if not content then error(err) end; return content:find('hello') ~= nil",
     )
     .await
     .unwrap();
@@ -1085,7 +1055,7 @@ mod tests {
     // Test git_show on staged file using ref='staged'
     let res = exec(
       ctx.clone(),
-      r#"{"code": "local content, err = git_show{path='staged.txt', ref='staged'}; if not content then error(err) end; return content:find('staged content') ~= nil"}"#,
+      "local content, err = git_show{path='staged.txt', ref='staged'}; if not content then error(err) end; return content:find('staged content') ~= nil",
     )
     .await
     .unwrap();
@@ -1094,7 +1064,7 @@ mod tests {
     // Test git_show error when file not found at ref
     let res = exec(
       ctx.clone(),
-      r#"{"code": "local content, err = git_show{path='nonexistent.txt', ref='HEAD'}; if content then error('expected error') end; return err"}"#,
+      "local content, err = git_show{path='nonexistent.txt', ref='HEAD'}; if content then error('expected error') end; return err",
     )
     .await
     .unwrap();
@@ -1121,7 +1091,7 @@ mod tests {
     // Test git_show at HEAD~1 (should show 'hello' from first commit)
     let res = exec(
       ctx.clone(),
-      r#"{"code": "local content, err = git_show{path='test.txt', ref='HEAD~1'}; if not content then error(err) end; return content:find('hello world commit2') == nil and content:find('hello') ~= nil"}"#,
+      "local content, err = git_show{path='test.txt', ref='HEAD~1'}; if not content then error(err) end; return content:find('hello world commit2') == nil and content:find('hello') ~= nil",
     )
     .await
     .unwrap();
@@ -1130,7 +1100,7 @@ mod tests {
     // Test git_log
     let res = exec(
       ctx,
-      r#"{"code": "local log, err = git_log({n=5}); if not log then error(err) end; for _, e in ipairs(log) do if e.subject:find('init') then return true end end; return false"}"#,
+      "local log, err = git_log({n=5}); if not log then error(err) end; for _, e in ipairs(log) do if e.subject:find('init') then return true end end; return false",
     )
     .await
     .unwrap();
