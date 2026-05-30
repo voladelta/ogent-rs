@@ -319,8 +319,8 @@ fn register_tools_in_lua(lua: &Lua, ctx: ToolContext) -> Result<()> {
     lua,
     globals,
     ctx,
-    "edit_hash_anchors",
-    crate::tools::fs::edit_hash_anchors
+    "apply_anchor_edits",
+    crate::tools::fs::apply_anchor_edits
   );
 
   // Register repo tools
@@ -397,7 +397,7 @@ _t.read_file = read_file
 _t.append_file = append_file
 _t.file_info = file_info
 _t.read_hash_anchors = read_hash_anchors
-_t.edit_hash_anchors = edit_hash_anchors
+_t.apply_anchor_edits = apply_anchor_edits
 _t.load_skill = load_skill
 _t.list_skills = list_skills
 _t.load_skill_asset = load_skill_asset
@@ -433,7 +433,7 @@ function apply_anchor_edits(...)
   else
     path, ops = ...
   end
-  local ok, err = _t.edit_hash_anchors({path=path, ops=ops})
+  local ok, err = _t.apply_anchor_edits({path=path, ops=ops})
   if ok then _G._last_hash_anchor_path = path end
   return ok, err
 end

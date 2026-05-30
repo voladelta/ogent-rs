@@ -162,7 +162,7 @@ that is truncated with a visible marker, preventing runaway tool results from fi
 ### [`src/tools/fs.rs`](src/tools/fs.rs)
 
 Filesystem tools: `read_file`, `write_file`, `append_file`, `file_info`, `read_hash_anchors`,
-`edit_hash_anchors`.
+`apply_anchor_edits`.
 
 All path arguments go through `workspace.workspace_path()` or `workspace.readable_path()`
 before any I/O occurs. No tool in this module ever constructs an absolute path independently.

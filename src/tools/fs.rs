@@ -3,7 +3,7 @@ use serde::Deserialize;
 use serde_json::json;
 use std::fs;
 
-use crate::hashline::{apply_anchor_edits, render_hashlines};
+use crate::hashline::{apply_anchor_edits as hashline_apply_anchor_edits, render_hashlines};
 use crate::tools::{ToolContext, parse_args, require_nonempty};
 
 #[derive(Deserialize)]
@@ -54,7 +54,7 @@ pub fn write_file(ctx: ToolContext, args: &str) -> Result<String> {
   let path = ctx.workspace.workspace_path(&args.path)?;
   if path.exists() && !args.overwrite_existing {
     bail!(
-      "file {} already exists; use edit_hash_anchors for anchored edits or set overwrite_existing=true for intentional full-file replacement",
+      "file {} already exists; use apply_anchor_edits for anchored edits or set overwrite_existing=true for intentional full-file replacement",
       args.path
     );
   }
@@ -114,7 +114,7 @@ struct EditHashAnchorsArgs {
   ops: Vec<crate::hashline::EditOp>,
 }
 
-pub fn edit_hash_anchors(ctx: ToolContext, args: &str) -> Result<String> {
+pub fn apply_anchor_edits(ctx: ToolContext, args: &str) -> Result<String> {
   let args: EditHashAnchorsArgs = parse_args(args)?;
   require_nonempty(&args.path, "path")?;
   if args.ops.is_empty() {
@@ -122,7 +122,7 @@ pub fn edit_hash_anchors(ctx: ToolContext, args: &str) -> Result<String> {
   }
   let path = ctx.workspace.workspace_path(&args.path)?;
   let source = fs::read_to_string(&path).with_context(|| format!("read {}", args.path))?;
-  let out = apply_anchor_edits(&source, &args.ops)?;
+  let out = hashline_apply_anchor_edits(&source, &args.ops)?;
   fs::write(&path, out).with_context(|| format!("write {}", args.path))?;
   Ok(format!("Applied {} edits to {}", args.ops.len(), args.path))
 }
