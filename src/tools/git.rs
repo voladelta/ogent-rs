@@ -434,26 +434,23 @@ fn parse_unified_diff(text: &str, stat_only: bool) -> Result<Vec<GitDiffDelta>> 
   }
 
   for line in text.lines() {
-    if line.starts_with("diff --git ") {
-      if let Some(h) = current_hunk.take() {
-        if let Some(d) = current.as_mut() {
-          if let Some(hunks) = &mut d.hunks {
+    if let Some(after) = line.strip_prefix("diff --git ") {
+      if let Some(h) = current_hunk.take()
+        && let Some(d) = current.as_mut()
+          && let Some(hunks) = &mut d.hunks {
             hunks.push(h);
           }
-        }
-      }
       maybe_push_delta(&mut deltas, &mut current);
 
-      let after = &line["diff --git ".len()..];
       let parts: Vec<&str> = after.split_whitespace().collect();
-      let old_raw = strip_quotes(parts.get(0).unwrap_or(&""));
+      let old_raw = strip_quotes(parts.first().unwrap_or(&""));
       let new_raw = strip_quotes(parts.get(1).unwrap_or(&""));
       let old_path = strip_prefix(old_raw, "a/").unwrap_or(old_raw).to_string();
       let new_path = strip_prefix(new_raw, "b/").unwrap_or(new_raw).to_string();
 
       current = Some(GitDiffDelta {
         path: new_path,
-        old_path: old_path,
+        old_path,
         change_type: "modified".to_string(),
         is_binary: false,
         old_mode: None,
@@ -472,13 +469,11 @@ fn parse_unified_diff(text: &str, stat_only: bool) -> Result<Vec<GitDiffDelta>> 
 
     // Helper closure to push a hunk to current delta
     let push_hunk = |cur: &mut Option<GitDiffDelta>, hunk: &mut Option<GitDiffHunk>| {
-      if let Some(h) = hunk.take() {
-        if let Some(d) = cur {
-          if let Some(hunks) = &mut d.hunks {
+      if let Some(h) = hunk.take()
+        && let Some(d) = cur
+          && let Some(hunks) = &mut d.hunks {
             hunks.push(h);
           }
-        }
-      }
     };
 
     if line.starts_with("old mode ") {
@@ -539,11 +534,10 @@ fn parse_unified_diff(text: &str, stat_only: bool) -> Result<Vec<GitDiffDelta>> 
       if let Some(h) = parse_hunk_header(line) {
         old_line = h.old_start;
         new_line = h.new_start;
-        if let Some(cur) = current.as_mut() {
-          if cur.hunks.is_some() {
+        if let Some(cur) = current.as_mut()
+          && cur.hunks.is_some() {
             current_hunk = Some(h);
           }
-        }
       }
     } else if line.starts_with(" ") {
       if let Some(h) = current_hunk.as_mut() {
@@ -566,11 +560,10 @@ fn parse_unified_diff(text: &str, stat_only: bool) -> Result<Vec<GitDiffDelta>> 
         });
         old_line += 1;
       }
-      if let Some(cur) = current.as_mut() {
-        if let Some(del) = &mut cur.deletions {
+      if let Some(cur) = current.as_mut()
+        && let Some(del) = &mut cur.deletions {
           *del += 1;
         }
-      }
     } else if line.starts_with("+") {
       if let Some(h) = current_hunk.as_mut() {
         h.lines.push(GitDiffLine {
@@ -581,23 +574,20 @@ fn parse_unified_diff(text: &str, stat_only: bool) -> Result<Vec<GitDiffDelta>> 
         });
         new_line += 1;
       }
-      if let Some(cur) = current.as_mut() {
-        if let Some(ins) = &mut cur.insertions {
+      if let Some(cur) = current.as_mut()
+        && let Some(ins) = &mut cur.insertions {
           *ins += 1;
         }
-      }
     } else if line == "\\ No newline at end of file" {
       // skip
     }
   }
 
-  if let Some(h) = current_hunk.take() {
-    if let Some(d) = current.as_mut() {
-      if let Some(hunks) = &mut d.hunks {
+  if let Some(h) = current_hunk.take()
+    && let Some(d) = current.as_mut()
+      && let Some(hunks) = &mut d.hunks {
         hunks.push(h);
       }
-    }
-  }
   maybe_push_delta(&mut deltas, &mut current);
 
   Ok(deltas)
@@ -642,7 +632,7 @@ fn parse_hunk_header(line: &str) -> Option<GitDiffHunk> {
 }
 
 fn parse_range(s: &str) -> (u32, u32) {
-  let s = s.trim_start_matches(|c: char| c == '+' || c == '-');
+  let s = s.trim_start_matches(['+', '-']);
   if let Some((start, count)) = s.split_once(',') {
     let start = start.parse().unwrap_or(0);
     let count = count.parse().unwrap_or(0);
