@@ -430,18 +430,21 @@ async fn run_lua_vm_async(lua: &Lua, code: &str) -> Result<String> {
   Ok(final_response)
 }
 
+// exec is stateless: create a fresh VM, run the script, and discard it.
+// With mlua's `send` feature, Lua is Send and the `thread.into_async()` future
+// is also Send, so we can run it directly in async context without burning a
+// blocking thread.
 async fn exec_tool(ctx: ToolContext, args: &str) -> Result<String> {
   let args: LuaArgs = parse_args(args)?;
-  tokio::task::spawn_blocking(move || {
-    let lua = create_sandboxed_vm()?;
-    register_tools_in_lua(&lua, ctx)?;
-    let handle = tokio::runtime::Handle::current();
-    handle.block_on(async { run_lua_vm_async(&lua, &args.code).await })
-  })
-  .await
-  .context("spawn_blocking panicked")?
+  let lua = create_sandboxed_vm()?;
+  register_tools_in_lua(&lua, ctx)?;
+  run_lua_vm_async(&lua, &args.code).await
 }
 
+// eval is stateful: it reuses the same Lua VM across calls via a session lock.
+// parking_lot::MutexGuard is !Send, so we cannot hold the guard across an await
+// in a Send future. We confine the locked operation to spawn_blocking so the
+// guard never crosses an await boundary.
 async fn eval_tool(ctx: ToolContext, args: &str) -> Result<String> {
   let args: LuaArgs = parse_args(args)?;
   let session = ctx.lua_session.clone();
