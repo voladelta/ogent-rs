@@ -716,7 +716,7 @@ async fn eval_tool(ctx: ToolContext, args: &str) -> Result<String> {
   let args: LuaArgs = parse_args(args)?;
   let session = ctx.lua_session.clone();
   tokio::task::spawn_blocking(move || {
-    let mut guard = session.lock().unwrap();
+    let mut guard = session.lock();
     if guard.is_none() {
       let lua = create_sandboxed_vm()?;
       register_tools_in_lua(&lua, ctx.clone())?;
@@ -749,7 +749,7 @@ mod tests {
     ToolContext {
       workspace,
       skill_store,
-      lua_session: Arc::new(std::sync::Mutex::new(None)),
+      lua_session: Arc::new(parking_lot::Mutex::new(None)),
       client,
       output_sink: None,
       verbose: false,
@@ -899,7 +899,7 @@ mod tests {
     let ctx = ToolContext {
       workspace,
       skill_store,
-      lua_session: Arc::new(std::sync::Mutex::new(None)),
+      lua_session: Arc::new(parking_lot::Mutex::new(None)),
       client,
       output_sink: None,
       verbose: false,
@@ -989,5 +989,63 @@ mod tests {
     let _ = std::fs::remove_file(temp_file);
 
     assert!(res.contains("temp_test_glob.txt"), "Res was: {res}");
+  }
+
+  #[tokio::test]
+  async fn test_base_functions_available() {
+    // Regression: ensure BASE library functions like pairs/type/pcall are present.
+    // Lua::new_with in mlua loads BASE implicitly even when not specified in StdLib flags,
+    // but we keep this test to catch any future regression if the sandbox setup changes.
+    let ctx = test_context();
+    let res = exec_tool(
+      ctx,
+      r#"{"code": "for k,v in pairs({a=1}) do return k end"}"#,
+    )
+    .await
+    .unwrap();
+    assert!(
+      res.contains("\"a\""),
+      "Expected pairs() to work (BASE lib loaded). Got: {res}"
+    );
+  }
+
+  #[tokio::test]
+  async fn test_eval_survives_panic_while_holding_lock() {
+    // Regression: with std::sync::Mutex, a panic while holding the session lock
+    // would poison the mutex permanently, killing all future eval calls.
+    // parking_lot::Mutex releases the lock on panic, so eval can recover.
+    let session = Arc::new(parking_lot::Mutex::new(None::<Lua>));
+    let session2 = session.clone();
+
+    let t = std::thread::spawn(move || {
+      let _g = session2.lock();
+      panic!("intentional panic while holding lock");
+    });
+    assert!(t.join().is_err(), "thread must have panicked");
+
+    let workspace = Workspace::from_current_dir();
+    let skill_store = Arc::new(crate::skills::SkillStore::new(workspace.root()));
+    let client = crate::client::Client::new(
+      "http://localhost",
+      "dummy".into(),
+      |_, _| Ok(serde_json::Value::Null),
+      30,
+    )
+    .unwrap();
+
+    let ctx = ToolContext {
+      workspace,
+      skill_store,
+      lua_session: session,
+      client,
+      output_sink: None,
+      verbose: false,
+      actor_id: "director".to_string(),
+      agent_depth: 0,
+    };
+
+    // eval_tool should create a fresh VM and succeed despite the previous panic.
+    let res = eval_tool(ctx, r#"{"code": "return 42"}"#).await.unwrap();
+    assert!(res.contains("42"), "eval should recover after panic. Got: {res}");
   }
 }

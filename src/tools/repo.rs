@@ -142,7 +142,7 @@ mod tests {
     let ctx = ToolContext {
       workspace,
       skill_store,
-      lua_session: Arc::new(std::sync::Mutex::new(None)),
+      lua_session: Arc::new(parking_lot::Mutex::new(None)),
       client,
       output_sink: None,
       verbose: false,
@@ -210,7 +210,7 @@ mod tests {
     let ctx = ToolContext {
       workspace,
       skill_store,
-      lua_session: Arc::new(std::sync::Mutex::new(None)),
+      lua_session: Arc::new(parking_lot::Mutex::new(None)),
       client,
       output_sink: None,
       verbose: false,

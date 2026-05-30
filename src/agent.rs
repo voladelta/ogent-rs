@@ -178,7 +178,7 @@ pub struct Agent {
   pub session_id: String,
   output_sink: Option<Arc<dyn AgentOutputSink>>,
   pub skill_store: Arc<crate::skills::SkillStore>,
-  pub lua_session: Arc<std::sync::Mutex<Option<mlua::Lua>>>,
+  pub lua_session: Arc<parking_lot::Mutex<Option<mlua::Lua>>>,
   pub actor_id: String,
   pub verbose: bool,
   /// Subagent nesting depth: 0 for the root agent, incremented by each `agent{}` spawn.
@@ -206,7 +206,7 @@ impl Agent {
       session_id,
       output_sink: None,
       skill_store,
-      lua_session: Arc::new(std::sync::Mutex::new(None)),
+      lua_session: Arc::new(parking_lot::Mutex::new(None)),
       actor_id,
       verbose,
       agent_depth,

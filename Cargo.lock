@@ -1131,6 +1131,7 @@ dependencies = [
  "ignore",
  "mimalloc",
  "mlua",
+ "parking_lot",
  "reqwest",
  "serde",
  "serde_json",

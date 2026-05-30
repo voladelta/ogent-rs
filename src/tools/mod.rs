@@ -17,7 +17,7 @@ pub mod web;
 pub struct ToolContext {
   pub workspace: crate::workspace::Workspace,
   pub skill_store: std::sync::Arc<crate::skills::SkillStore>,
-  pub lua_session: std::sync::Arc<std::sync::Mutex<Option<mlua::Lua>>>,
+  pub lua_session: std::sync::Arc<parking_lot::Mutex<Option<mlua::Lua>>>,
   pub client: crate::client::Client,
   pub output_sink: Option<std::sync::Arc<dyn crate::agent::AgentOutputSink>>,
   pub verbose: bool,
@@ -147,7 +147,7 @@ mod tests {
       ToolContext {
         workspace,
         skill_store,
-        lua_session: std::sync::Arc::new(std::sync::Mutex::new(None)),
+        lua_session: std::sync::Arc::new(parking_lot::Mutex::new(None)),
         client,
         output_sink: None,
         verbose: false,
