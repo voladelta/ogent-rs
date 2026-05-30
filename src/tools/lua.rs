@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use mlua::{HookTriggers, Lua, LuaSerdeExt, StdLib, Value};
+use parking_lot::Mutex;
 use serde::Deserialize;
 use serde_json::json;
 use std::sync::Arc;
@@ -257,7 +258,7 @@ fn register_tools_in_lua(lua: &Lua, ctx: ToolContext) -> Result<()> {
   registered.insert("json_decode".to_string());
   // exec and eval must not be exposed inside the Lua sandbox: calling eval from
   // within an eval session would deadlock because eval_tool holds the
-  // lua_session lock and parking_lot::Mutex is not reentrant.
+  // lua_session lock and Mutex is not reentrant.
   registered.insert("exec".to_string());
   registered.insert("eval".to_string());
 
@@ -356,7 +357,7 @@ end
 
 async fn run_lua_vm_async(lua: &Lua, code: &str) -> Result<String> {
   // 1. Capture stdout via print override
-  let stdout_buffer = Arc::new(parking_lot::Mutex::new(String::new()));
+  let stdout_buffer = Arc::new(Mutex::new(String::new()));
   let buffer_clone = stdout_buffer.clone();
 
   let print_fn = lua.create_function(move |_, args: mlua::MultiValue| {
@@ -442,7 +443,7 @@ async fn exec_tool(ctx: ToolContext, args: &str) -> Result<String> {
 }
 
 // eval is stateful: it reuses the same Lua VM across calls via a session lock.
-// parking_lot::MutexGuard is !Send, so we cannot hold the guard across an await
+// MutexGuard is !Send, so we cannot hold the guard across an await
 // in a Send future. We confine the locked operation to spawn_blocking so the
 // guard never crosses an await boundary.
 async fn eval_tool(ctx: ToolContext, args: &str) -> Result<String> {
@@ -452,12 +453,12 @@ async fn eval_tool(ctx: ToolContext, args: &str) -> Result<String> {
     let mut guard = session.lock();
     if guard.is_none() {
       let lua = create_sandboxed_vm()?;
-      register_tools_in_lua(&lua, ctx.clone())?;
+      register_tools_in_lua(&lua, ctx)?;
       *guard = Some(lua);
     }
     let lua = guard.as_ref().unwrap();
     let handle = tokio::runtime::Handle::current();
-    handle.block_on(async { run_lua_vm_async(lua, &args.code).await })
+    handle.block_on(run_lua_vm_async(lua, &args.code))
   })
   .await
   .context("spawn_blocking panicked")?
@@ -482,7 +483,7 @@ mod tests {
     ToolContext {
       workspace,
       skill_store,
-      lua_session: Arc::new(parking_lot::Mutex::new(None)),
+      lua_session: Arc::new(Mutex::new(None)),
       client,
       output_sink: None,
       verbose: false,
@@ -632,7 +633,7 @@ mod tests {
     let ctx = ToolContext {
       workspace,
       skill_store,
-      lua_session: Arc::new(parking_lot::Mutex::new(None)),
+      lua_session: Arc::new(Mutex::new(None)),
       client,
       output_sink: None,
       verbose: false,
@@ -746,8 +747,8 @@ mod tests {
   async fn test_eval_survives_panic_while_holding_lock() {
     // Regression: with std::sync::Mutex, a panic while holding the session lock
     // would poison the mutex permanently, killing all future eval calls.
-    // parking_lot::Mutex releases the lock on panic, so eval can recover.
-    let session = Arc::new(parking_lot::Mutex::new(None::<Lua>));
+    // Mutex releases the lock on panic, so eval can recover.
+    let session = Arc::new(Mutex::new(None::<Lua>));
     let session2 = session.clone();
 
     let t = std::thread::spawn(move || {
