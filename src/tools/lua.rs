@@ -455,6 +455,49 @@ fn register_tools_in_lua(lua: &Lua, ctx: ToolContext) -> Result<()> {
   })?;
   globals.set("load_skill_asset", load_skill_asset_fn)?;
 
+  // Register glob with positional arguments: glob(pattern)
+  let ctx_clone = ctx.clone();
+  let glob_fn = lua.create_async_function(move |lua, args: mlua::MultiValue| {
+    let ctx = ctx_clone.clone();
+    async move {
+      let pattern: String = match args.front() {
+        Some(Value::String(s)) => s.to_str()?.to_string(),
+        _ => {
+          return Err(mlua::Error::RuntimeError(
+            "first argument pattern must be a string".to_string(),
+          ));
+        }
+      };
+
+      let args_json = json!({
+        "pattern": pattern,
+      })
+      .to_string();
+
+      let result = crate::tools::execute_tool(ctx, "glob", &args_json).await;
+
+      match result {
+        Ok(output) => {
+          let paths: Vec<String> = match serde_json::from_str(&output) {
+            Ok(p) => p,
+            Err(e) => {
+              return Err(mlua::Error::RuntimeError(format!(
+                "failed to parse glob output: {e}"
+              )));
+            }
+          };
+          let out_table = lua.create_table()?;
+          for (i, path) in paths.into_iter().enumerate() {
+            out_table.set(i + 1, path)?;
+          }
+          Ok((Value::Table(out_table), Value::Nil))
+        }
+        Err(e) => Ok((Value::Nil, Value::String(lua.create_string(e.to_string())?))),
+      }
+    }
+  })?;
+  globals.set("glob", glob_fn)?;
+
   for tool in crate::tools::all_tools() {
     if tool.name == "exec"
       || tool.name == "eval"
@@ -467,6 +510,7 @@ fn register_tools_in_lua(lua: &Lua, ctx: ToolContext) -> Result<()> {
       || tool.name == "task_update"
       || tool.name == "agent"
       || tool.name == "parallel"
+      || tool.name == "glob"
     {
       continue;
     }
@@ -843,5 +887,24 @@ mod tests {
       .unwrap();
     assert!(res.contains("30"), "Res was: {res}");
     assert!(res.contains("70"), "Res was: {res}");
+  }
+
+  #[tokio::test]
+  async fn test_glob_from_lua() {
+    let ctx = test_context();
+    let temp_file = ctx.workspace.workspace_path("temp_test_glob.txt").unwrap();
+    std::fs::write(&temp_file, "temp").unwrap();
+
+    let code = r#"
+      local files, err = glob("temp_test_glob.*")
+      if not files then error(err) end
+      return files
+    "#;
+    let res = exec_tool(ctx, &json!({ "code": code }).to_string())
+      .await
+      .unwrap();
+    let _ = std::fs::remove_file(temp_file);
+
+    assert!(res.contains("temp_test_glob.txt"), "Res was: {res}");
   }
 }

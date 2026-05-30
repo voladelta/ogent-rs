@@ -68,6 +68,7 @@ Within the Lua execution sandbox, scripts can invoke workspace operations direct
 ### Shell & Repository Maps
 * `shell{command=..., timeout_seconds=...}`: Runs bounded commands (max 600s) inside the workspace root (e.g. `cargo test`, `git diff`).
 * `repo_map{path=..., levels=...}` / `repo_map()`: Displays the directory structure tree of the workspace, automatically respecting `.gitignore` files and ignoring hidden paths.
+* `glob(pattern)`: Searches for files matching a glob pattern (e.g. `"**/*.rs"`, `"src/tools/*.rs"`) and returns a Lua array of matching relative paths. Automatically respects `.gitignore` rules.
 
 ### Web Search (Exa)
 * `web_search{query=..., num_results=..., type=...}` / `web_read{urls=..., mode=...}` / `web_code_context{query=...}`: Queries the web, reads highlight summaries, or fetches real-world code snippets.

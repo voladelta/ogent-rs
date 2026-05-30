@@ -1127,6 +1127,7 @@ dependencies = [
  "clap",
  "criterion",
  "futures-util",
+ "globset",
  "ignore",
  "mimalloc",
  "mlua",

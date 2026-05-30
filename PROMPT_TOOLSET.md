@@ -115,6 +115,29 @@ Displays the repository directory structure tree. Automatically respects `.gitig
   print(tree)
   ```
 
+#### `glob(pattern)`
+Returns a Lua array of relative file paths matching a glob pattern. Automatically respects `.gitignore` rules and excludes hidden paths.
+- **Parameters** (positional):
+  - `pattern` (string): Glob pattern relative to workspace root. Supports `*`, `**`, `?`, `[...]`, and `{a,b}` brace expansions.
+- **Returns**: `(array_of_strings, nil)` or `(nil, error_string)`
+- **Notes**:
+  - Results are sorted alphabetically.
+  - Only files are returned — directories are never included.
+  - Use `repo_map` to get a quick visual overview, and `glob` when you need a list of file paths to iterate over programmatically.
+- **Examples**:
+  ```lua
+  -- Find all Rust source files
+  local files, err = glob("**/*.rs")
+  if not files then error(err) end
+  for _, path in ipairs(files) do print(path) end
+  ```
+  ```lua
+  -- Find files in a specific directory
+  local files, err = glob("src/tools/*.rs")
+  if not files then error(err) end
+  return files
+  ```
+
 #### `shell{command=..., timeout_seconds=...}`
 Executes a command inside the workspace root.
 - **Parameters** (table):

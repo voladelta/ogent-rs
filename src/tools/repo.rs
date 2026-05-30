@@ -2,15 +2,23 @@ use anyhow::Result;
 use serde::Deserialize;
 use serde_json::json;
 
-use crate::tools::{Handler, ToolContext, ToolDef, parse_args};
+use crate::tools::{Handler, ToolContext, ToolDef, parse_args, require_nonempty};
 
 pub fn tools() -> Vec<ToolDef> {
-  vec![ToolDef {
-    name: "repo_map",
-    description: "Display a tree map of the repository directory structure. path defaults to the workspace root; levels defaults to 3.",
-    parameters: json!({"type":"object","properties":{"path":{"type":"string","description":"Directory path relative to workspace root. Default: \".\""},"levels":{"type":"integer","description":"Max depth to descend. Default: 3 if 0 or omitted."}},"additionalProperties":false}),
-    handler: Handler::Sync(repo_map),
-  }]
+  vec![
+    ToolDef {
+      name: "repo_map",
+      description: "Display a tree map of the repository directory structure. path defaults to the workspace root; levels defaults to 3.",
+      parameters: json!({"type":"object","properties":{"path":{"type":"string","description":"Directory path relative to workspace root. Default: \".\""},"levels":{"type":"integer","description":"Max depth to descend. Default: 3 if 0 or omitted."}},"additionalProperties":false}),
+      handler: Handler::Sync(repo_map),
+    },
+    ToolDef {
+      name: "glob",
+      description: "Search for files in the workspace matching a glob pattern, automatically respecting .gitignore.",
+      parameters: json!({"type":"object","properties":{"pattern":{"type":"string","description":"Glob pattern relative to workspace root (e.g. \"**/*.rs\")"}},"required":["pattern"],"additionalProperties":false}),
+      handler: Handler::Sync(glob),
+    },
+  ]
 }
 
 #[derive(Deserialize)]
@@ -50,6 +58,38 @@ fn repo_map(ctx: ToolContext, args: &str) -> Result<String> {
 }
 fn path_or_root(path: &str) -> &str {
   if path.is_empty() { "." } else { path }
+}
+
+#[derive(Deserialize)]
+struct GlobArgs {
+  pattern: String,
+}
+
+fn glob(ctx: ToolContext, args: &str) -> Result<String> {
+  let args: GlobArgs = parse_args(args)?;
+  require_nonempty(&args.pattern, "pattern")?;
+
+  let glob = globset::Glob::new(&args.pattern)?;
+  let matcher = glob.compile_matcher();
+
+  let mut matches = Vec::new();
+  let root = ctx.workspace.root();
+  let walker = ignore::WalkBuilder::new(root)
+    .sort_by_file_name(|a, b| a.cmp(b))
+    .build();
+
+  for entry in walker {
+    let entry = entry?;
+    if entry.file_type().map(|ft| ft.is_file()).unwrap_or(false) {
+      if let Ok(rel_path) = entry.path().strip_prefix(root) {
+        if matcher.is_match(rel_path) {
+          matches.push(rel_path.to_string_lossy().into_owned());
+        }
+      }
+    }
+  }
+
+  Ok(serde_json::to_string(&matches)?)
 }
 
 #[cfg(test)]
@@ -122,6 +162,53 @@ mod tests {
       "should contain test.txt: \n{}",
       res
     );
+
+    Ok(())
+  }
+
+  #[test]
+  fn test_glob_respects_gitignore() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let root = temp.path();
+
+    std::fs::write(root.join(".gitignore"), "ignored_dir/\n*.tmp\n")?;
+    std::fs::create_dir(root.join(".git"))?;
+
+    std::fs::create_dir(root.join("ignored_dir"))?;
+    std::fs::write(root.join("ignored_dir/file.rs"), "hello")?;
+
+    std::fs::create_dir(root.join("allowed_dir"))?;
+    std::fs::write(root.join("allowed_dir/file.rs"), "hello")?;
+    std::fs::write(root.join("test.tmp"), "ignored")?;
+    std::fs::write(root.join("test.rs"), "allowed")?;
+
+    let workspace = Workspace::from_root(root.to_path_buf());
+    let skill_store = Arc::new(SkillStore::new(workspace.root()));
+    let client = crate::client::Client::new(
+      "http://localhost",
+      "dummy".into(),
+      |_, _| Ok(serde_json::Value::Null),
+      30,
+    )
+    .unwrap();
+    let ctx = ToolContext {
+      workspace,
+      skill_store,
+      lua_session: Arc::new(std::sync::Mutex::new(None)),
+      client,
+      output_sink: None,
+      verbose: false,
+      actor_id: "director".to_string(),
+    };
+
+    let args = r#"{"pattern":"**/*.rs"}"#;
+    let res = glob(ctx, args)?;
+    let files: Vec<String> = serde_json::from_str(&res)?;
+
+    assert_eq!(files.len(), 2);
+    assert!(files.contains(&"test.rs".to_string()));
+    assert!(files.contains(&"allowed_dir/file.rs".to_string()));
+    assert!(!files.contains(&"ignored_dir/file.rs".to_string()));
 
     Ok(())
   }
