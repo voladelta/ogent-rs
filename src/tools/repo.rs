@@ -76,7 +76,7 @@ mod tests {
     std::fs::write(root.join("test.txt"), "allowed")?;
 
     let workspace = Workspace::from_root(root.to_path_buf());
-    let skill_store = Arc::new(SkillStore::new(workspace.root(), Vec::new()));
+    let skill_store = Arc::new(SkillStore::new(workspace.root()));
     let client = crate::client::Client::new(
       "http://localhost",
       "dummy".into(),

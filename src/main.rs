@@ -59,24 +59,16 @@ async fn main() -> Result<()> {
     .provider_for(profile)
     .context("missing provider config for profile")?;
   let client = providers::new_client(profile, provider)?;
-  run_agent_cli(
-    workspace,
-    client,
-    config.startup_skills,
-    &args.prompt.join(" "),
-    args.verbose,
-  )
-  .await
+  run_agent_cli(workspace, client, &args.prompt.join(" "), args.verbose).await
 }
 
 async fn run_agent_cli(
   mut workspace: crate::workspace::Workspace,
   client: crate::client::Client,
-  startup_skills: Vec<String>,
   task: &str,
   verbose: bool,
 ) -> Result<()> {
-  let skill_store = std::sync::Arc::new(skills::SkillStore::new(workspace.root(), startup_skills));
+  let skill_store = std::sync::Arc::new(skills::SkillStore::new(workspace.root()));
   for root in skill_store.skill_roots() {
     workspace.add_allowed_root(root.clone());
   }

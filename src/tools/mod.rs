@@ -132,8 +132,7 @@ mod tests {
   #[tokio::test]
   async fn execute_tool_unknown_returns_error() {
     let workspace = crate::workspace::Workspace::from_current_dir();
-    let skill_store =
-      std::sync::Arc::new(crate::skills::SkillStore::new(workspace.root(), Vec::new()));
+    let skill_store = std::sync::Arc::new(crate::skills::SkillStore::new(workspace.root()));
     let client = crate::client::Client::new(
       "http://localhost",
       "dummy".into(),

@@ -613,7 +613,7 @@ mod tests {
 
   fn test_context() -> ToolContext {
     let workspace = Workspace::from_current_dir();
-    let skill_store = Arc::new(crate::skills::SkillStore::new(workspace.root(), Vec::new()));
+    let skill_store = Arc::new(crate::skills::SkillStore::new(workspace.root()));
     let client = crate::client::Client::new(
       "http://localhost",
       "dummy".into(),
@@ -762,7 +762,7 @@ mod tests {
     std::fs::write(asset_dir.join("MANUAL.md"), "This is MANUAL content.").unwrap();
 
     let workspace = Workspace::from_root(temp.clone());
-    let skill_store = Arc::new(crate::skills::SkillStore::new(workspace.root(), Vec::new()));
+    let skill_store = Arc::new(crate::skills::SkillStore::new(workspace.root()));
     let client = crate::client::Client::new(
       "http://localhost",
       "dummy".into(),

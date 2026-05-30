@@ -391,8 +391,7 @@ mod tests {
       30,
     )
     .unwrap();
-    let skill_store =
-      std::sync::Arc::new(crate::skills::SkillStore::new(workspace.root(), Vec::new()));
+    let skill_store = std::sync::Arc::new(crate::skills::SkillStore::new(workspace.root()));
     let agent = Agent::new(
       workspace.clone(),
       client,
@@ -439,8 +438,7 @@ mod tests {
     let workspace = Workspace::from_root(root.clone());
     let session_id = "newline-test";
     let client = Client::new(&url, "dummy".into(), |_, _| Ok(serde_json::Value::Null), 30).unwrap();
-    let skill_store =
-      std::sync::Arc::new(crate::skills::SkillStore::new(workspace.root(), Vec::new()));
+    let skill_store = std::sync::Arc::new(crate::skills::SkillStore::new(workspace.root()));
     let mut agent = Agent::new(
       workspace.clone(),
       client,

@@ -76,12 +76,11 @@ impl SkillManifest {
 pub struct SkillStore {
   repo_roots: Vec<PathBuf>,
   home_roots: Vec<PathBuf>,
-  startup_skills: Vec<String>,
   manifest: SkillManifest,
 }
 
 impl SkillStore {
-  pub fn new(workspace_root: &Path, startup_skills: Vec<String>) -> Self {
+  pub fn new(workspace_root: &Path) -> Self {
     let repo_roots = vec![
       workspace_root.join(".skills"),
       workspace_root.join(".agents/skills"),
@@ -102,7 +101,6 @@ impl SkillStore {
     Self {
       repo_roots,
       home_roots,
-      startup_skills,
       manifest,
     }
   }
@@ -121,10 +119,6 @@ impl SkillStore {
     } else {
       bail!("skill {skill_name} not found in skill roots")
     }
-  }
-
-  pub fn startup_skills(&self) -> &[String] {
-    &self.startup_skills
   }
 }
 
