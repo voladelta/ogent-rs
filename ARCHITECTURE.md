@@ -74,6 +74,7 @@ Use this map to locate source files for specific request areas:
 7. **Skill Injection**: Startup skill discovery and injection remain fully enabled.
 8. **Lua Sandbox Safety**: The Lua execution engine restricts scripts to safe libraries (no `os`, `io`, `debug`, or `package`), limits memory to **32MB**, and caps CPU cycles to **32,000 instructions**.
 9. **Skill Path Whitelisting**: Skills are searched for and loaded from exactly five whitelisted directories (under `cwd/` and `~/`), and skill assets loaded via `load_skill_asset` undergo strict path traversal verification to prevent arbitrary file read access.
+10. **File Size Limits**: Files read via sandbox filesystem operations (`read_file`, `read_hash_anchors`) and skill assets (`load_skill_asset`) are subject to a **1MB** size limit to ensure runtime stability and prevent unbounded memory usage.
 
 ---
 
