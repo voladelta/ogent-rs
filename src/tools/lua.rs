@@ -1046,6 +1046,9 @@ mod tests {
 
     // eval_tool should create a fresh VM and succeed despite the previous panic.
     let res = eval_tool(ctx, r#"{"code": "return 42"}"#).await.unwrap();
-    assert!(res.contains("42"), "eval should recover after panic. Got: {res}");
+    assert!(
+      res.contains("42"),
+      "eval should recover after panic. Got: {res}"
+    );
   }
 }
