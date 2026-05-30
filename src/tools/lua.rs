@@ -283,13 +283,15 @@ fn register_tools_in_lua(lua: &Lua, ctx: ToolContext) -> Result<()> {
   })?;
   globals.set("parallel", parallel_fn)?;
 
-  // Helper to decode JSON strings into Lua tables
+  // Helper to decode JSON strings into Lua tables.
+  // Intentionally NOT exposed as a global: structured tool outputs are
+  // already decoded by the positional wrappers below. Lua scripts should
+  // never need raw JSON parsing.
   let json_decode = lua.create_function(|lua, s: String| {
     let v: serde_json::Value = serde_json::from_str(&s)
       .map_err(|e| mlua::Error::RuntimeError(format!("json_decode: {e}")))?;
     lua.to_value(&v)
   })?;
-  globals.set("json_decode", json_decode)?;
 
   // Register fs tools
   register_sync!(lua, globals, ctx, "read_file", crate::tools::fs::read_file);
@@ -391,7 +393,10 @@ fn register_tools_in_lua(lua: &Lua, ctx: ToolContext) -> Result<()> {
 
   // Inject thin Lua wrappers that convert positional arguments to tables
   // and delegate to the functions registered above.
+  // json_decode is passed as a local so the wrappers can decode structured
+  // outputs without exposing raw JSON parsing to Lua scripts.
   let positional_wrappers = r#"
+local json_decode = ...
 local _t = {}
 _t.read_file = read_file
 _t.append_file = append_file
@@ -482,7 +487,8 @@ function git_log(opts)
   return ok, err
 end
 "#;
-  lua.load(positional_wrappers).exec()?;
+  let wrappers_func = lua.load(positional_wrappers).into_function()?;
+  wrappers_func.call::<()>(json_decode)?;
 
   Ok(())
 }

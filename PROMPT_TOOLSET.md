@@ -33,6 +33,8 @@ You execute all workspace operations by writing Lua 5.5 code inside either the `
 
 All functions return `(result, nil)` on success or `(nil, error_string)` on failure. Always handle errors cleanly.
 
+> **Note on structured data**: Functions that return structured data (e.g. `glob`, `git_status`, `git_diff`, `git_changes`, `git_log`, `file_info`) automatically decode JSON into native Lua tables. There is no `json_decode` global — this keeps the abstraction clean and prevents scripts from relying on raw JSON parsing.
+
 ### 1. Filesystem & Editing
 
 #### `file_info(path)`
