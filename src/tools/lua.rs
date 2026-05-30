@@ -281,6 +281,76 @@ fn register_tools_in_lua(lua: &Lua, ctx: ToolContext) -> Result<()> {
   })?;
   globals.set("read_file", read_file_fn)?;
 
+  // Register append_file with positional arguments: append_file(path, content)
+  let ctx_clone = ctx.clone();
+  let append_file_fn = lua.create_async_function(move |lua, args: mlua::MultiValue| {
+    let ctx = ctx_clone.clone();
+    async move {
+      let path: String = match args.front() {
+        Some(Value::String(s)) => s.to_str()?.to_string(),
+        _ => {
+          return Err(mlua::Error::RuntimeError(
+            "first argument path must be a string".to_string(),
+          ));
+        }
+      };
+      let content: String = match args.get(1) {
+        Some(Value::String(s)) => s.to_str()?.to_string(),
+        _ => {
+          return Err(mlua::Error::RuntimeError(
+            "second argument content must be a string".to_string(),
+          ));
+        }
+      };
+
+      let args_json = json!({
+        "path": path,
+        "content": content,
+      })
+      .to_string();
+
+      let result = crate::tools::execute_tool(ctx, "append_file", &args_json).await;
+
+      match result {
+        Ok(output) => Ok((Value::String(lua.create_string(output)?), Value::Nil)),
+        Err(e) => Ok((Value::Nil, Value::String(lua.create_string(e.to_string())?))),
+      }
+    }
+  })?;
+  globals.set("append_file", append_file_fn)?;
+
+  // Register file_info with positional arguments: file_info(path)
+  let ctx_clone = ctx.clone();
+  let file_info_fn = lua.create_async_function(move |lua, args: mlua::MultiValue| {
+    let ctx = ctx_clone.clone();
+    async move {
+      let path: String = match args.front() {
+        Some(Value::String(s)) => s.to_str()?.to_string(),
+        _ => {
+          return Err(mlua::Error::RuntimeError(
+            "first argument path must be a string".to_string(),
+          ));
+        }
+      };
+
+      let args_json = json!({ "path": path }).to_string();
+
+      let result = crate::tools::execute_tool(ctx, "file_info", &args_json).await;
+
+      match result {
+        Ok(output) => {
+          // Deserialize JSON into a Lua table so callers get info.size_bytes, info.line_count
+          let json_val: serde_json::Value = serde_json::from_str(&output)
+            .map_err(|e| mlua::Error::RuntimeError(format!("parse file_info output: {e}")))?;
+          let lua_val = lua.to_value(&json_val)?;
+          Ok((lua_val, Value::Nil))
+        }
+        Err(e) => Ok((Value::Nil, Value::String(lua.create_string(e.to_string())?))),
+      }
+    }
+  })?;
+  globals.set("file_info", file_info_fn)?;
+
   // Register read_hash_anchors with positional arguments: read_hash_anchors(path, offset, limit)
   let ctx_clone = ctx.clone();
   let read_hash_anchors_fn = lua.create_async_function(move |lua, args: mlua::MultiValue| {
@@ -502,6 +572,8 @@ fn register_tools_in_lua(lua: &Lua, ctx: ToolContext) -> Result<()> {
     if tool.name == "exec"
       || tool.name == "eval"
       || tool.name == "read_file"
+      || tool.name == "append_file"
+      || tool.name == "file_info"
       || tool.name == "read_hash_anchors"
       || tool.name == "edit_hash_anchors"
       || tool.name == "load_skill"

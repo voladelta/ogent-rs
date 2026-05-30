@@ -50,11 +50,27 @@ fn repo_map(ctx: ToolContext, args: &str) -> Result<String> {
       let name = entry.file_name().to_string_lossy();
       out.push_str(&"  ".repeat(depth));
       out.push_str(&name);
+      // Append human-readable size for files only
+      if entry.file_type().map(|ft| ft.is_file()).unwrap_or(false) {
+        if let Ok(meta) = entry.metadata() {
+          out.push_str(&format!("  {}", human_size(meta.len())));
+        }
+      }
       out.push('\n');
     }
   }
 
   Ok(out)
+}
+
+fn human_size(bytes: u64) -> String {
+  if bytes < 1024 {
+    format!("{} B", bytes)
+  } else if bytes < 1024 * 1024 {
+    format!("{:.1} KB", bytes as f64 / 1024.0)
+  } else {
+    format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
+  }
 }
 fn path_or_root(path: &str) -> &str {
   if path.is_empty() { "." } else { path }

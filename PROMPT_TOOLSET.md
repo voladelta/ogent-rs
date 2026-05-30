@@ -35,6 +35,20 @@ All functions return `(result, nil)` on success or `(nil, error_string)` on fail
 
 ### 1. Filesystem & Editing
 
+#### `file_info(path)`
+Returns metadata for a file without reading its contents.
+- **Parameters** (positional):
+  - `path` (string): Relative path to the file.
+- **Returns**: `(table, nil)` with fields `path`, `size_bytes` (integer), `line_count` (integer), or `(nil, error)`
+- **Use this before `read_file` or `read_hash_anchors` to plan offset/limit when a file may be large.**
+- **Example**:
+  ```lua
+  local info, err = file_info("src/main.rs")
+  if not info then error(err) end
+  print(info.size_bytes, info.line_count)
+  -- If size_bytes > 1048576, read_file will refuse it; use read_hash_anchors with offset/limit instead
+  ```
+
 #### `read_file(path, offset, limit)`
 Reads a file's contents from the workspace.
 - **Parameters** (positional):
@@ -42,6 +56,7 @@ Reads a file's contents from the workspace.
   - `offset` (integer, optional): 0-indexed byte offset. Defaults to `0`.
   - `limit` (integer, optional): Max bytes to read. Defaults to the remaining file size.
 - **Returns**: `(content_string, nil)` or `(nil, error)`
+- **Note**: For files larger than 1MB, first call `file_info` to get `size_bytes` and `line_count`, then page through using `offset`/`limit` or use `read_hash_anchors` with the same offsets.
 - **Example**:
   ```lua
   local content, err = read_file("Cargo.toml", 0, 500)
@@ -50,15 +65,29 @@ Reads a file's contents from the workspace.
   ```
 
 #### `write_file{path=..., content=..., overwrite_existing=...}`
-Writes content to a file.
+Writes content to a file. **Replaces the entire file.**
 - **Parameters** (table):
   - `path` (string): Relative path to write. Automatically creates any missing parent directories.
   - `content` (string): Complete file content.
   - `overwrite_existing` (boolean, optional): If `true`, overwrites existing files. If `false` or omitted, fails if the file already exists.
 - **Returns**: `(success_msg, nil)` or `(nil, error)`
+- **Note**: This is a full-file replacement. For appending incremental content (logs, progress output), use `append_file` instead. For targeted edits to existing code, prefer `apply_anchor_edits`.
 - **Example**:
   ```lua
   local res, err = write_file{path="scratch/test.txt", content="hello world\n", overwrite_existing=true}
+  if not res then error(err) end
+  ```
+
+#### `append_file(path, content)`
+Appends content to a file. Creates the file if it does not exist.
+- **Parameters** (positional):
+  - `path` (string): Relative path to the file.
+  - `content` (string): Content to append.
+- **Returns**: `(success_msg, nil)` or `(nil, error)`
+- **Use this for**: log files, progress tracking, writing output incrementally, or any case where you want to add to a file without reading its current contents first.
+- **Example**:
+  ```lua
+  local res, err = append_file("scratch/log.txt", "step 1 done\n")
   if not res then error(err) end
   ```
 
@@ -103,7 +132,7 @@ Applies a batch array of range-based edits (replacements, insertions, deletions)
 ### 2. Workspace Exploration & Shell
 
 #### `repo_map{path=..., levels=...}` or `repo_map()`
-Displays the repository directory structure tree. Automatically respects `.gitignore` rules and ignores hidden files/directories (starting with `.`).
+Displays the repository directory structure tree. Automatically respects `.gitignore` rules and ignores hidden files/directories (starting with `.`). File entries include a human-readable size (e.g. `main.rs  4.2 KB`).
 - **Parameters** (table, optional):
   - `path` (string, optional): Directory relative to the workspace. Defaults to `"."`.
   - `levels` (integer, optional): Max depth. Defaults to `3`.
@@ -149,6 +178,7 @@ Executes a command inside the workspace root.
   - **Guidelines**:
     - For copying, moving/renaming, or deleting files/directories, run standard shell commands (such as `cp`, `mv`, `rm`) within the workspace.
     - For creating new files or editing existing files, prefer the built-in `write_file` and `apply_anchor_edits` functions over shell command redirects (e.g. `echo ... > file`) or shell-based text editors.
+    - **For semantic code search, use `colgrep` via `shell`.** See the colgrep guide (injected separately) for full usage. Quick example: `shell{command = "colgrep 'error handling' src/"}`.
 - **Example**:
   ```lua
   local output, err = shell{command = "cargo test"}
@@ -184,7 +214,7 @@ Securely reads an asset file inside a skill's directory (e.g. reference manual).
 #### `web_search{query=..., num_results=..., type=...}`
 Queries Exa search for highlights and excerpts.
 - **Parameters** (table):
-  - `query` (string): Natural language search terms.
+  - `query` (string): Natural language search terms. Works equally well for general information and coding/API queries.
   - `num_results` (integer, optional): Default is `10`.
   - `type` (string, optional): `"auto"` or `"deep-reasoning"`. Defaults to `"auto"`.
 - **Returns**: `(results_markdown, nil)` or `(nil, error)`
@@ -197,7 +227,7 @@ Reads key excerpts or full text from specified URLs.
 - **Returns**: `(results_markdown, nil)` or `(nil, error)`
 
 #### `web_code_context{query=...}`
-Queries Exa for code snippets, library details, or API signatures.
+Queries Exa specifically for code snippets, library details, or API signatures. Prefer this over `web_search` when looking for concrete code examples or crate/package documentation.
 - **Parameters** (table):
   - `query` (string): Coding pattern/API query.
 - **Returns**: `(results_markdown, nil)` or `(nil, error)`
@@ -225,7 +255,20 @@ Spawns a subagent in a fresh, isolated Lua VM sandbox sharing the parent's gener
 Runs multiple Lua functions concurrently inside the async executor, using cooperative multitasking, and waits for all of them to complete.
 - **Parameters** (array/list of functions):
   - An array of anonymous functions or function names to execute in parallel.
-- **Returns**: `(array_of_results, nil)` or `(nil, error)`. If any task fails, it aborts and returns the failure error.
+- **Returns**: `(array_of_results, nil)` or `(nil, error)`.
+- **Error behavior**: If **any** task fails, the entire batch aborts and returns that task's error. To tolerate partial failures and collect all results regardless, wrap individual task bodies with `pcall`:
+  ```lua
+  local results = parallel({
+    function()
+      local ok, val = pcall(function() return agent{task="..."} end)
+      return {ok=ok, value=val}
+    end,
+    function()
+      local ok, val = pcall(function() return agent{task="..."} end)
+      return {ok=ok, value=val}
+    end,
+  })
+  ```
 
 ---
 

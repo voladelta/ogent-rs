@@ -21,6 +21,18 @@ pub fn tools() -> Vec<ToolDef> {
       handler: Handler::Sync(write_file),
     },
     ToolDef {
+      name: "append_file",
+      description: "Append content to an existing file, or create it if it does not exist. Safer than read+write for incremental writes.",
+      parameters: json!({"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}},"required":["path","content"],"additionalProperties":false}),
+      handler: Handler::Sync(append_file),
+    },
+    ToolDef {
+      name: "file_info",
+      description: "Return metadata for a file: size in bytes and number of lines. Use before read_file/read_hash_anchors to plan offset/limit for large files.",
+      parameters: json!({"type":"object","properties":{"path":{"type":"string"}},"required":["path"],"additionalProperties":false}),
+      handler: Handler::Sync(file_info),
+    },
+    ToolDef {
       name: "read_hash_anchors",
       description: "Read a file with each line prefixed as <line>:<hash>|content, filtered by optional byte offset and limit.",
       parameters: json!({"type":"object","properties":{"path":{"type":"string"},"offset":{"type":"integer","description":"0-indexed byte offset (inclusive)"},"limit":{"type":"integer","description":"max bytes to read"}},"required":["path"],"additionalProperties":false}),
@@ -165,4 +177,60 @@ fn edit_hash_anchors(ctx: ToolContext, args: &str) -> Result<String> {
   let out = apply_anchor_edits(&source, &args.ops)?;
   fs::write(&path, out).with_context(|| format!("write {}", args.path))?;
   Ok(format!("Applied {} edits to {}", args.ops.len(), args.path))
+}
+
+#[derive(Deserialize)]
+struct AppendFileArgs {
+  path: String,
+  content: String,
+}
+
+fn append_file(ctx: ToolContext, args: &str) -> Result<String> {
+  use std::io::Write;
+  let args: AppendFileArgs = parse_args(args)?;
+  require_nonempty(&args.path, "path")?;
+  let path = ctx.workspace.workspace_path(&args.path)?;
+  if let Some(parent) = path.parent() {
+    fs::create_dir_all(parent).with_context(|| format!("mkdir {}", parent.display()))?;
+  }
+  let mut file = fs::OpenOptions::new()
+    .create(true)
+    .append(true)
+    .open(&path)
+    .with_context(|| format!("open {}", args.path))?;
+  file
+    .write_all(args.content.as_bytes())
+    .with_context(|| format!("append {}", args.path))?;
+  Ok(format!(
+    "Appended {} bytes to {}",
+    args.content.len(),
+    args.path
+  ))
+}
+
+#[derive(Deserialize)]
+struct FileInfoArgs {
+  path: String,
+}
+
+fn file_info(ctx: ToolContext, args: &str) -> Result<String> {
+  let args: FileInfoArgs = parse_args(args)?;
+  require_nonempty(&args.path, "path")?;
+  let path = ctx.workspace.readable_path(&args.path)?;
+  let meta = fs::metadata(&path).with_context(|| format!("stat {}", args.path))?;
+  let size_bytes = meta.len();
+  // Count lines without loading the whole file into memory when it's large
+  let line_count: u64 = if size_bytes <= (1 << 20) {
+    let content = fs::read_to_string(&path).with_context(|| format!("read {}", args.path))?;
+    content.lines().count() as u64
+  } else {
+    use std::io::{BufRead, BufReader};
+    let file = fs::File::open(&path).with_context(|| format!("open {}", args.path))?;
+    BufReader::new(file).lines().count() as u64
+  };
+  Ok(serde_json::to_string(&json!({
+    "path": args.path,
+    "size_bytes": size_bytes,
+    "line_count": line_count,
+  }))?)
 }
