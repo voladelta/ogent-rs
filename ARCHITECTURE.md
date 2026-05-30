@@ -69,7 +69,7 @@ The agent turn loop and output pipeline.
 5. Appends all messages (assistant + tool results) to `self.messages`.
 6. Breaks when no tool calls are present.
 
-**`AgentOutputSink`** is a trait with four hooks: `message`, `stream_event`, `tool_call`,
+ **`AgentOutputSink`** is a trait with five hooks: `message`, `stream_event`, `tool_call`,
 `tool_result`, and `task_update`. The CLI implementation (`CliOutputSink`) renders these
 to stdout using `print_actor_text`, which uses a `Mutex<(last_actor, at_line_start)>` to
 avoid interleaved output across concurrently streaming subagents.
@@ -162,7 +162,7 @@ that is truncated with a visible marker, preventing runaway tool results from fi
 ### [`src/tools/fs.rs`](src/tools/fs.rs)
 
 Filesystem tools: `read_file`, `write_file`, `append_file`, `file_info`, `read_hash_anchors`,
-`edit_hash_anchors`, `glob`.
+`edit_hash_anchors`.
 
 All path arguments go through `workspace.workspace_path()` or `workspace.readable_path()`
 before any I/O occurs. No tool in this module ever constructs an absolute path independently.
@@ -182,6 +182,9 @@ directory is always the workspace root. This prevents shell commands from escapi
 
 `repo_map` — prints the directory tree of the workspace, respecting `.gitignore` and
 skipping hidden paths.
+
+`glob` — searches for files matching a glob pattern and returns a Lua array of matching
+relative paths. Respects `.gitignore` rules.
 
 ### [`src/tools/web.rs`](src/tools/web.rs)
 
@@ -234,7 +237,7 @@ the entire batch is rejected and the file is left unchanged.
 
 ### [`src/session.rs`](src/session.rs)
 
-`persist_session_in(workspace, messages, session_id)` serializes `messages` to JSONL at
+`persist_session_in(&workspace, &messages, &session_id)` serializes `messages` to JSONL at
 `{workspace_root}/.ogent/sessions/{session_id}.jsonl`. Each line is one `Message`.
 
 Session IDs are timestamped (`generate_session_id`) to avoid collisions.
@@ -246,12 +249,13 @@ subagents. Subagent conversations exist only in memory for the duration of the r
 
 **`SkillStore`** discovers and loads skill prompt files from a fixed set of directories:
 
-```
-{cwd}/.ogent/skills/
-{cwd}/skills/
-~/.ogent/skills/
-~/.ogent/   (for global skills)
-```
+ ```
+ {cwd}/.skills/
+ {cwd}/.agents/skills/
+ {cwd}/.ogent/skills/
+ ~/.agents/skills/
+ ~/.ogent/skills/
+ ```
 
 Skills are Markdown files. `list_skills()` returns a formatted directory of all discovered
 skills. `load_skill(name)` reads and returns the file content. Skills are lazy — nothing
@@ -278,10 +282,6 @@ at compile time via `include_str!`.
 Loads `config.yaml` from `{workspace}/.ogent/config.yaml` or `~/.ogent/config.yaml`.
 Holds profiles (model name, temperature, etc.) and providers (base URL, API key env var).
 
-### [`src/util.rs`](src/util.rs)
-
-Small shared helpers. Currently: nothing important enough to document separately.
-
 ---
 
 ## Cross-Cutting Concerns
@@ -297,7 +297,7 @@ The model's tool schema is locked to `exec` and `eval`. This means:
 
 ### Subagent Spawning
 
-When the model calls `agent{role, task}` via Lua, `tools/lua.rs` constructs a fresh `Agent`
+When the model calls `agent{role, task, profile?}` via Lua, `tools/lua.rs` constructs a fresh `Agent`
 inline and calls `run_loop` on it directly (not in a separate thread or process). Subagents
 are concurrent via Tokio tasks but share the same Tokio runtime. Each subagent gets:
 - its own `lua_session` (isolated VM state)
@@ -338,6 +338,7 @@ are added. No runtime code can add new allowed roots.
 | Filesystem and editing tools | [src/tools/fs.rs](src/tools/fs.rs) | [src/hashline.rs](src/hashline.rs) |
 | Anchored edit mechanics | [src/hashline.rs](src/hashline.rs) | [src/tools/fs.rs](src/tools/fs.rs) |
 | Shell execution | [src/tools/shell.rs](src/tools/shell.rs) | [src/workspace.rs](src/workspace.rs) |
+| Git operations | [src/tools/git.rs](src/tools/git.rs) | [src/tools/mod.rs](src/tools/mod.rs) |
 | Workspace path validation | [src/workspace.rs](src/workspace.rs) | [src/tools/fs.rs](src/tools/fs.rs) |
 | System prompt and messages | [src/prompts.rs](src/prompts.rs) | PROMPT_SYSTEM.md |
 | Skills discovery and loading | [src/skills.rs](src/skills.rs) | [src/tools/skills.rs](src/tools/skills.rs) |

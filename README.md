@@ -4,7 +4,7 @@
 
 ## Quick Start
 
-1. Rename the `dotogent` boilerplate directory to `.ogent` at the repo level or copy it to `~/.ogent` for global config. It contains `config.yaml` and the `colgrep` skill.
+1. Ensure an `.ogent` directory exists at the repo level (or at `~/.ogent` for global config). It should contain `config.yaml` and skill directories.
 2. Edit `.ogent/config.yaml` or `~/.ogent/config.yaml` to configure your models and providers.
 3. Set the required API keys (e.g. for DeepSeek and Exa search):
    ```bash
@@ -73,9 +73,9 @@ Within the Lua execution sandbox, scripts can invoke workspace operations direct
 ### Git Operations (Structured)
 * `git_status{staged=..., paths=..., untracked=...}`: Returns a JSON array of file changes with `path`, `old_path` (for renames/copies), `status` (`added`, `deleted`, `modified`, `renamed`, `copied`, `untracked`, `ignored`, `type_changed`, `unmerged`), `staged`, `worktree`, `index_char`, `worktree_char`, and `display` fields.
 * `git_diff{staged=..., base=..., paths=..., context=..., stat_only=...}`: Returns a JSON array of file deltas with `path`, `old_path`, `change_type`, `is_binary`, `old_mode`, `new_mode`, `similarity`, `insertions`, `deletions`, and `hunks` (each hunk has `old_start`, `old_lines`, `new_start`, `new_lines`, `header`, and `lines` with `type`, `text`, `old_line`, `new_line`).
-* `git_changes{paths=..., context=..., stat_only=...}`: Convenience function returning **all** `git_status` entries (staged + worktree) with `diff` (worktree changes) and `staged_diff` (staged changes) attached.
+  * `git_changes{base=..., paths=..., context=..., stat_only=...}`: Convenience function returning **all** `git_status` entries (staged + worktree) with `diff` (worktree changes) and `staged_diff` (staged changes) attached.
 * `git_show{path=..., ref=...}`: Reads a file at a specific git ref without checking it out.
-* `git_log{paths=..., n=...}`: Returns brief commit history (plain text, `--oneline` format).
+  * `git_log{paths=..., n=...}`: Returns a JSON array of commit entries with `sha`, `subject`, `author`, `date` fields.
 
 ### Web Search (Exa)
 * `web_search{query=..., num_results=..., type=...}` / `web_read{urls=..., mode=...}` / `web_code_context{query=...}`: Queries the web, reads highlight summaries, or fetches real-world code snippets.
@@ -93,7 +93,7 @@ When developing or pair programming with `ogent`:
 
 ### Operating Rules
 - **Smallest Correct Change**: Always optimize for the smallest correct delta.
-- **Search First**: Prefer `colgrep` for behavioral/intent search, `rg` for exact text, and `ast-grep` for structural queries.
+- **Search First**: Prefer `colgrep` for behavioral/intent search, and `rg` for exact text.
 - **Runtime Safety**: Do not edit runtime artifacts (`.ogent/sessions/`, `target/`) unless requested.
 - **Final Handoff**: When completing a task, summarize changed files, verification performed, and any doc updates.
 
