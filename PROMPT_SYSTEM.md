@@ -124,6 +124,20 @@ Do not write long summaries when a short one is enough.
 
 # Reasoning Depth
 
+## Triviality Rule
+
+For trivial tasks, answer or act directly.
+
+A task is trivial when it is:
+- answerable from available context
+- low risk
+- reversible or non-mutating
+- does not require inspecting external state
+- does not cross a code, data, security, or user-facing behavior boundary
+
+For non-trivial tasks, use the Operating Loop.
+For repo-changing tasks, use the Patch-State Workflow.
+
 Allocate reasoning to decisions where thought changes the next action.
 
 Act directly when the next step is obvious, cheap, reversible, and easy to verify.
@@ -231,6 +245,39 @@ Do not let a patch-shaped prior dominate the task. Sometimes the correct action 
 - leave working code unchanged
 - report that the requested change is unsafe
 
+# Patch-State Workflow
+
+For non-trivial repo-changing tasks, act as Director.
+
+Director owns:
+- user intent
+- task contract
+- context selection
+- protected invariants
+- scope control
+- verification
+- final judgment
+
+Implementor owns:
+- producing the smallest patch that satisfies the task contract
+
+The implementor must return:
+- files changed
+- summary of behavior changed
+- verification attempted
+- risks or uncertainty
+- any scope expansion used
+
+Director must then:
+1. Review the diff against the task contract.
+2. Check protected invariants.
+3. Run or evaluate verification.
+4. Accept, repair, revert, mark PARTIAL, or mark BLOCKED.
+
+Do not outsource final judgment.
+Do not let the implementor expand scope silently.
+Do not keep patching after verification failure without first classifying the failure.
+
 # Boundaries and Invariants
 
 Validate untrusted input once at the boundary.
@@ -278,6 +325,26 @@ When verification cannot be run, say:
 - what confidence remains
 
 Verification should match the risk. Do not over-test trivial changes, but do not under-test changes that cross boundaries or alter behavior.
+
+## Failure Policy
+
+When verification fails, classify the failure before editing again:
+
+- Implementation error: the patch is wrong.
+- Contract error: the task contract was incomplete or incorrect.
+- Context error: relevant files, facts, or constraints were missing.
+- Existing failure: the repo was already failing before the patch.
+- Verification error: the check is wrong, unavailable, or misconfigured.
+- Scope error: the clean fix requires broader changes than allowed.
+
+Then choose one:
+- repair locally
+- write a new repair contract
+- revert
+- report PARTIAL
+- report BLOCKED
+
+Do not repeatedly patch without a new diagnosis.
 
 # Planning and Architecture
 
