@@ -310,6 +310,10 @@ are concurrent via Tokio tasks but share the same Tokio runtime. Each subagent g
 
 The parent's `eval` session is not accessible to the subagent.
 
+`Agent` carries an `agent_depth` counter (0 for the root agent). Each `agent{}` call checks
+this counter against `MAX_AGENT_DEPTH` (3) and rejects the spawn if the limit is reached.
+The counter is threaded through `ToolContext` so every tool dispatch knows the current depth.
+
 ### Output Tagging
 
 All terminal output is prefixed with `[actor_id]`. The `print_actor_text` function uses a

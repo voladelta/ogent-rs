@@ -75,7 +75,7 @@ Within the Lua execution sandbox, scripts can invoke workspace operations direct
 
 ### Subagent Workflows & DSL
 * `task_update(status, summary)`: Sends a progress/status update (e.g. `'init'`, `'review'`, `'fixing'`) to standard output.
-* `agent{role=..., task=..., profile=...}`: Spawns a subagent concurrently in an isolated sandboxed VM, loading specialized prompts if defined. Falls back to `PROMPT_ROLE_GENERIC.md` if no role prompt file is found in `.ogent/`, `cwd/`, or `~/.ogent/`.
+* `agent{role=..., task=..., profile=...}`: Spawns a subagent concurrently in an isolated sandboxed VM, loading specialized prompts if defined. Falls back to `PROMPT_ROLE_GENERIC.md` if no role prompt file is found in `.ogent/`, `cwd/`, or `~/.ogent/`. Nesting is capped at depth 3.
 * `parallel{func1, func2, ...}`: Runs multiple functions concurrently using cooperative multitasking and waits for all of them to complete.
 
 ---
