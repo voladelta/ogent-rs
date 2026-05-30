@@ -114,9 +114,10 @@ async fn spawn_subagent(
   );
   subagent.set_output_sink(ctx.output_sink.clone());
 
-  subagent.run_loop().await.map_err(|e| {
-    mlua::Error::RuntimeError(format!("subagent run loop failed: {e}"))
-  })?;
+  subagent
+    .run_loop()
+    .await
+    .map_err(|e| mlua::Error::RuntimeError(format!("subagent run loop failed: {e}")))?;
   let last_msg = subagent
     .messages
     .iter()
