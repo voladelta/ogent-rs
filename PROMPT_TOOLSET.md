@@ -195,7 +195,7 @@ These functions return parsed, structured data instead of raw command output. Us
 #### `git_status{staged=..., paths=..., untracked=...}`
 Returns a JSON-decoded Lua array of file change entries.
 - **Parameters** (table, optional):
-  - `staged` (boolean, optional): `true` = staged only; `false` = unstaged only; omit = all.
+  - `staged` (boolean, optional): `true` = entries with staged changes; `false` = entries with worktree changes (including untracked); omit = all.
   - `paths` (array of strings, optional): Restrict to specific relative paths.
   - `untracked` (boolean, optional): Include untracked files. Defaults to `true`.
 - **Returns**: `(array_of_entries, nil)` or `(nil, error)`
