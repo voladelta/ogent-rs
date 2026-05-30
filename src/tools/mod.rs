@@ -22,6 +22,9 @@ pub struct ToolContext {
   pub output_sink: Option<std::sync::Arc<dyn crate::agent::AgentOutputSink>>,
   pub verbose: bool,
   pub actor_id: String,
+  /// Nesting depth of agent spawns: 0 for the root agent, +1 for each `agent{}` call.
+  /// Enforced in lua.rs to prevent unbounded subagent recursion.
+  pub agent_depth: u32,
 }
 
 pub type AsyncHandler = Box<
@@ -149,6 +152,7 @@ mod tests {
         output_sink: None,
         verbose: false,
         actor_id: "director".to_string(),
+        agent_depth: 0,
       },
       "nonexistent_tool",
       "{}",

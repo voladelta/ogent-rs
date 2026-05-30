@@ -181,6 +181,8 @@ pub struct Agent {
   pub lua_session: Arc<std::sync::Mutex<Option<mlua::Lua>>>,
   pub actor_id: String,
   pub verbose: bool,
+  /// Subagent nesting depth: 0 for the root agent, incremented by each `agent{}` spawn.
+  pub agent_depth: u32,
 }
 
 impl Agent {
@@ -194,6 +196,7 @@ impl Agent {
     skill_store: Arc<crate::skills::SkillStore>,
     actor_id: String,
     verbose: bool,
+    agent_depth: u32,
   ) -> Self {
     Self {
       workspace,
@@ -206,6 +209,7 @@ impl Agent {
       lua_session: Arc::new(std::sync::Mutex::new(None)),
       actor_id,
       verbose,
+      agent_depth,
     }
   }
 
@@ -312,6 +316,7 @@ impl Agent {
             output_sink,
             verbose,
             actor_id,
+            agent_depth: self.agent_depth,
           },
           &tool_call.function.name,
           &tool_call.function.arguments,
@@ -401,6 +406,7 @@ mod tests {
       skill_store,
       "director".to_string(),
       false,
+      0,
     );
 
     agent.persist().unwrap();
@@ -448,6 +454,7 @@ mod tests {
       skill_store,
       "director".to_string(),
       false,
+      0,
     );
 
     struct MockSink {

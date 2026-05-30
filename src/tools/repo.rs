@@ -147,6 +147,7 @@ mod tests {
       output_sink: None,
       verbose: false,
       actor_id: "director".to_string(),
+      agent_depth: 0,
     };
 
     let args = r#"{"path":"","levels":3}"#;
@@ -214,6 +215,7 @@ mod tests {
       output_sink: None,
       verbose: false,
       actor_id: "director".to_string(),
+      agent_depth: 0,
     };
 
     let args = r#"{"pattern":"**/*.rs"}"#;

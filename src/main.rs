@@ -83,6 +83,7 @@ async fn run_agent_cli(
     skill_store,
     "director".to_string(),
     verbose,
+    0,
   );
   agent.set_output_sink(Some(agent::cli_output_sink()));
   let loop_result = agent.run_loop().await;

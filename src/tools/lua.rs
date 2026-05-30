@@ -6,6 +6,8 @@ use std::sync::{Arc, Mutex};
 
 use crate::tools::{Handler, ToolContext, ToolDef, parse_args};
 
+const MAX_AGENT_DEPTH: u32 = 3;
+
 pub fn tools() -> Vec<ToolDef> {
   vec![
     ToolDef {
@@ -129,6 +131,12 @@ fn register_tools_in_lua(lua: &Lua, ctx: ToolContext) -> Result<()> {
         .and_then(|p| p.as_str())
         .map(|s| s.to_string());
 
+      if ctx.agent_depth >= MAX_AGENT_DEPTH {
+        return Err(mlua::Error::RuntimeError(format!(
+          "max subagent depth ({MAX_AGENT_DEPTH}) exceeded"
+        )));
+      }
+
       let client = if let Some(p_name) = profile_override {
         let config = crate::config::load_or_exit(ctx.workspace.root());
         let profile = match config.get_profile(&p_name) {
@@ -170,6 +178,7 @@ fn register_tools_in_lua(lua: &Lua, ctx: ToolContext) -> Result<()> {
         ctx.skill_store.clone(),
         role.clone(),
         ctx.verbose,
+        ctx.agent_depth + 1,
       );
       subagent.set_output_sink(ctx.output_sink.clone());
 
@@ -745,6 +754,7 @@ mod tests {
       output_sink: None,
       verbose: false,
       actor_id: "director".to_string(),
+      agent_depth: 0,
     }
   }
 
@@ -894,6 +904,7 @@ mod tests {
       output_sink: None,
       verbose: false,
       actor_id: "director".to_string(),
+      agent_depth: 0,
     };
 
     // Test list_skills()
