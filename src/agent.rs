@@ -230,13 +230,6 @@ impl Agent {
     }
   }
 
-  #[allow(dead_code)]
-  pub fn emit_task_update(&self, status: &str, summary: &str) {
-    if let Some(sink) = &self.output_sink {
-      sink.task_update(&self.actor_id, status, summary);
-    }
-  }
-
   fn stream_events_to_sink(
     &self,
   ) -> Option<(
@@ -313,7 +306,13 @@ impl Agent {
           other => Err(anyhow::anyhow!("unknown tool: {other}")),
         };
         let failed = result.is_err();
-        let content = tool_result_content(&tool_call.function.name, result);
+        let content = match result {
+          Ok(content) => content,
+          Err(err) => format!(
+            "tool `{}` failed:\n{err}\n\nUse this tool error as evidence, then adjust the next tool call or report the failure.",
+            tool_call.function.name
+          ),
+        };
         self.emit_tool_result(&tool_call.function.name, &content, failed);
         let tool_message = Message::tool_result(tool_call.id, content);
         self.messages.push(tool_message.clone());
@@ -326,15 +325,6 @@ impl Agent {
 
   pub fn persist(&self) -> Result<()> {
     session::persist_session_in(&self.workspace, &self.messages, &self.session_id)
-  }
-}
-
-fn tool_result_content(tool_name: &str, result: Result<String>) -> String {
-  match result {
-    Ok(content) => content,
-    Err(err) => format!(
-      "tool `{tool_name}` failed:\n{err}\n\nUse this tool error as evidence, then adjust the next tool call or report the failure."
-    ),
   }
 }
 
@@ -356,15 +346,6 @@ mod tests {
   use super::*;
   use crate::client::Client;
   use crate::types::MessageOrigin;
-
-  #[test]
-  fn tool_result_content_reports_errors_to_model() {
-    let content = tool_result_content("shell", Err(anyhow::anyhow!("exit err: exit status: 127")));
-
-    assert!(content.contains("tool `shell` failed"));
-    assert!(content.contains("exit status: 127"));
-    assert!(content.contains("adjust the next tool call"));
-  }
 
   #[test]
   fn truncate_for_cli_keeps_short_text() {

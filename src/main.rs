@@ -9,7 +9,6 @@ mod skills;
 mod sse;
 mod tools;
 mod types;
-mod util;
 mod workspace;
 
 use anyhow::{Context, Result};
@@ -41,7 +40,7 @@ async fn main() -> Result<()> {
   if let Ok(home) = env::var("HOME") {
     workspace.add_allowed_root(std::path::PathBuf::from(home).join(".ogent"));
   }
-  let config = config::load_or_exit(workspace.root());
+  let config = load_config_or_exit(workspace.root());
   let profile_name = args
     .profile
     .clone()
@@ -91,6 +90,16 @@ async fn run_agent_cli(
     eprintln!("warning: failed to persist session: {pe}");
   }
   loop_result.map_err(Into::into)
+}
+
+fn load_config_or_exit(workspace_root: &std::path::Path) -> config::Config {
+  match config::load_config(workspace_root) {
+    Ok(cfg) => cfg,
+    Err(err) => {
+      eprintln!("Error: {err}");
+      std::process::exit(1);
+    }
+  }
 }
 
 fn parse_args() -> Args {

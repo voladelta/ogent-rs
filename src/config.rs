@@ -63,13 +63,3 @@ fn home_ogent_config() -> Result<PathBuf> {
   let home = std::env::var_os("HOME").context("HOME not set")?;
   Ok(PathBuf::from(home).join(".ogent/config.yaml"))
 }
-
-pub fn load_or_exit(workspace_root: &Path) -> Config {
-  match load_config(workspace_root) {
-    Ok(cfg) => cfg,
-    Err(err) => {
-      eprintln!("Error: {err}");
-      std::process::exit(1);
-    }
-  }
-}

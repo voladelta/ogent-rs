@@ -122,11 +122,25 @@ impl SkillStore {
   }
 }
 
+fn xml_escape(s: &str) -> String {
+  let mut out = String::with_capacity(s.len());
+  for c in s.chars() {
+    match c {
+      '&' => out.push_str("&amp;"),
+      '"' => out.push_str("&quot;"),
+      '<' => out.push_str("&lt;"),
+      '>' => out.push_str("&gt;"),
+      _ => out.push(c),
+    }
+  }
+  out
+}
+
 pub fn format_loaded_skill(skill: &Skill) -> String {
   format!(
     "<skill name=\"{}\" root=\"{}\">\n{}\n</skill>",
-    crate::util::xml_escape(&skill.name),
-    crate::util::xml_escape(&skill.root.to_string_lossy()),
+    xml_escape(&skill.name),
+    xml_escape(&skill.root.to_string_lossy()),
     skill.body
   )
 }
@@ -248,5 +262,18 @@ mod tests {
     assert!(formatted.contains("name=\"hello-world &amp; &quot;test&quot;\""));
     assert!(formatted.contains("root=\"/path/to/my &amp; skill\""));
     assert!(formatted.contains("My Body\nContent"));
+  }
+
+  #[test]
+  fn xml_escape_basic() {
+    assert_eq!(xml_escape("hello"), "hello");
+    assert_eq!(xml_escape("a & b"), "a &amp; b");
+    assert_eq!(xml_escape("a < b"), "a &lt; b");
+    assert_eq!(xml_escape("a > b"), "a &gt; b");
+    assert_eq!(xml_escape("a \" b"), "a &quot; b");
+    assert_eq!(
+      xml_escape("<foo bar=\"baz\">&</foo>"),
+      "&lt;foo bar=&quot;baz&quot;&gt;&amp;&lt;/foo&gt;"
+    );
   }
 }
