@@ -1,87 +1,10 @@
 use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use std::collections::HashMap;
 use tokio::process::Command;
 use tokio::time::{Duration, timeout};
 
-use crate::tools::{Handler, ToolContext, ToolDef, parse_args};
-
-pub fn tools() -> Vec<ToolDef> {
-  vec![
-    ToolDef {
-      name: "git_status",
-      description: "Return structured git status entries for the workspace. Returns a JSON array of file changes.",
-      parameters: json!({
-        "type": "object",
-        "properties": {
-          "staged": {"type": "boolean", "description": "true = staged only; false = unstaged only; omit = all."},
-          "paths": {"type": "array", "items": {"type": "string"}, "description": "Restrict to specific paths."},
-          "untracked": {"type": "boolean", "description": "Include untracked files (default true)."}
-        },
-        "additionalProperties": false
-      }),
-      handler: Handler::async_fn(|ctx, args| async move { git_status(ctx, &args).await }),
-    },
-    ToolDef {
-      name: "git_diff",
-      description: "Return a structured git diff for the workspace. Returns a JSON array of file deltas with hunks.",
-      parameters: json!({
-        "type": "object",
-        "properties": {
-          "staged": {"type": "boolean", "description": "true = diff --cached (index vs HEAD). Default false (worktree vs index)."},
-          "base": {"type": "string", "description": "Diff against a specific ref (e.g. 'HEAD~1'). Ignored when staged is true."},
-          "paths": {"type": "array", "items": {"type": "string"}, "description": "Restrict to specific paths."},
-          "context": {"type": "integer", "description": "Context lines per hunk (default 3)."},
-          "stat_only": {"type": "boolean", "description": "If true, omit hunks and return only path, change_type, insertions, deletions."}
-        },
-        "additionalProperties": false
-      }),
-      handler: Handler::async_fn(|ctx, args| async move { git_diff(ctx, &args).await }),
-    },
-    ToolDef {
-      name: "git_changes",
-      description: "Convenience function returning all status entries (staged and worktree) with diff and staged_diff fields attached for files that have content changes.",
-      parameters: json!({
-        "type": "object",
-        "properties": {
-          "paths": {"type": "array", "items": {"type": "string"}, "description": "Restrict to specific paths."},
-          "context": {"type": "integer", "description": "Context lines per hunk (default 3)."},
-          "stat_only": {"type": "boolean", "description": "If true, omit hunks and return only path, change_type, insertions, deletions."}
-        },
-        "additionalProperties": false
-      }),
-      handler: Handler::async_fn(|ctx, args| async move { git_changes(ctx, &args).await }),
-    },
-    ToolDef {
-      name: "git_show",
-      description: "Read a file at a specific git ref without checking it out.",
-      parameters: json!({
-        "type": "object",
-        "properties": {
-          "path": {"type": "string", "description": "Relative path to the file."},
-          "ref": {"type": "string", "description": "Git ref (e.g. 'HEAD', 'HEAD~1', 'abc123'). Defaults to HEAD."}
-        },
-        "required": ["path"],
-        "additionalProperties": false
-      }),
-      handler: Handler::async_fn(|ctx, args| async move { git_show(ctx, &args).await }),
-    },
-    ToolDef {
-      name: "git_log",
-      description: "Return brief commit history for a set of paths.",
-      parameters: json!({
-        "type": "object",
-        "properties": {
-          "paths": {"type": "array", "items": {"type": "string"}, "description": "Restrict to specific paths."},
-          "n": {"type": "integer", "description": "Max number of commits (default 10)."}
-        },
-        "additionalProperties": false
-      }),
-      handler: Handler::async_fn(|ctx, args| async move { git_log(ctx, &args).await }),
-    },
-  ]
-}
+use crate::tools::{ToolContext, parse_args};
 
 #[derive(Deserialize)]
 struct GitStatusArgs {
@@ -222,7 +145,7 @@ async fn run_git(workspace: &std::path::Path, args: &[&str]) -> Result<std::proc
   }
 }
 
-async fn git_status(ctx: ToolContext, args: &str) -> Result<String> {
+pub async fn git_status(ctx: ToolContext, args: &str) -> Result<String> {
   let args: GitStatusArgs = parse_args(args)?;
 
   let mut git_args: Vec<String> = vec![
@@ -386,7 +309,7 @@ fn resolve_status(x: char, y: char) -> String {
   .to_string()
 }
 
-async fn git_diff(ctx: ToolContext, args: &str) -> Result<String> {
+pub async fn git_diff(ctx: ToolContext, args: &str) -> Result<String> {
   let args: GitDiffArgs = parse_args(args)?;
 
   let mut git_args: Vec<String> = vec!["diff".to_string(), "--no-ext-diff".to_string()];
@@ -437,9 +360,10 @@ fn parse_unified_diff(text: &str, stat_only: bool) -> Result<Vec<GitDiffDelta>> 
     if let Some(after) = line.strip_prefix("diff --git ") {
       if let Some(h) = current_hunk.take()
         && let Some(d) = current.as_mut()
-          && let Some(hunks) = &mut d.hunks {
-            hunks.push(h);
-          }
+        && let Some(hunks) = &mut d.hunks
+      {
+        hunks.push(h);
+      }
       maybe_push_delta(&mut deltas, &mut current);
 
       let parts: Vec<&str> = after.split_whitespace().collect();
@@ -471,51 +395,52 @@ fn parse_unified_diff(text: &str, stat_only: bool) -> Result<Vec<GitDiffDelta>> 
     let push_hunk = |cur: &mut Option<GitDiffDelta>, hunk: &mut Option<GitDiffHunk>| {
       if let Some(h) = hunk.take()
         && let Some(d) = cur
-          && let Some(hunks) = &mut d.hunks {
-            hunks.push(h);
-          }
+        && let Some(hunks) = &mut d.hunks
+      {
+        hunks.push(h);
+      }
     };
 
-    if line.starts_with("old mode ") {
+    if let Some(stripped) = line.strip_prefix("old mode ") {
       if let Some(cur) = current.as_mut() {
-        cur.old_mode = Some(line["old mode ".len()..].to_string());
+        cur.old_mode = Some(stripped.to_string());
       }
-    } else if line.starts_with("new mode ") {
+    } else if let Some(stripped) = line.strip_prefix("new mode ") {
       if let Some(cur) = current.as_mut() {
-        cur.new_mode = Some(line["new mode ".len()..].to_string());
+        cur.new_mode = Some(stripped.to_string());
       }
-    } else if line.starts_with("deleted file mode ") {
+    } else if let Some(stripped) = line.strip_prefix("deleted file mode ") {
       if let Some(cur) = current.as_mut() {
         cur.change_type = "deleted".to_string();
-        cur.old_mode = Some(line["deleted file mode ".len()..].to_string());
+        cur.old_mode = Some(stripped.to_string());
       }
-    } else if line.starts_with("new file mode ") {
+    } else if let Some(stripped) = line.strip_prefix("new file mode ") {
       if let Some(cur) = current.as_mut() {
         cur.change_type = "added".to_string();
-        cur.new_mode = Some(line["new file mode ".len()..].to_string());
+        cur.new_mode = Some(stripped.to_string());
       }
-    } else if line.starts_with("similarity index ") {
+    } else if let Some(stripped) = line.strip_prefix("similarity index ") {
       if let Some(cur) = current.as_mut() {
-        let pct = line["similarity index ".len()..].trim_end_matches('%');
+        let pct = stripped.trim_end_matches('%');
         cur.similarity = pct.parse().ok();
       }
-    } else if line.starts_with("rename from ") {
+    } else if let Some(stripped) = line.strip_prefix("rename from ") {
       if let Some(cur) = current.as_mut() {
         cur.change_type = "renamed".to_string();
-        cur.old_path = strip_quotes(&line["rename from ".len()..]).to_string();
+        cur.old_path = strip_quotes(stripped).to_string();
       }
-    } else if line.starts_with("rename to ") {
+    } else if let Some(stripped) = line.strip_prefix("rename to ") {
       if let Some(cur) = current.as_mut() {
-        cur.path = strip_quotes(&line["rename to ".len()..]).to_string();
+        cur.path = strip_quotes(stripped).to_string();
       }
-    } else if line.starts_with("copy from ") {
+    } else if let Some(stripped) = line.strip_prefix("copy from ") {
       if let Some(cur) = current.as_mut() {
         cur.change_type = "copied".to_string();
-        cur.old_path = strip_quotes(&line["copy from ".len()..]).to_string();
+        cur.old_path = strip_quotes(stripped).to_string();
       }
-    } else if line.starts_with("copy to ") {
+    } else if let Some(stripped) = line.strip_prefix("copy to ") {
       if let Some(cur) = current.as_mut() {
-        cur.path = strip_quotes(&line["copy to ".len()..]).to_string();
+        cur.path = strip_quotes(stripped).to_string();
       }
     } else if line.starts_with("index ") {
       // skip
@@ -525,9 +450,7 @@ fn parse_unified_diff(text: &str, stat_only: bool) -> Result<Vec<GitDiffDelta>> 
         cur.hunks = None;
         current_hunk = None;
       }
-    } else if line.starts_with("--- ") {
-      // skip
-    } else if line.starts_with("+++ ") {
+    } else if line.starts_with("--- ") || line.starts_with("+++ ") {
       // skip
     } else if line.starts_with("@@") {
       push_hunk(&mut current, &mut current_hunk);
@@ -535,49 +458,52 @@ fn parse_unified_diff(text: &str, stat_only: bool) -> Result<Vec<GitDiffDelta>> 
         old_line = h.old_start;
         new_line = h.new_start;
         if let Some(cur) = current.as_mut()
-          && cur.hunks.is_some() {
-            current_hunk = Some(h);
-          }
+          && cur.hunks.is_some()
+        {
+          current_hunk = Some(h);
+        }
       }
-    } else if line.starts_with(" ") {
+    } else if let Some(stripped) = line.strip_prefix(" ") {
       if let Some(h) = current_hunk.as_mut() {
         h.lines.push(GitDiffLine {
           r#type: "context".to_string(),
-          text: line[1..].to_string(),
+          text: stripped.to_string(),
           old_line: Some(old_line),
           new_line: Some(new_line),
         });
         old_line += 1;
         new_line += 1;
       }
-    } else if line.starts_with("-") {
+    } else if let Some(stripped) = line.strip_prefix("-") {
       if let Some(h) = current_hunk.as_mut() {
         h.lines.push(GitDiffLine {
           r#type: "deletion".to_string(),
-          text: line[1..].to_string(),
+          text: stripped.to_string(),
           old_line: Some(old_line),
           new_line: None,
         });
         old_line += 1;
       }
       if let Some(cur) = current.as_mut()
-        && let Some(del) = &mut cur.deletions {
-          *del += 1;
-        }
-    } else if line.starts_with("+") {
+        && let Some(del) = &mut cur.deletions
+      {
+        *del += 1;
+      }
+    } else if let Some(stripped) = line.strip_prefix("+") {
       if let Some(h) = current_hunk.as_mut() {
         h.lines.push(GitDiffLine {
           r#type: "addition".to_string(),
-          text: line[1..].to_string(),
+          text: stripped.to_string(),
           old_line: None,
           new_line: Some(new_line),
         });
         new_line += 1;
       }
       if let Some(cur) = current.as_mut()
-        && let Some(ins) = &mut cur.insertions {
-          *ins += 1;
-        }
+        && let Some(ins) = &mut cur.insertions
+      {
+        *ins += 1;
+      }
     } else if line == "\\ No newline at end of file" {
       // skip
     }
@@ -585,9 +511,10 @@ fn parse_unified_diff(text: &str, stat_only: bool) -> Result<Vec<GitDiffDelta>> 
 
   if let Some(h) = current_hunk.take()
     && let Some(d) = current.as_mut()
-      && let Some(hunks) = &mut d.hunks {
-        hunks.push(h);
-      }
+    && let Some(hunks) = &mut d.hunks
+  {
+    hunks.push(h);
+  }
   maybe_push_delta(&mut deltas, &mut current);
 
   Ok(deltas)
@@ -672,7 +599,7 @@ async fn run_diff(
   Ok(deltas.into_iter().map(|d| (d.path.clone(), d)).collect())
 }
 
-async fn git_changes(ctx: ToolContext, args: &str) -> Result<String> {
+pub async fn git_changes(ctx: ToolContext, args: &str) -> Result<String> {
   let args: GitChangesArgs = parse_args(args)?;
 
   // 1. Get status
@@ -751,7 +678,7 @@ async fn git_changes(ctx: ToolContext, args: &str) -> Result<String> {
   Ok(serde_json::to_string(&entries)?)
 }
 
-async fn git_show(ctx: ToolContext, args: &str) -> Result<String> {
+pub async fn git_show(ctx: ToolContext, args: &str) -> Result<String> {
   let args: GitShowArgs = parse_args(args)?;
 
   let spec = format!("{}:{}", args.git_ref, args.path);
@@ -760,7 +687,7 @@ async fn git_show(ctx: ToolContext, args: &str) -> Result<String> {
   Ok(content.into_owned())
 }
 
-async fn git_log(ctx: ToolContext, args: &str) -> Result<String> {
+pub async fn git_log(ctx: ToolContext, args: &str) -> Result<String> {
   let args: GitLogArgs = parse_args(args)?;
 
   let mut git_args: Vec<String> = vec![
@@ -938,8 +865,8 @@ index abc..def 100644
 
     assert_eq!(entries[0].path, "README.md");
     assert_eq!(entries[0].status, "modified");
-    assert_eq!(entries[0].staged, false);
-    assert_eq!(entries[0].worktree, true);
+    assert!(!entries[0].staged);
+    assert!(entries[0].worktree);
     assert_eq!(entries[0].index_char, " ");
     assert_eq!(entries[0].worktree_char, "M");
     assert_eq!(entries[0].display, " M");
@@ -963,8 +890,8 @@ index abc..def 100644
     assert_eq!(entries[0].path, "new.rs");
     assert_eq!(entries[0].old_path, Some("old.rs".to_string()));
     assert_eq!(entries[0].status, "renamed");
-    assert_eq!(entries[0].staged, true);
-    assert_eq!(entries[0].worktree, false);
+    assert!(entries[0].staged);
+    assert!(!entries[0].worktree);
     assert_eq!(entries[0].index_char, "R");
     assert_eq!(entries[0].worktree_char, " ");
   }
@@ -976,8 +903,8 @@ index abc..def 100644
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].path, "file.rs");
     assert_eq!(entries[0].status, "modified");
-    assert_eq!(entries[0].staged, true);
-    assert_eq!(entries[0].worktree, true);
+    assert!(entries[0].staged);
+    assert!(entries[0].worktree);
   }
 
   #[test]
@@ -991,8 +918,8 @@ index abc..def 100644
     assert_eq!(entries[0].status, "unmerged");
     assert_eq!(entries[0].index_char, "U");
     assert_eq!(entries[0].worktree_char, "U");
-    assert_eq!(entries[0].staged, true);
-    assert_eq!(entries[0].worktree, true);
+    assert!(entries[0].staged);
+    assert!(entries[0].worktree);
 
     assert_eq!(entries[1].path, "added_by_us.rs");
     assert_eq!(entries[1].status, "unmerged");
@@ -1014,7 +941,7 @@ index abc..def 100644
     assert_eq!(entries[0].status, "type_changed");
     assert_eq!(entries[0].index_char, "T");
     assert_eq!(entries[0].worktree_char, " ");
-    assert_eq!(entries[0].staged, true);
-    assert_eq!(entries[0].worktree, false);
+    assert!(entries[0].staged);
+    assert!(!entries[0].worktree);
   }
 }

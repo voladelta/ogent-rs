@@ -5,7 +5,7 @@ use std::sync::{Arc, OnceLock};
 use crate::client::{Client, ClientError};
 use crate::session;
 use crate::sse::StreamEvent;
-use crate::tools::{ToolContext, execute_tool};
+use crate::tools::ToolContext;
 use crate::types::{Message, Role, Tool, ToolCall};
 use crate::workspace::Workspace;
 
@@ -297,28 +297,21 @@ impl Agent {
 
       for tool_call in assistant.tool_calls {
         self.emit_tool_call(&tool_call);
-        let workspace = self.workspace.clone();
-        let skill_store = self.skill_store.clone();
-        let lua_session = self.lua_session.clone();
-        let client = self.client.clone();
-        let output_sink = self.output_sink.clone();
-        let verbose = self.verbose;
-        let actor_id = self.actor_id.clone();
-        let result = execute_tool(
-          ToolContext {
-            workspace,
-            skill_store,
-            lua_session,
-            client,
-            output_sink,
-            verbose,
-            actor_id,
-            agent_depth: self.agent_depth,
-          },
-          &tool_call.function.name,
-          &tool_call.function.arguments,
-        )
-        .await;
+        let ctx = ToolContext {
+          workspace: self.workspace.clone(),
+          skill_store: self.skill_store.clone(),
+          lua_session: self.lua_session.clone(),
+          client: self.client.clone(),
+          output_sink: self.output_sink.clone(),
+          verbose: self.verbose,
+          actor_id: self.actor_id.clone(),
+          agent_depth: self.agent_depth,
+        };
+        let result = match tool_call.function.name.as_str() {
+          "exec" => crate::tools::exec(ctx, &tool_call.function.arguments).await,
+          "eval" => crate::tools::eval(ctx, &tool_call.function.arguments).await,
+          other => Err(anyhow::anyhow!("unknown tool: {other}")),
+        };
         let failed = result.is_err();
         let content = tool_result_content(&tool_call.function.name, result);
         self.emit_tool_result(&tool_call.function.name, &content, failed);

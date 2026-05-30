@@ -64,7 +64,8 @@ The agent turn loop and output pipeline.
 1. Opens a streaming channel to the sink.
 2. Calls `client.chat(messages, tools, stream_tx)`.
 3. Awaits the stream handle, then handles the response.
-4. If the response has tool calls, dispatches each via `execute_tool`.
+4. If the response has tool calls, dispatches `exec` and `eval` directly to
+   `tools::exec()` and `tools::eval()`.
 5. Appends all messages (assistant + tool results) to `self.messages`.
 6. Breaks when no tool calls are present.
 
@@ -107,23 +108,17 @@ It sends a `Vec<Message>` and `Vec<Tool>`, and returns a `ChatResponse`.
 
 ### [`src/tools/mod.rs`](src/tools/mod.rs)
 
-Tool registry and dispatch.
-
-**`ToolDef`** is the internal definition of a tool: a `name`, `description`, JSON `parameters`
-schema, and a `Handler` (sync or async function). Every tool in the system — `read_file`,
-`shell`, `exec`, `web_search`, etc. — is registered here.
-
-**`all_tools()`** returns all registered `ToolDef`s, lazily initialized via `OnceLock`.
-
-**`configured_agent_tools()`** returns only the two schemas sent to the LLM: `exec` and `eval`.
-This is a filtered subset of `all_tools()`.
-
-**`execute_tool(ctx, name, args)`** is the single dispatch point. All tool calls from the
-agent loop go through here, and all tool calls from the Lua sandbox also go through here
-(via the wrapper functions in `tools/lua.rs`).
+Tool context and helpers.
 
 **`ToolContext`** is passed to every tool handler. It carries everything a tool might need:
 `workspace`, `skill_store`, `lua_session`, `client`, `output_sink`, `verbose`, `actor_id`.
+
+**`agent_tools()`** returns the two `Tool` schemas sent to the LLM: `exec` and `eval`.
+These are defined explicitly in `tools/lua.rs`.
+
+Each tool module (`fs`, `git`, `repo`, `shell`, `skills`, `web`) exports its functions as
+`pub fn` or `pub async fn`. They are not registered in a central registry — instead,
+`tools/lua.rs` registers them directly into the Lua sandbox as globals.
 
 **Architecture Invariant:** the LLM only ever sees `exec` and `eval` in its tool list.
 All other tools are internal — accessible only via Lua scripts.
@@ -143,10 +138,10 @@ Both go through `run_lua_vm_async`, which:
 4. Runs the coroutine via `thread.into_async(())?.await`.
 5. Returns captured stdout + return value (or runtime error) as a formatted string.
 
-`register_tools_in_lua` injects every capability as a Lua global function. Tools with
-special calling conventions (positional args, Lua table return) are wrapped manually
-(e.g. `read_file`, `apply_anchor_edits`, `glob`). Remaining tools are wrapped generically
-via a loop over `all_tools()`.
+`register_tools_in_lua` injects every capability as a Lua global function using the
+`register_sync!` and `register_async!` macros. Tools with special calling conventions
+(positional args, Lua table return) are wrapped manually (e.g. `read_file`,
+`apply_anchor_edits`, `glob`).
 
 The `agent{role, task, profile}` Lua function spawns a full `Agent` inline — same code path
 as the root agent, with a fresh `lua_session` and a role-specific prompt.

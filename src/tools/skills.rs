@@ -1,40 +1,8 @@
 use anyhow::Result;
 use serde::Deserialize;
-use serde_json::json;
 use std::fmt::Write;
 
-use crate::tools::{Handler, ToolContext, ToolDef, parse_args, require_nonempty};
-
-pub fn tools() -> Vec<ToolDef> {
-  vec![
-    ToolDef {
-      name: "load_skill",
-      description: "Load a skill from .ogent/skills/ or ~/.ogent/skills/.",
-      parameters: json!({"type":"object","properties":{"name":{"type":"string"}},"required":["name"],"additionalProperties":false}),
-      handler: Handler::Sync(load_skill),
-    },
-    ToolDef {
-      name: "list_skills",
-      description: "List all available skills from workspace and home skill directories.",
-      parameters: json!({"type":"object","properties":{},"additionalProperties":false}),
-      handler: Handler::Sync(list_skills),
-    },
-    ToolDef {
-      name: "load_skill_asset",
-      description: "Load an asset file from a skill root directory (e.g. references/MANUAL.md or scripts/analyze.py).",
-      parameters: json!({
-        "type": "object",
-        "properties": {
-          "root": {"type": "string", "description": "Absolute or workspace-relative root directory of the skill"},
-          "path": {"type": "string", "description": "Asset file relative path inside the skill root"}
-        },
-        "required": ["root", "path"],
-        "additionalProperties": false
-      }),
-      handler: Handler::Sync(load_skill_asset),
-    },
-  ]
-}
+use crate::tools::{ToolContext, parse_args, require_nonempty};
 
 #[derive(Deserialize)]
 struct LoadSkillArgs {
@@ -47,14 +15,14 @@ struct LoadSkillAssetArgs {
   path: String,
 }
 
-fn load_skill(ctx: ToolContext, args: &str) -> Result<String> {
+pub fn load_skill(ctx: ToolContext, args: &str) -> Result<String> {
   let args: LoadSkillArgs = parse_args(args)?;
   require_nonempty(&args.name, "name")?;
   let skill = ctx.skill_store.load_skill(&args.name)?;
   Ok(crate::skills::format_loaded_skill(&skill))
 }
 
-fn list_skills(ctx: ToolContext, _args: &str) -> Result<String> {
+pub fn list_skills(ctx: ToolContext, _args: &str) -> Result<String> {
   let infos = ctx.skill_store.discover_skills();
   if infos.is_empty() {
     return Ok("# Available Skills\nNo skills found.".to_string());
@@ -79,7 +47,7 @@ fn list_skills(ctx: ToolContext, _args: &str) -> Result<String> {
   Ok(out.trim_end().to_string())
 }
 
-fn load_skill_asset(ctx: ToolContext, args: &str) -> Result<String> {
+pub fn load_skill_asset(ctx: ToolContext, args: &str) -> Result<String> {
   use anyhow::{Context, bail};
   use std::path::PathBuf;
 

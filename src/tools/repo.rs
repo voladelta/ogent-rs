@@ -1,25 +1,7 @@
 use anyhow::Result;
 use serde::Deserialize;
-use serde_json::json;
 
-use crate::tools::{Handler, ToolContext, ToolDef, parse_args, require_nonempty};
-
-pub fn tools() -> Vec<ToolDef> {
-  vec![
-    ToolDef {
-      name: "repo_map",
-      description: "Display a tree map of the repository directory structure. path defaults to the workspace root; levels defaults to 3.",
-      parameters: json!({"type":"object","properties":{"path":{"type":"string","description":"Directory path relative to workspace root. Default: \".\""},"levels":{"type":"integer","description":"Max depth to descend. Default: 3 if 0 or omitted."}},"additionalProperties":false}),
-      handler: Handler::Sync(repo_map),
-    },
-    ToolDef {
-      name: "glob",
-      description: "Search for files in the workspace matching a glob pattern, automatically respecting .gitignore.",
-      parameters: json!({"type":"object","properties":{"pattern":{"type":"string","description":"Glob pattern relative to workspace root (e.g. \"**/*.rs\")"}},"required":["pattern"],"additionalProperties":false}),
-      handler: Handler::Sync(glob),
-    },
-  ]
-}
+use crate::tools::{ToolContext, parse_args, require_nonempty};
 
 #[derive(Deserialize)]
 struct RepoMapArgs {
@@ -29,7 +11,7 @@ struct RepoMapArgs {
   levels: usize,
 }
 
-fn repo_map(ctx: ToolContext, args: &str) -> Result<String> {
+pub fn repo_map(ctx: ToolContext, args: &str) -> Result<String> {
   let args: RepoMapArgs = parse_args(args)?;
   let rel = path_or_root(&args.path);
   let path = ctx.workspace.readable_path(rel)?;
@@ -87,7 +69,7 @@ struct GlobArgs {
   pattern: String,
 }
 
-fn glob(ctx: ToolContext, args: &str) -> Result<String> {
+pub fn glob(ctx: ToolContext, args: &str) -> Result<String> {
   let args: GlobArgs = parse_args(args)?;
   require_nonempty(&args.pattern, "pattern")?;
 

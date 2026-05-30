@@ -78,7 +78,7 @@ async fn run_agent_cli(
     workspace,
     client,
     messages,
-    tools::configured_agent_tools(),
+    tools::agent_tools(),
     session::generate_session_id(),
     skill_store,
     "director".to_string(),

@@ -1,21 +1,11 @@
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
-use serde_json::json;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use tokio::process::Command;
 use tokio::time::{Duration, timeout};
 
-use crate::tools::{Handler, ToolContext, ToolDef, parse_args, require_nonempty};
-
-pub fn tools() -> Vec<ToolDef> {
-  vec![ToolDef {
-    name: "shell",
-    description: "Execute a shell command in the workspace root and return stdout and stderr combined. Default timeout is 120s if omitted or 0; max is 600s.",
-    parameters: json!({"type":"object","properties":{"command":{"type":"string"},"timeout_seconds":{"type":"integer","description":"Max seconds. Default: 120 if 0 or omitted. Max: 600."}},"required":["command"],"additionalProperties":false}),
-    handler: Handler::async_fn(|ctx, args| async move { shell(ctx, &args).await }),
-  }]
-}
+use crate::tools::{ToolContext, parse_args, require_nonempty};
 
 #[derive(Deserialize)]
 struct ShellArgs {
@@ -115,7 +105,7 @@ fn resolve_cd_target(base: &Path, path: &str) -> Result<PathBuf> {
   Ok(base.join(path))
 }
 
-async fn shell(ctx: ToolContext, args: &str) -> Result<String> {
+pub async fn shell(ctx: ToolContext, args: &str) -> Result<String> {
   let args: ShellArgs = parse_args(args)?;
   require_nonempty(&args.command, "command")?;
   check_shell_cds(&ctx.workspace, &args.command)?;

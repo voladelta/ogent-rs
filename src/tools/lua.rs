@@ -5,71 +5,116 @@ use serde::Deserialize;
 use serde_json::json;
 use std::sync::Arc;
 
-use crate::tools::{Handler, ToolContext, ToolDef, parse_args};
+use crate::tools::ToolContext;
+use crate::tools::parse_args;
+use crate::types::{Tool, ToolFunction};
 
 const MAX_AGENT_DEPTH: u32 = 3;
 
-pub fn tools() -> Vec<ToolDef> {
+pub fn agent_tools() -> Vec<Tool> {
   vec![
-    ToolDef {
-      name: "exec",
-      description: "Execute a one-off stateless Lua 5.5 script. Captures stdout prints and the final return value.",
-      parameters: json!({
-        "type": "object",
-        "properties": {
-          "code": {
-            "type": "string",
-            "description": "Lua 5.5 script to execute"
+    Tool {
+      kind: "function".to_string(),
+      function: ToolFunction {
+        name: "exec".to_string(),
+        description: "Execute a one-off stateless Lua 5.5 script. Captures stdout prints and the final return value.".to_string(),
+        parameters: json!({
+          "type": "object",
+          "properties": {
+            "code": {
+              "type": "string",
+              "description": "Lua 5.5 script to execute"
+            },
+            "reason": {
+              "type": "string",
+              "description": "Optional explanation of why the script is being executed (for tracking/session logging)"
+            }
           },
-          "reason": {
-            "type": "string",
-            "description": "Optional explanation of why the script is being executed (for tracking/session logging)"
-          }
-        },
-        "required": ["code"],
-        "additionalProperties": false
-      }),
-      handler: Handler::async_fn(|ctx, args| async move { exec_tool(ctx, &args).await }),
+          "required": ["code"],
+          "additionalProperties": false
+        }),
+      },
     },
-    ToolDef {
-      name: "eval",
-      description: "Execute a stateful Lua 5.5 script within the persistent session. Captures stdout prints and the final return value. Retains global variables/functions between calls.",
-      parameters: json!({
-        "type": "object",
-        "properties": {
-          "code": {
-            "type": "string",
-            "description": "Lua 5.5 script to execute"
+    Tool {
+      kind: "function".to_string(),
+      function: ToolFunction {
+        name: "eval".to_string(),
+        description: "Execute a stateful Lua 5.5 script within the persistent session. Captures stdout prints and the final return value. Retains global variables/functions between calls.".to_string(),
+        parameters: json!({
+          "type": "object",
+          "properties": {
+            "code": {
+              "type": "string",
+              "description": "Lua 5.5 script to execute"
+            },
+            "reason": {
+              "type": "string",
+              "description": "Optional explanation of why the script is being executed (for tracking/session logging)"
+            }
           },
-          "reason": {
-            "type": "string",
-            "description": "Optional explanation of why the script is being executed (for tracking/session logging)"
-          }
-        },
-        "required": ["code"],
-        "additionalProperties": false
-      }),
-      handler: Handler::async_fn(|ctx, args| async move { eval_tool(ctx, &args).await }),
+          "required": ["code"],
+          "additionalProperties": false
+        }),
+      },
     },
   ]
 }
 
-#[derive(Deserialize)]
-struct LuaArgs {
-  code: String,
-  #[allow(dead_code)]
-  reason: Option<String>,
+macro_rules! register_sync {
+  ($lua:expr, $globals:expr, $ctx:expr, $name:expr, $func:expr) => {{
+    let ctx_clone = $ctx.clone();
+    let lua_fn = $lua.create_function(move |lua, args: mlua::Value| {
+      let json_args = match args {
+        mlua::Value::Nil => "{}".to_string(),
+        _ => {
+          let json_val: serde_json::Value = lua.from_value(args)?;
+          json_val.to_string()
+        }
+      };
+      let result = $func(ctx_clone.clone(), &json_args);
+      match result {
+        Ok(output) => Ok((
+          mlua::Value::String(lua.create_string(&output)?),
+          mlua::Value::Nil,
+        )),
+        Err(e) => Ok((
+          mlua::Value::Nil,
+          mlua::Value::String(lua.create_string(&e.to_string())?),
+        )),
+      }
+    })?;
+    $globals.set($name, lua_fn)?;
+  }};
 }
 
-fn create_sandboxed_vm() -> Result<Lua> {
-  // Load safe libraries. Coroutine is required for async support in mlua.
-  let libs = StdLib::TABLE | StdLib::STRING | StdLib::MATH | StdLib::UTF8 | StdLib::COROUTINE;
-  let lua = Lua::new_with(libs, mlua::LuaOptions::default())?;
-
-  // Limit memory usage to 32MB
-  lua.set_memory_limit(32 * 1024 * 1024)?;
-
-  Ok(lua)
+macro_rules! register_async {
+  ($lua:expr, $globals:expr, $ctx:expr, $name:expr, $func:expr) => {{
+    let ctx_clone = $ctx.clone();
+    let lua_fn = $lua.create_async_function(move |lua, args: mlua::Value| {
+      let ctx = ctx_clone.clone();
+      async move {
+        let json_args = match args {
+          mlua::Value::Nil => "{}".to_string(),
+          _ => {
+            let json_val: serde_json::Value = lua.from_value(args)?;
+            json_val.to_string()
+          }
+        };
+        let result = $func(ctx, &json_args).await;
+        match result {
+          Ok(output) => Ok((
+            mlua::Value::String(lua.create_string(&output)?),
+            mlua::Value::Nil,
+          )),
+          Err(e) => Ok((
+            mlua::Value::Nil,
+            mlua::Value::String(lua.create_string(&e.to_string())?),
+          )),
+        }
+      }
+    })?;
+    $globals.set($name, lua_fn)?;
+  }};
 }
 
 async fn spawn_subagent(
@@ -105,7 +150,7 @@ async fn spawn_subagent(
     ctx.workspace.clone(),
     client,
     messages,
-    crate::tools::configured_agent_tools(),
+    crate::tools::agent_tools(),
     crate::session::generate_session_id(),
     ctx.skill_store.clone(),
     role.to_string(),
@@ -246,50 +291,106 @@ fn register_tools_in_lua(lua: &Lua, ctx: ToolContext) -> Result<()> {
   })?;
   globals.set("json_decode", json_decode)?;
 
-  // Track manually-registered names so the generic loop doesn't overwrite them
-  let mut registered = std::collections::HashSet::new();
-  registered.insert("task_update".to_string());
-  registered.insert("agent".to_string());
-  registered.insert("parallel".to_string());
-  registered.insert("json_decode".to_string());
-  // exec and eval must not be exposed inside the Lua sandbox: calling eval from
-  // within an eval session would deadlock because eval_tool holds the
-  // lua_session lock and Mutex is not reentrant.
-  registered.insert("exec".to_string());
-  registered.insert("eval".to_string());
+  // Register fs tools
+  register_sync!(lua, globals, ctx, "read_file", crate::tools::fs::read_file);
+  register_sync!(
+    lua,
+    globals,
+    ctx,
+    "write_file",
+    crate::tools::fs::write_file
+  );
+  register_sync!(
+    lua,
+    globals,
+    ctx,
+    "append_file",
+    crate::tools::fs::append_file
+  );
+  register_sync!(lua, globals, ctx, "file_info", crate::tools::fs::file_info);
+  register_sync!(
+    lua,
+    globals,
+    ctx,
+    "read_hash_anchors",
+    crate::tools::fs::read_hash_anchors
+  );
+  register_sync!(
+    lua,
+    globals,
+    ctx,
+    "edit_hash_anchors",
+    crate::tools::fs::edit_hash_anchors
+  );
 
-  // Register generic handlers for every tool from all_tools().
-  // `registered.insert()` returns false if the name was already present (manually
-  // registered above), so we skip duplicates rather than overwriting them.
-  for tool in crate::tools::all_tools() {
-    if !registered.insert(tool.name.to_string()) {
-      continue;
-    }
-    let tool_name = tool.name.to_string();
-    let ctx_clone = ctx.clone();
-    let lua_fn = lua.create_async_function(move |lua, args: Value| {
-      let tool_name = tool_name.clone();
-      let ctx = ctx_clone.clone();
-      async move {
-        let json_args = match args {
-          Value::Nil => "{}".to_string(),
-          _ => {
-            let json_val: serde_json::Value = lua.from_value(args)?;
-            json_val.to_string()
-          }
-        };
-        let result = crate::tools::execute_tool(ctx, &tool_name, &json_args).await;
-        match result {
-          Ok(output) => Ok((Value::String(lua.create_string(output)?), Value::Nil)),
-          Err(e) => Ok((Value::Nil, Value::String(lua.create_string(e.to_string())?))),
-        }
-      }
-    })?;
-    globals.set(tool.name, lua_fn)?;
-  }
+  // Register repo tools
+  register_sync!(lua, globals, ctx, "repo_map", crate::tools::repo::repo_map);
+  register_sync!(lua, globals, ctx, "glob", crate::tools::repo::glob);
+
+  // Register git tools
+  register_async!(
+    lua,
+    globals,
+    ctx,
+    "git_status",
+    crate::tools::git::git_status
+  );
+  register_async!(lua, globals, ctx, "git_diff", crate::tools::git::git_diff);
+  register_async!(
+    lua,
+    globals,
+    ctx,
+    "git_changes",
+    crate::tools::git::git_changes
+  );
+  register_async!(lua, globals, ctx, "git_show", crate::tools::git::git_show);
+  register_async!(lua, globals, ctx, "git_log", crate::tools::git::git_log);
+
+  // Register shell tool
+  register_async!(lua, globals, ctx, "shell", crate::tools::shell::shell);
+
+  // Register skills tools
+  register_sync!(
+    lua,
+    globals,
+    ctx,
+    "load_skill",
+    crate::tools::skills::load_skill
+  );
+  register_sync!(
+    lua,
+    globals,
+    ctx,
+    "list_skills",
+    crate::tools::skills::list_skills
+  );
+  register_sync!(
+    lua,
+    globals,
+    ctx,
+    "load_skill_asset",
+    crate::tools::skills::load_skill_asset
+  );
+
+  // Register web tools
+  register_async!(
+    lua,
+    globals,
+    ctx,
+    "web_search",
+    crate::tools::web::web_search
+  );
+  register_async!(lua, globals, ctx, "web_read", crate::tools::web::web_read);
+  register_async!(
+    lua,
+    globals,
+    ctx,
+    "web_code_context",
+    crate::tools::web::web_code_context
+  );
 
   // Inject thin Lua wrappers that convert positional arguments to tables
-  // and delegate to the generic handlers registered above.
+  // and delegate to the functions registered above.
   let positional_wrappers = r#"
 local _t = {}
 _t.read_file = read_file
@@ -458,7 +559,13 @@ async fn run_lua_vm_async(lua: &Lua, code: &str) -> Result<String> {
 // With mlua's `send` feature, Lua is Send and the `thread.into_async()` future
 // is also Send, so we can run it directly in async context without burning a
 // blocking thread.
-async fn exec_tool(ctx: ToolContext, args: &str) -> Result<String> {
+pub async fn exec(ctx: ToolContext, args: &str) -> Result<String> {
+  #[derive(Deserialize)]
+  struct LuaArgs {
+    code: String,
+    #[allow(dead_code)]
+    reason: Option<String>,
+  }
   let args: LuaArgs = parse_args(args)?;
   let lua = create_sandboxed_vm()?;
   register_tools_in_lua(&lua, ctx)?;
@@ -469,7 +576,13 @@ async fn exec_tool(ctx: ToolContext, args: &str) -> Result<String> {
 // MutexGuard is !Send, so we cannot hold the guard across an await
 // in a Send future. We confine the locked operation to spawn_blocking so the
 // guard never crosses an await boundary.
-async fn eval_tool(ctx: ToolContext, args: &str) -> Result<String> {
+pub async fn eval(ctx: ToolContext, args: &str) -> Result<String> {
+  #[derive(Deserialize)]
+  struct LuaArgs {
+    code: String,
+    #[allow(dead_code)]
+    reason: Option<String>,
+  }
   let args: LuaArgs = parse_args(args)?;
   let session = ctx.lua_session.clone();
   tokio::task::spawn_blocking(move || {
@@ -485,6 +598,17 @@ async fn eval_tool(ctx: ToolContext, args: &str) -> Result<String> {
   })
   .await
   .context("spawn_blocking panicked")?
+}
+
+fn create_sandboxed_vm() -> Result<Lua> {
+  // Load safe libraries. Coroutine is required for async support in mlua.
+  let libs = StdLib::TABLE | StdLib::STRING | StdLib::MATH | StdLib::UTF8 | StdLib::COROUTINE;
+  let lua = Lua::new_with(libs, mlua::LuaOptions::default())?;
+
+  // Limit memory usage to 32MB
+  lua.set_memory_limit(32 * 1024 * 1024)?;
+
+  Ok(lua)
 }
 
 #[cfg(test)]
@@ -518,7 +642,7 @@ mod tests {
   #[tokio::test]
   async fn test_exec_stateless() {
     let ctx = test_context();
-    let res = exec_tool(ctx.clone(), r#"{"code": "print('hello'); return 2 + 2"}"#)
+    let res = exec(ctx.clone(), r#"{"code": "print('hello'); return 2 + 2"}"#)
       .await
       .unwrap();
     assert!(res.contains("Stdout Output"));
@@ -527,19 +651,17 @@ mod tests {
     assert!(res.contains("4"));
 
     // Verify it is stateless (variables don't persist)
-    exec_tool(ctx.clone(), r#"{"code": "global_var = 42"}"#)
+    exec(ctx.clone(), r#"{"code": "global_var = 42"}"#)
       .await
       .unwrap();
-    let res2 = exec_tool(ctx, r#"{"code": "return global_var"}"#)
-      .await
-      .unwrap();
+    let res2 = exec(ctx, r#"{"code": "return global_var"}"#).await.unwrap();
     assert!(res2.contains("Nil") || res2.contains("Success (no output or return value)."));
   }
 
   #[tokio::test]
   async fn test_eval_stateful() {
     let ctx = test_context();
-    let res = eval_tool(
+    let res = eval(
       ctx.clone(),
       r#"{"code": "persisted_var = 100; return persisted_var"}"#,
     )
@@ -547,7 +669,7 @@ mod tests {
     .unwrap();
     assert!(res.contains("100"));
 
-    let res2 = eval_tool(ctx, r#"{"code": "return persisted_var + 50"}"#)
+    let res2 = eval(ctx, r#"{"code": "return persisted_var + 50"}"#)
       .await
       .unwrap();
     assert!(res2.contains("150"));
@@ -556,9 +678,7 @@ mod tests {
   #[tokio::test]
   async fn test_infinite_loop_aborts() {
     let ctx = test_context();
-    let res = exec_tool(ctx, r#"{"code": "while true do end"}"#)
-      .await
-      .unwrap();
+    let res = exec(ctx, r#"{"code": "while true do end"}"#).await.unwrap();
     assert!(res.contains("Runtime Error"));
     assert!(res.contains("limit exceeded"));
   }
@@ -566,14 +686,14 @@ mod tests {
   #[tokio::test]
   async fn test_sandbox_restricts_os() {
     let ctx = test_context();
-    let res = exec_tool(ctx, r#"{"code": "return os"}"#).await.unwrap();
+    let res = exec(ctx, r#"{"code": "return os"}"#).await.unwrap();
     assert!(res.contains("Nil") || res.contains("Success"));
   }
 
   #[tokio::test]
   async fn test_tool_calling_from_lua() {
     let ctx = test_context();
-    let res = exec_tool(
+    let res = exec(
       ctx,
       r#"{"code": "local content, err = read_file('Cargo.toml', 0, 100); return content:find('ogent') ~= nil"}"#,
     )
@@ -616,7 +736,7 @@ mod tests {
       return read_file('temp_test_anchors.txt')
     "#;
 
-    let res = exec_tool(ctx, &json!({ "code": lua_code }).to_string())
+    let res = exec(ctx, &json!({ "code": lua_code }).to_string())
       .await
       .unwrap();
     let _ = std::fs::remove_file(full_path);
@@ -665,7 +785,7 @@ mod tests {
     };
 
     // Test list_skills()
-    let list_res = exec_tool(
+    let list_res = exec(
       ctx.clone(),
       r#"{"code": "local res, err = list_skills(); if not res then error(err) end; return res"}"#,
     )
@@ -675,7 +795,7 @@ mod tests {
     assert!(list_res.contains("A test skill for Lua"));
 
     // Test load_skill("my_test_skill")
-    let load_res = exec_tool(ctx.clone(), r#"{"code": "local res, err = load_skill('my_test_skill'); if not res then error(err) end; return res"}"#).await.unwrap();
+    let load_res = exec(ctx.clone(), r#"{"code": "local res, err = load_skill('my_test_skill'); if not res then error(err) end; return res"}"#).await.unwrap();
     assert!(load_res.contains("skill name="));
     assert!(load_res.contains("my_test_skill"));
     assert!(load_res.contains("Hello from skill body!"));
@@ -685,7 +805,7 @@ mod tests {
       r#"local res, err = load_skill_asset('{}', 'references/MANUAL.md'); if not res then error(err) end; return res"#,
       skill_dir.to_string_lossy()
     );
-    let asset_res = exec_tool(ctx.clone(), &json!({ "code": load_asset_code }).to_string())
+    let asset_res = exec(ctx.clone(), &json!({ "code": load_asset_code }).to_string())
       .await
       .unwrap();
     assert!(asset_res.contains("This is MANUAL content."));
@@ -695,14 +815,14 @@ mod tests {
       r#"local res, err = load_skill_asset('{}', '../../Cargo.toml'); return err"#,
       skill_dir.to_string_lossy()
     );
-    let bad_res = exec_tool(ctx.clone(), &json!({ "code": bad_asset_code }).to_string())
+    let bad_res = exec(ctx.clone(), &json!({ "code": bad_asset_code }).to_string())
       .await
       .unwrap();
     assert!(bad_res.contains("outside the skill root directory"));
 
     // Test load_skill_asset non-whitelisted root rejection
     let bad_root_code = r#"local res, err = load_skill_asset('/tmp', 'foo'); return err"#;
-    let bad_res2 = exec_tool(ctx.clone(), &json!({ "code": bad_root_code }).to_string())
+    let bad_res2 = exec(ctx.clone(), &json!({ "code": bad_root_code }).to_string())
       .await
       .unwrap();
     assert!(bad_res2.contains("not inside a whitelisted"));
@@ -721,7 +841,7 @@ mod tests {
       })
       return results
     "#;
-    let res = exec_tool(ctx, &json!({ "code": code }).to_string())
+    let res = exec(ctx, &json!({ "code": code }).to_string())
       .await
       .unwrap();
     assert!(res.contains("30"), "Res was: {res}");
@@ -739,7 +859,7 @@ mod tests {
       if not files then error(err) end
       return files
     "#;
-    let res = exec_tool(ctx, &json!({ "code": code }).to_string())
+    let res = exec(ctx, &json!({ "code": code }).to_string())
       .await
       .unwrap();
     let _ = std::fs::remove_file(temp_file);
@@ -753,7 +873,7 @@ mod tests {
     // Lua::new_with in mlua loads BASE implicitly even when not specified in StdLib flags,
     // but we keep this test to catch any future regression if the sandbox setup changes.
     let ctx = test_context();
-    let res = exec_tool(
+    let res = exec(
       ctx,
       r#"{"code": "for k,v in pairs({a=1}) do return k end"}"#,
     )
@@ -800,8 +920,8 @@ mod tests {
       agent_depth: 0,
     };
 
-    // eval_tool should create a fresh VM and succeed despite the previous panic.
-    let res = eval_tool(ctx, r#"{"code": "return 42"}"#).await.unwrap();
+    // eval should create a fresh VM and succeed despite the previous panic.
+    let res = eval(ctx, r#"{"code": "return 42"}"#).await.unwrap();
     assert!(
       res.contains("42"),
       "eval should recover after panic. Got: {res}"
@@ -823,13 +943,13 @@ mod tests {
     std::process::Command::new("git")
       .arg("-C")
       .arg(root)
-      .args(&["config", "user.email", "test@test.com"])
+      .args(["config", "user.email", "test@test.com"])
       .output()
       .unwrap();
     std::process::Command::new("git")
       .arg("-C")
       .arg(root)
-      .args(&["config", "user.name", "Test"])
+      .args(["config", "user.name", "Test"])
       .output()
       .unwrap();
 
@@ -837,13 +957,13 @@ mod tests {
     std::process::Command::new("git")
       .arg("-C")
       .arg(root)
-      .args(&["add", "test.txt"])
+      .args(["add", "test.txt"])
       .output()
       .unwrap();
     std::process::Command::new("git")
       .arg("-C")
       .arg(root)
-      .args(&["commit", "-m", "init"])
+      .args(["commit", "-m", "init"])
       .output()
       .unwrap();
 
@@ -855,7 +975,7 @@ mod tests {
     std::process::Command::new("git")
       .arg("-C")
       .arg(root)
-      .args(&["add", "staged.txt"])
+      .args(["add", "staged.txt"])
       .output()
       .unwrap();
 
@@ -880,7 +1000,7 @@ mod tests {
     };
 
     // Test git_status
-    let res = exec_tool(
+    let res = exec(
       ctx.clone(),
       r#"{"code": "local status, err = git_status(); if not status then error(err) end; local out = {}; for _, e in ipairs(status) do table.insert(out, e.path .. ':' .. e.status) end; return table.concat(out, ',')"}"#,
     )
@@ -893,7 +1013,7 @@ mod tests {
     assert!(res.contains("staged.txt:added"), "git_status result: {res}");
 
     // Test git_diff
-    let res = exec_tool(
+    let res = exec(
       ctx.clone(),
       r#"{"code": "local diff, err = git_diff(); if not diff then error(err) end; return diff[1].path .. ':' .. diff[1].change_type .. ':' .. #diff[1].hunks"}"#,
     )
@@ -905,7 +1025,7 @@ mod tests {
     );
 
     // Test git_changes — worktree diff on test.txt, staged_diff on staged.txt
-    let res = exec_tool(
+    let res = exec(
       ctx.clone(),
       r#"{"code": "local changes, err = git_changes(); if not changes then error(err) end; local out = {}; for _, e in ipairs(changes) do if e.diff then table.insert(out, e.path .. ':diff:' .. #e.diff.hunks) end if e.staged_diff then table.insert(out, e.path .. ':staged_diff:' .. #e.staged_diff.hunks) end end; return table.concat(out, ',')"}"#,
     )
@@ -921,7 +1041,7 @@ mod tests {
     );
 
     // Test git_show
-    let res = exec_tool(
+    let res = exec(
       ctx.clone(),
       r#"{"code": "local content, err = git_show('test.txt', 'HEAD'); if not content then error(err) end; return content:find('hello') ~= nil"}"#,
     )
@@ -930,7 +1050,7 @@ mod tests {
     assert!(res.contains("true"), "git_show result: {res}");
 
     // Test git_log
-    let res = exec_tool(
+    let res = exec(
       ctx,
       r#"{"code": "local log, err = git_log({n=5}); if not log then error(err) end; return log:find('init') ~= nil"}"#,
     )

@@ -4,30 +4,7 @@ use serde_json::{Value, json};
 use std::fmt::Write;
 use tokio::time::Duration;
 
-use crate::tools::{Handler, ToolContext, ToolDef, parse_args, require_nonempty};
-
-pub fn tools() -> Vec<ToolDef> {
-  vec![
-    ToolDef {
-      name: "web_search",
-      description: "Search the web for relevant excerpts. Use type=auto for quick facts and deep-reasoning for complex or niche topics.",
-      parameters: json!({"type":"object","properties":{"query":{"type":"string"},"num_results":{"type":"integer"},"type":{"type":"string","enum":["auto","deep-reasoning"]}},"required":["query"],"additionalProperties":false}),
-      handler: Handler::async_fn(|ctx, args| async move { web_search(ctx, &args).await }),
-    },
-    ToolDef {
-      name: "web_read",
-      description: "Read key excerpts from one or more URLs. Set mode=text for full text or highlights for key excerpts.",
-      parameters: json!({"type":"object","properties":{"urls":{"type":"array","items":{"type":"string"}},"mode":{"type":"string","enum":["text","highlights"],"description":"text for full page text, highlights for key excerpts. Default: highlights."}},"required":["urls"],"additionalProperties":false}),
-      handler: Handler::async_fn(|ctx, args| async move { web_read(ctx, &args).await }),
-    },
-    ToolDef {
-      name: "web_code_context",
-      description: "Search real code for syntax, APIs, and patterns to avoid hallucinating implementation details. Not for general web search or URL reading.",
-      parameters: json!({"type":"object","properties":{"query":{"type":"string"}},"required":["query"],"additionalProperties":false}),
-      handler: Handler::async_fn(|ctx, args| async move { web_code_context(ctx, &args).await }),
-    },
-  ]
-}
+use crate::tools::{ToolContext, parse_args, require_nonempty};
 
 #[derive(Deserialize, Default, Clone, Copy)]
 #[serde(rename_all = "kebab-case")]
@@ -58,7 +35,7 @@ struct WebSearchArgs {
   search_type: SearchType,
 }
 
-async fn web_search(_ctx: ToolContext, args: &str) -> Result<String> {
+pub async fn web_search(_ctx: ToolContext, args: &str) -> Result<String> {
   let args: WebSearchArgs = parse_args(args)?;
   require_nonempty(&args.query, "query")?;
   let n = args.num_results.clamp(1, 100);
@@ -89,7 +66,7 @@ struct WebReadArgs {
   mode: WebReadMode,
 }
 
-async fn web_read(_ctx: ToolContext, args: &str) -> Result<String> {
+pub async fn web_read(_ctx: ToolContext, args: &str) -> Result<String> {
   let args: WebReadArgs = parse_args(args)?;
   if args.urls.is_empty() {
     bail!("urls is required");
@@ -128,7 +105,7 @@ struct CodeWebContextArgs {
   query: String,
 }
 
-async fn web_code_context(_ctx: ToolContext, args: &str) -> Result<String> {
+pub async fn web_code_context(_ctx: ToolContext, args: &str) -> Result<String> {
   let args: CodeWebContextArgs = parse_args(args)?;
   require_nonempty(&args.query, "query")?;
   let v = exa_post(

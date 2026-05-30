@@ -4,68 +4,7 @@ use serde_json::json;
 use std::fs;
 
 use crate::hashline::{apply_anchor_edits, render_hashlines};
-use crate::tools::{Handler, ToolContext, ToolDef, parse_args, require_nonempty};
-
-pub fn tools() -> Vec<ToolDef> {
-  vec![
-    ToolDef {
-      name: "read_file",
-      description: "Read a file from the local filesystem with optional byte offset and limit.",
-      parameters: json!({"type":"object","properties":{"path":{"type":"string"},"offset":{"type":"integer","description":"0-indexed byte offset (inclusive)"},"limit":{"type":"integer","description":"max bytes to read"}},"required":["path"],"additionalProperties":false}),
-      handler: Handler::Sync(read_file),
-    },
-    ToolDef {
-      name: "write_file",
-      description: "Write content to a new file. For existing files, prefer edit_hash_anchors; set overwrite_existing=true only for intentional full-file replacement.",
-      parameters: json!({"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"},"overwrite_existing":{"type":"boolean"}},"required":["path","content"],"additionalProperties":false}),
-      handler: Handler::Sync(write_file),
-    },
-    ToolDef {
-      name: "append_file",
-      description: "Append content to an existing file, or create it if it does not exist. Safer than read+write for incremental writes.",
-      parameters: json!({"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}},"required":["path","content"],"additionalProperties":false}),
-      handler: Handler::Sync(append_file),
-    },
-    ToolDef {
-      name: "file_info",
-      description: "Return metadata for a file: size in bytes and number of lines. Use before read_file/read_hash_anchors to plan offset/limit for large files.",
-      parameters: json!({"type":"object","properties":{"path":{"type":"string"}},"required":["path"],"additionalProperties":false}),
-      handler: Handler::Sync(file_info),
-    },
-    ToolDef {
-      name: "read_hash_anchors",
-      description: "Read a file with each line prefixed as <line>:<hash>|content, filtered by optional byte offset and limit.",
-      parameters: json!({"type":"object","properties":{"path":{"type":"string"},"offset":{"type":"integer","description":"0-indexed byte offset (inclusive)"},"limit":{"type":"integer","description":"max bytes to read"}},"required":["path"],"additionalProperties":false}),
-      handler: Handler::Sync(read_hash_anchors),
-    },
-    ToolDef {
-      name: "edit_hash_anchors",
-      description: "Edit a file using hashline anchors from read_hash_anchors. Anchors must be <line>:<4-char-hash> (e.g., \"15:af63\"); use end_at for multi-line ranges.",
-      parameters: json!({
-        "type": "object",
-        "properties": {
-          "path": {"type": "string"},
-          "ops": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "start_at": {"type": "string", "description": "Anchor in <line-number>:<4-char-hash> format (e.g., 15:af63)"},
-                "end_at": {"type": "string", "description": "Optional end anchor in <line-number>:<4-char-hash> format for range replacement"},
-                "action": {"type": "string", "enum": ["replace", "delete", "insert_before", "insert_after"]},
-                "content": {"type": "string", "description": "new content to insert/replace"}
-              },
-              "required": ["start_at", "action"]
-            }
-          }
-        },
-        "required": ["path", "ops"],
-        "additionalProperties": false
-      }),
-      handler: Handler::Sync(edit_hash_anchors),
-    },
-  ]
-}
+use crate::tools::{ToolContext, parse_args, require_nonempty};
 
 #[derive(Deserialize)]
 pub struct ReadFileArgs {
@@ -81,7 +20,7 @@ pub struct ReadHashAnchorsArgs {
   pub limit: Option<usize>,
 }
 
-fn read_file(ctx: ToolContext, args: &str) -> Result<String> {
+pub fn read_file(ctx: ToolContext, args: &str) -> Result<String> {
   let args: ReadFileArgs = parse_args(args)?;
   require_nonempty(&args.path, "path")?;
   let path = ctx.workspace.readable_path(&args.path)?;
@@ -109,7 +48,7 @@ struct WriteFileArgs {
   overwrite_existing: bool,
 }
 
-fn write_file(ctx: ToolContext, args: &str) -> Result<String> {
+pub fn write_file(ctx: ToolContext, args: &str) -> Result<String> {
   let args: WriteFileArgs = parse_args(args)?;
   require_nonempty(&args.path, "path")?;
   let path = ctx.workspace.workspace_path(&args.path)?;
@@ -130,7 +69,7 @@ fn write_file(ctx: ToolContext, args: &str) -> Result<String> {
   ))
 }
 
-fn read_hash_anchors(ctx: ToolContext, args: &str) -> Result<String> {
+pub fn read_hash_anchors(ctx: ToolContext, args: &str) -> Result<String> {
   let args: ReadHashAnchorsArgs = parse_args(args)?;
   require_nonempty(&args.path, "path")?;
   let path = ctx.workspace.workspace_path(&args.path)?;
@@ -166,7 +105,7 @@ struct EditHashAnchorsArgs {
   ops: Vec<crate::hashline::EditOp>,
 }
 
-fn edit_hash_anchors(ctx: ToolContext, args: &str) -> Result<String> {
+pub fn edit_hash_anchors(ctx: ToolContext, args: &str) -> Result<String> {
   let args: EditHashAnchorsArgs = parse_args(args)?;
   require_nonempty(&args.path, "path")?;
   if args.ops.is_empty() {
@@ -185,7 +124,7 @@ struct AppendFileArgs {
   content: String,
 }
 
-fn append_file(ctx: ToolContext, args: &str) -> Result<String> {
+pub fn append_file(ctx: ToolContext, args: &str) -> Result<String> {
   use std::io::Write;
   let args: AppendFileArgs = parse_args(args)?;
   require_nonempty(&args.path, "path")?;
@@ -213,7 +152,7 @@ struct FileInfoArgs {
   path: String,
 }
 
-fn file_info(ctx: ToolContext, args: &str) -> Result<String> {
+pub fn file_info(ctx: ToolContext, args: &str) -> Result<String> {
   let args: FileInfoArgs = parse_args(args)?;
   require_nonempty(&args.path, "path")?;
   let path = ctx.workspace.readable_path(&args.path)?;
