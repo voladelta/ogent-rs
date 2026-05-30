@@ -71,10 +71,66 @@ fn create_sandboxed_vm() -> Result<Lua> {
   Ok(lua)
 }
 
+async fn spawn_subagent(
+  ctx: &ToolContext,
+  role: &str,
+  task: &str,
+  profile_override: Option<&str>,
+) -> Result<String, mlua::Error> {
+  if ctx.agent_depth >= MAX_AGENT_DEPTH {
+    return Err(mlua::Error::RuntimeError(format!(
+      "max subagent depth ({MAX_AGENT_DEPTH}) exceeded"
+    )));
+  }
+
+  let client = if let Some(p_name) = profile_override {
+    let config = crate::config::load_or_exit(ctx.workspace.root());
+    let profile = config
+      .get_profile(p_name)
+      .ok_or_else(|| mlua::Error::RuntimeError(format!("unknown profile: {p_name}")))?;
+    let provider = config.provider_for(profile).ok_or_else(|| {
+      mlua::Error::RuntimeError(format!("missing provider config for profile: {p_name}"))
+    })?;
+    crate::providers::new_client(profile, provider)
+      .map_err(|e| mlua::Error::RuntimeError(format!("failed to construct client: {e}")))?
+  } else {
+    ctx.client.clone()
+  };
+
+  let messages = crate::prompts::build_subagent_messages(&ctx.workspace, role, task.to_string());
+
+  let mut subagent = crate::agent::Agent::new(
+    ctx.workspace.clone(),
+    client,
+    messages,
+    crate::tools::configured_agent_tools(),
+    crate::session::generate_session_id(),
+    ctx.skill_store.clone(),
+    role.to_string(),
+    ctx.verbose,
+    ctx.agent_depth + 1,
+  );
+  subagent.set_output_sink(ctx.output_sink.clone());
+
+  let run_res = subagent.run_loop().await;
+  match run_res {
+    Ok(_) => {
+      let last_msg = subagent
+        .messages
+        .iter()
+        .rfind(|m| m.role == crate::types::Role::Assistant);
+      Ok(last_msg.map(|m| m.content.clone()).unwrap_or_default())
+    }
+    Err(e) => Err(mlua::Error::RuntimeError(format!(
+      "subagent run loop failed: {e}"
+    ))),
+  }
+}
+
 fn register_tools_in_lua(lua: &Lua, ctx: ToolContext) -> Result<()> {
   let globals = lua.globals();
 
-  // Register task_update with: task_update(status, summary)
+  // task_update(status, summary)
   let ctx_clone = ctx.clone();
   let task_update_fn = lua.create_function(move |_lua, args: mlua::MultiValue| {
     let status: String = match args.front() {
@@ -100,7 +156,7 @@ fn register_tools_in_lua(lua: &Lua, ctx: ToolContext) -> Result<()> {
   })?;
   globals.set("task_update", task_update_fn)?;
 
-  // Register agent with positional/table argument
+  // agent({role, task, profile?})
   let ctx_clone = ctx.clone();
   let agent_fn = lua.create_async_function(move |lua, args: Value| {
     let ctx = ctx_clone.clone();
@@ -130,77 +186,12 @@ fn register_tools_in_lua(lua: &Lua, ctx: ToolContext) -> Result<()> {
         .get("profile")
         .and_then(|p| p.as_str())
         .map(|s| s.to_string());
-
-      if ctx.agent_depth >= MAX_AGENT_DEPTH {
-        return Err(mlua::Error::RuntimeError(format!(
-          "max subagent depth ({MAX_AGENT_DEPTH}) exceeded"
-        )));
-      }
-
-      let client = if let Some(p_name) = profile_override {
-        let config = crate::config::load_or_exit(ctx.workspace.root());
-        let profile = match config.get_profile(&p_name) {
-          Some(p) => p,
-          None => {
-            return Err(mlua::Error::RuntimeError(format!(
-              "unknown profile: {p_name}"
-            )));
-          }
-        };
-        let provider = match config.provider_for(profile) {
-          Some(p) => p,
-          None => {
-            return Err(mlua::Error::RuntimeError(format!(
-              "missing provider config for profile: {p_name}"
-            )));
-          }
-        };
-        match crate::providers::new_client(profile, provider) {
-          Ok(c) => c,
-          Err(e) => {
-            return Err(mlua::Error::RuntimeError(format!(
-              "failed to construct client: {e}"
-            )));
-          }
-        }
-      } else {
-        ctx.client.clone()
-      };
-
-      let messages = crate::prompts::build_subagent_messages(&ctx.workspace, &role, task);
-
-      let mut subagent = crate::agent::Agent::new(
-        ctx.workspace.clone(),
-        client,
-        messages,
-        crate::tools::configured_agent_tools(),
-        crate::session::generate_session_id(),
-        ctx.skill_store.clone(),
-        role.clone(),
-        ctx.verbose,
-        ctx.agent_depth + 1,
-      );
-      subagent.set_output_sink(ctx.output_sink.clone());
-
-      let run_res = subagent.run_loop().await;
-      match run_res {
-        Ok(_) => {
-          let last_msg = subagent
-            .messages
-            .iter()
-            .rfind(|m| m.role == crate::types::Role::Assistant);
-          let content = last_msg.map(|m| m.content.clone()).unwrap_or_default();
-          Ok(content)
-        }
-        Err(e) => Err(mlua::Error::RuntimeError(format!(
-          "subagent run loop failed: {e}"
-        ))),
-      }
+      spawn_subagent(&ctx, &role, &task, profile_override.as_deref()).await
     }
   })?;
   globals.set("agent", agent_fn)?;
 
-  // Register parallel with: parallel({func1, func2, ...})
+  // parallel({func1, func2, ...})
   let parallel_fn = lua.create_async_function(move |lua, args: Value| async move {
     let tasks: Vec<mlua::Function> = match args {
       Value::Table(t) => {
@@ -236,9 +227,7 @@ fn register_tools_in_lua(lua: &Lua, ctx: ToolContext) -> Result<()> {
     let out_table = lua.create_table()?;
     for (i, res) in results.into_iter().enumerate() {
       match res {
-        Ok(val) => {
-          out_table.set(i + 1, val)?;
-        }
+        Ok(val) => out_table.set(i + 1, val)?,
         Err(e) => {
           return Err(mlua::Error::RuntimeError(format!(
             "task {} in parallel failed: {e}",
@@ -251,357 +240,31 @@ fn register_tools_in_lua(lua: &Lua, ctx: ToolContext) -> Result<()> {
   })?;
   globals.set("parallel", parallel_fn)?;
 
-  // Register read_file with positional arguments: read_file(path, offset, limit)
-  let ctx_clone = ctx.clone();
-  let read_file_fn = lua.create_async_function(move |lua, args: mlua::MultiValue| {
-    let ctx = ctx_clone.clone();
-    async move {
-      let path: String = match args.front() {
-        Some(Value::String(s)) => s.to_str()?.to_string(),
-        _ => {
-          return Err(mlua::Error::RuntimeError(
-            "first argument path must be a string".to_string(),
-          ));
-        }
-      };
-      let offset: Option<usize> = match args.get(1) {
-        Some(Value::Integer(i)) => Some(*i as usize),
-        _ => None,
-      };
-      let limit: Option<usize> = match args.get(2) {
-        Some(Value::Integer(i)) => Some(*i as usize),
-        _ => None,
-      };
-
-      let args_json = json!({
-        "path": path,
-        "offset": offset,
-        "limit": limit,
-      })
-      .to_string();
-
-      let result = crate::tools::execute_tool(ctx, "read_file", &args_json).await;
-
-      match result {
-        Ok(output) => Ok((Value::String(lua.create_string(output)?), Value::Nil)),
-        Err(e) => Ok((Value::Nil, Value::String(lua.create_string(e.to_string())?))),
-      }
-    }
+  // Helper to decode JSON strings into Lua tables
+  let json_decode = lua.create_function(|lua, s: String| {
+    let v: serde_json::Value = serde_json::from_str(&s)
+      .map_err(|e| mlua::Error::RuntimeError(format!("json_decode: {e}")))?;
+    lua.to_value(&v)
   })?;
-  globals.set("read_file", read_file_fn)?;
+  globals.set("json_decode", json_decode)?;
 
-  // Register append_file with positional arguments: append_file(path, content)
-  let ctx_clone = ctx.clone();
-  let append_file_fn = lua.create_async_function(move |lua, args: mlua::MultiValue| {
-    let ctx = ctx_clone.clone();
-    async move {
-      let path: String = match args.front() {
-        Some(Value::String(s)) => s.to_str()?.to_string(),
-        _ => {
-          return Err(mlua::Error::RuntimeError(
-            "first argument path must be a string".to_string(),
-          ));
-        }
-      };
-      let content: String = match args.get(1) {
-        Some(Value::String(s)) => s.to_str()?.to_string(),
-        _ => {
-          return Err(mlua::Error::RuntimeError(
-            "second argument content must be a string".to_string(),
-          ));
-        }
-      };
+  // Track manually-registered names so the generic loop doesn't overwrite them
+  let mut registered = std::collections::HashSet::new();
+  registered.insert("task_update".to_string());
+  registered.insert("agent".to_string());
+  registered.insert("parallel".to_string());
+  registered.insert("json_decode".to_string());
 
-      let args_json = json!({
-        "path": path,
-        "content": content,
-      })
-      .to_string();
-
-      let result = crate::tools::execute_tool(ctx, "append_file", &args_json).await;
-
-      match result {
-        Ok(output) => Ok((Value::String(lua.create_string(output)?), Value::Nil)),
-        Err(e) => Ok((Value::Nil, Value::String(lua.create_string(e.to_string())?))),
-      }
-    }
-  })?;
-  globals.set("append_file", append_file_fn)?;
-
-  // Register file_info with positional arguments: file_info(path)
-  let ctx_clone = ctx.clone();
-  let file_info_fn = lua.create_async_function(move |lua, args: mlua::MultiValue| {
-    let ctx = ctx_clone.clone();
-    async move {
-      let path: String = match args.front() {
-        Some(Value::String(s)) => s.to_str()?.to_string(),
-        _ => {
-          return Err(mlua::Error::RuntimeError(
-            "first argument path must be a string".to_string(),
-          ));
-        }
-      };
-
-      let args_json = json!({ "path": path }).to_string();
-
-      let result = crate::tools::execute_tool(ctx, "file_info", &args_json).await;
-
-      match result {
-        Ok(output) => {
-          // Deserialize JSON into a Lua table so callers get info.size_bytes, info.line_count
-          let json_val: serde_json::Value = serde_json::from_str(&output)
-            .map_err(|e| mlua::Error::RuntimeError(format!("parse file_info output: {e}")))?;
-          let lua_val = lua.to_value(&json_val)?;
-          Ok((lua_val, Value::Nil))
-        }
-        Err(e) => Ok((Value::Nil, Value::String(lua.create_string(e.to_string())?))),
-      }
-    }
-  })?;
-  globals.set("file_info", file_info_fn)?;
-
-  // Register read_hash_anchors with positional arguments: read_hash_anchors(path, offset, limit)
-  let ctx_clone = ctx.clone();
-  let read_hash_anchors_fn = lua.create_async_function(move |lua, args: mlua::MultiValue| {
-    let ctx = ctx_clone.clone();
-    async move {
-      let path: String = match args.front() {
-        Some(Value::String(s)) => s.to_str()?.to_string(),
-        _ => {
-          return Err(mlua::Error::RuntimeError(
-            "first argument path must be a string".to_string(),
-          ));
-        }
-      };
-      let offset: Option<usize> = match args.get(1) {
-        Some(Value::Integer(i)) => Some(*i as usize),
-        _ => None,
-      };
-      let limit: Option<usize> = match args.get(2) {
-        Some(Value::Integer(i)) => Some(*i as usize),
-        _ => None,
-      };
-
-      // Save path for apply_anchor_edits
-      lua.globals().set("_last_hash_anchor_path", path.clone())?;
-
-      let args_json = json!({
-        "path": path,
-        "offset": offset,
-        "limit": limit,
-      })
-      .to_string();
-
-      let result = crate::tools::execute_tool(ctx, "read_hash_anchors", &args_json).await;
-
-      match result {
-        Ok(output) => Ok((Value::String(lua.create_string(output)?), Value::Nil)),
-        Err(e) => Ok((Value::Nil, Value::String(lua.create_string(e.to_string())?))),
-      }
-    }
-  })?;
-  globals.set("read_hash_anchors", read_hash_anchors_fn)?;
-
-  // Register apply_anchor_edits with positional arguments: apply_anchor_edits([path,] ops)
-  let ctx_clone = ctx.clone();
-  let apply_anchor_edits_fn = lua.create_async_function(move |lua, args: mlua::MultiValue| {
-    let ctx = ctx_clone.clone();
-    async move {
-      let (path, ops) = match args.len() {
-        1 => {
-          let ops = match args.front() {
-            Some(Value::Table(t)) => t.clone(),
-            _ => return Err(mlua::Error::RuntimeError("argument ops must be an array of EditOps".to_string())),
-          };
-          let last_path: Option<String> = lua.globals().get("_last_hash_anchor_path")?;
-          let last_path = match last_path {
-            Some(p) => p,
-            None => return Err(mlua::Error::RuntimeError("no path specified and no previous read_hash_anchors call to infer path from".to_string())),
-          };
-          (last_path, ops)
-        }
-        2 => {
-          let path: String = match args.front() {
-            Some(Value::String(s)) => s.to_str()?.to_string(),
-            _ => return Err(mlua::Error::RuntimeError("first argument path must be a string".to_string())),
-          };
-          let ops = match args.get(1) {
-            Some(Value::Table(t)) => t.clone(),
-            _ => return Err(mlua::Error::RuntimeError("second argument ops must be an array of EditOps".to_string())),
-          };
-          lua.globals().set("_last_hash_anchor_path", path.clone())?;
-          (path, ops)
-        }
-        _ => return Err(mlua::Error::RuntimeError("invalid number of arguments to apply_anchor_edits, expected apply_anchor_edits(ops) or apply_anchor_edits(path, ops)".to_string())),
-      };
-
-      let ops_val: serde_json::Value = lua.from_value(Value::Table(ops))?;
-
-      let args_json = json!({
-        "path": path,
-        "ops": ops_val,
-      }).to_string();
-
-      let result = crate::tools::execute_tool(ctx, "edit_hash_anchors", &args_json).await;
-
-      match result {
-        Ok(output) => Ok((Value::String(lua.create_string(output)?), Value::Nil)),
-        Err(e) => Ok((Value::Nil, Value::String(lua.create_string(e.to_string())?))),
-      }
-    }
-  })?;
-  globals.set("apply_anchor_edits", apply_anchor_edits_fn)?;
-
-  // Register load_skill with positional arguments: load_skill(name)
-  let ctx_clone = ctx.clone();
-  let load_skill_fn = lua.create_async_function(move |lua, args: mlua::MultiValue| {
-    let ctx = ctx_clone.clone();
-    async move {
-      let name: String = match args.front() {
-        Some(Value::String(s)) => s.to_str()?.to_string(),
-        _ => {
-          return Err(mlua::Error::RuntimeError(
-            "first argument name must be a string".to_string(),
-          ));
-        }
-      };
-
-      let args_json = json!({
-        "name": name,
-      })
-      .to_string();
-
-      let result = crate::tools::execute_tool(ctx, "load_skill", &args_json).await;
-
-      match result {
-        Ok(output) => Ok((Value::String(lua.create_string(output)?), Value::Nil)),
-        Err(e) => Ok((Value::Nil, Value::String(lua.create_string(e.to_string())?))),
-      }
-    }
-  })?;
-  globals.set("load_skill", load_skill_fn)?;
-
-  // Register list_skills with positional arguments: list_skills()
-  let ctx_clone = ctx.clone();
-  let list_skills_fn = lua.create_async_function(move |lua, _args: mlua::MultiValue| {
-    let ctx = ctx_clone.clone();
-    async move {
-      let result = crate::tools::execute_tool(ctx, "list_skills", "{}").await;
-
-      match result {
-        Ok(output) => Ok((Value::String(lua.create_string(output)?), Value::Nil)),
-        Err(e) => Ok((Value::Nil, Value::String(lua.create_string(e.to_string())?))),
-      }
-    }
-  })?;
-  globals.set("list_skills", list_skills_fn)?;
-
-  // Register load_skill_asset with positional arguments: load_skill_asset(root, path)
-  let ctx_clone = ctx.clone();
-  let load_skill_asset_fn = lua.create_async_function(move |lua, args: mlua::MultiValue| {
-    let ctx = ctx_clone.clone();
-    async move {
-      let root: String = match args.front() {
-        Some(Value::String(s)) => s.to_str()?.to_string(),
-        _ => {
-          return Err(mlua::Error::RuntimeError(
-            "first argument root must be a string".to_string(),
-          ));
-        }
-      };
-      let path: String = match args.get(1) {
-        Some(Value::String(s)) => s.to_str()?.to_string(),
-        _ => {
-          return Err(mlua::Error::RuntimeError(
-            "second argument path must be a string".to_string(),
-          ));
-        }
-      };
-
-      let args_json = json!({
-        "root": root,
-        "path": path,
-      })
-      .to_string();
-
-      let result = crate::tools::execute_tool(ctx, "load_skill_asset", &args_json).await;
-
-      match result {
-        Ok(output) => Ok((Value::String(lua.create_string(output)?), Value::Nil)),
-        Err(e) => Ok((Value::Nil, Value::String(lua.create_string(e.to_string())?))),
-      }
-    }
-  })?;
-  globals.set("load_skill_asset", load_skill_asset_fn)?;
-
-  // Register glob with positional arguments: glob(pattern)
-  let ctx_clone = ctx.clone();
-  let glob_fn = lua.create_async_function(move |lua, args: mlua::MultiValue| {
-    let ctx = ctx_clone.clone();
-    async move {
-      let pattern: String = match args.front() {
-        Some(Value::String(s)) => s.to_str()?.to_string(),
-        _ => {
-          return Err(mlua::Error::RuntimeError(
-            "first argument pattern must be a string".to_string(),
-          ));
-        }
-      };
-
-      let args_json = json!({
-        "pattern": pattern,
-      })
-      .to_string();
-
-      let result = crate::tools::execute_tool(ctx, "glob", &args_json).await;
-
-      match result {
-        Ok(output) => {
-          let paths: Vec<String> = match serde_json::from_str(&output) {
-            Ok(p) => p,
-            Err(e) => {
-              return Err(mlua::Error::RuntimeError(format!(
-                "failed to parse glob output: {e}"
-              )));
-            }
-          };
-          let out_table = lua.create_table()?;
-          for (i, path) in paths.into_iter().enumerate() {
-            out_table.set(i + 1, path)?;
-          }
-          Ok((Value::Table(out_table), Value::Nil))
-        }
-        Err(e) => Ok((Value::Nil, Value::String(lua.create_string(e.to_string())?))),
-      }
-    }
-  })?;
-  globals.set("glob", glob_fn)?;
-
+  // Register generic handlers for every tool from all_tools()
   for tool in crate::tools::all_tools() {
-    if tool.name == "exec"
-      || tool.name == "eval"
-      || tool.name == "read_file"
-      || tool.name == "append_file"
-      || tool.name == "file_info"
-      || tool.name == "read_hash_anchors"
-      || tool.name == "edit_hash_anchors"
-      || tool.name == "load_skill"
-      || tool.name == "list_skills"
-      || tool.name == "load_skill_asset"
-      || tool.name == "task_update"
-      || tool.name == "agent"
-      || tool.name == "parallel"
-      || tool.name == "glob"
-    {
+    if !registered.insert(tool.name.to_string()) {
       continue;
     }
     let tool_name = tool.name.to_string();
     let ctx_clone = ctx.clone();
-
     let lua_fn = lua.create_async_function(move |lua, args: Value| {
       let tool_name = tool_name.clone();
       let ctx = ctx_clone.clone();
-
       async move {
         let json_args = match args {
           Value::Nil => "{}".to_string(),
@@ -610,9 +273,7 @@ fn register_tools_in_lua(lua: &Lua, ctx: ToolContext) -> Result<()> {
             json_val.to_string()
           }
         };
-
         let result = crate::tools::execute_tool(ctx, &tool_name, &json_args).await;
-
         match result {
           Ok(output) => Ok((Value::String(lua.create_string(output)?), Value::Nil)),
           Err(e) => Ok((Value::Nil, Value::String(lua.create_string(e.to_string())?))),
@@ -621,6 +282,67 @@ fn register_tools_in_lua(lua: &Lua, ctx: ToolContext) -> Result<()> {
     })?;
     globals.set(tool.name, lua_fn)?;
   }
+
+  // Inject thin Lua wrappers that convert positional arguments to tables
+  // and delegate to the generic handlers registered above.
+  let positional_wrappers = r#"
+local _t = {}
+_t.read_file = read_file
+_t.append_file = append_file
+_t.file_info = file_info
+_t.read_hash_anchors = read_hash_anchors
+_t.edit_hash_anchors = edit_hash_anchors
+_t.load_skill = load_skill
+_t.list_skills = list_skills
+_t.load_skill_asset = load_skill_asset
+_t.glob = glob
+
+function read_file(path, offset, limit)
+  return _t.read_file({path=path, offset=offset, limit=limit})
+end
+function append_file(path, content)
+  return _t.append_file({path=path, content=content})
+end
+function file_info(path)
+  local ok, err = _t.file_info({path=path})
+  if ok then ok = json_decode(ok) end
+  return ok, err
+end
+function read_hash_anchors(path, offset, limit)
+  local ok, err = _t.read_hash_anchors({path=path, offset=offset, limit=limit})
+  if ok then _G._last_hash_anchor_path = path end
+  return ok, err
+end
+function apply_anchor_edits(...)
+  local n = select('#', ...)
+  local path, ops
+  if n == 1 then
+    ops = ...
+    path = _G._last_hash_anchor_path
+  else
+    path, ops = ...
+  end
+  local ok, err = _t.edit_hash_anchors({path=path, ops=ops})
+  if ok then _G._last_hash_anchor_path = path end
+  return ok, err
+end
+function load_skill(name)
+  return _t.load_skill({name=name})
+end
+function list_skills()
+  return _t.list_skills()
+end
+function load_skill_asset(root, path)
+  return _t.load_skill_asset({root=root, path=path})
+end
+function glob(pattern)
+  local ok, err = _t.glob({pattern=pattern})
+  if ok then ok = json_decode(ok) end
+  return ok, err
+end
+"#;
+  lua.load(positional_wrappers).exec()?;
+
   Ok(())
 }
 
