@@ -23,7 +23,7 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 #[derive(Parser, Debug)]
 struct Args {
-  #[arg(long)]
+  #[arg(short, long)]
   profile: Option<String>,
   #[arg(short, long)]
   verbose: bool,

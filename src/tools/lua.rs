@@ -84,7 +84,8 @@ async fn spawn_subagent(
   }
 
   let client = if let Some(p_name) = profile_override {
-    let config = crate::config::load_or_exit(ctx.workspace.root());
+    let config = crate::config::load_config(ctx.workspace.root())
+      .map_err(|e| mlua::Error::RuntimeError(format!("failed to load config: {e}")))?;
     let profile = config
       .get_profile(p_name)
       .ok_or_else(|| mlua::Error::RuntimeError(format!("unknown profile: {p_name}")))?;
@@ -254,6 +255,11 @@ fn register_tools_in_lua(lua: &Lua, ctx: ToolContext) -> Result<()> {
   registered.insert("agent".to_string());
   registered.insert("parallel".to_string());
   registered.insert("json_decode".to_string());
+  // exec and eval must not be exposed inside the Lua sandbox: calling eval from
+  // within an eval session would deadlock because eval_tool holds the
+  // lua_session lock and parking_lot::Mutex is not reentrant.
+  registered.insert("exec".to_string());
+  registered.insert("eval".to_string());
 
   // Register generic handlers for every tool from all_tools()
   for tool in crate::tools::all_tools() {
