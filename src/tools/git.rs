@@ -281,9 +281,7 @@ fn parse_porcelain_v1_z(stdout: &[u8]) -> Result<Vec<GitStatusEntry>> {
 
     match &field[..2] {
       b"??" => {
-        let path = std::str::from_utf8(&field[3..])
-          .unwrap_or("")
-          .to_string();
+        let path = std::str::from_utf8(&field[3..]).unwrap_or("").to_string();
         entries.push(GitStatusEntry {
           path,
           old_path: None,
@@ -298,9 +296,7 @@ fn parse_porcelain_v1_z(stdout: &[u8]) -> Result<Vec<GitStatusEntry>> {
         });
       }
       b"!!" => {
-        let path = std::str::from_utf8(&field[3..])
-          .unwrap_or("")
-          .to_string();
+        let path = std::str::from_utf8(&field[3..]).unwrap_or("").to_string();
         entries.push(GitStatusEntry {
           path,
           old_path: None,

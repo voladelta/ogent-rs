@@ -890,10 +890,7 @@ mod tests {
       res.contains("test.txt:modified"),
       "git_status result: {res}"
     );
-    assert!(
-      res.contains("staged.txt:added"),
-      "git_status result: {res}"
-    );
+    assert!(res.contains("staged.txt:added"), "git_status result: {res}");
 
     // Test git_diff
     let res = exec_tool(
