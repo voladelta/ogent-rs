@@ -188,7 +188,126 @@ Executes a command inside the workspace root.
 
 ---
 
-### 3. Skills Discovery & Loading
+### 3. Git Operations (Structured)
+
+These functions return parsed, structured data instead of raw command output. Use them when you need to inspect changes, map line numbers, or compute edits directly from diff information.
+
+#### `git_status{staged=..., paths=..., untracked=...}`
+Returns a JSON-decoded Lua array of file change entries.
+- **Parameters** (table, optional):
+  - `staged` (boolean, optional): `true` = staged only; `false` = unstaged only; omit = all.
+  - `paths` (array of strings, optional): Restrict to specific relative paths.
+  - `untracked` (boolean, optional): Include untracked files. Defaults to `true`.
+- **Returns**: `(array_of_entries, nil)` or `(nil, error)`
+- **Entry fields**:
+  - `path` (string): Current path (after rename).
+  - `old_path` (string or nil): Old path if renamed/copied.
+  - `status` (string): `"added"`, `"deleted"`, `"modified"`, `"renamed"`, `"copied"`, `"untracked"`, `"ignored"`, `"type_changed"`, or `"unmerged"`.
+  - `staged` (boolean): `true` if the change is in the index.
+  - `worktree` (boolean): `true` if the change is in the working tree.
+  - `index_char` (string): Single-character index state (`" "`, `"A"`, `"D"`, `"M"`, `"R"`, `"C"`, `"T"`, `"U"`, etc.).
+  - `worktree_char` (string): Single-character worktree state (same set as `index_char`).
+  - `display` (string): Two-letter porcelain code (e.g. `" M"`, `"R "`).
+- **Example**:
+  ```lua
+  local changes, err = git_status{untracked = true}
+  if not changes then error(err) end
+  for _, e in ipairs(changes) do
+    print(e.display, e.path, e.status)
+  end
+  ```
+
+#### `git_diff{staged=..., base=..., paths=..., context=..., stat_only=...}`
+Returns a JSON-decoded Lua array of file deltas with hunks, line numbers, and change metadata.
+- **Parameters** (table, optional):
+  - `staged` (boolean, optional): `true` = diff `--cached` (index vs HEAD). Default `false` (worktree vs index).
+  - `base` (string, optional): Diff against a specific ref (e.g. `"HEAD~1"`). Ignored when `staged` is `true`.
+  - `paths` (array of strings, optional): Restrict to specific relative paths.
+  - `context` (integer, optional): Context lines per hunk. Defaults to `3`.
+  - `stat_only` (boolean, optional): If `true`, omit `hunks` and return only `path`, `change_type`, `insertions`, and `deletions`.
+- **Returns**: `(array_of_deltas, nil)` or `(nil, error)`
+- **Delta fields**:
+  - `path` (string): New/current path.
+  - `old_path` (string): Old path (same as `path` unless renamed/copied).
+  - `change_type` (string): `"added"`, `"deleted"`, `"modified"`, `"renamed"`, `"copied"`, or `"type_changed"`.
+  - `is_binary` (boolean): `true` for binary files.
+  - `old_mode` / `new_mode` (string or nil): File mode strings (e.g. `"100644"`).
+  - `similarity` (integer or nil): 0–100 for renames/copies.
+  - `insertions` / `deletions` (integer or nil): Line counts.
+  - `hunks` (array or nil): Each hunk has:
+    - `old_start`, `old_lines`, `new_start`, `new_lines` (integers)
+    - `header` (string): The `@@` header line.
+    - `lines` (array): Each line has `type` (`"context"`, `"deletion"`, `"addition"`), `text`, `old_line` (integer or nil), `new_line` (integer or nil).
+- **Example**:
+  ```lua
+  local deltas, err = git_diff{paths = {"src/main.rs"}, context = 3}
+  if not deltas then error(err) end
+  for _, d in ipairs(deltas) do
+    print(d.path, d.change_type, d.insertions, d.deletions)
+    if d.hunks then
+      for _, h in ipairs(d.hunks) do
+        for _, l in ipairs(h.lines) do
+          print(l.old_line or "-", l.new_line or "-", l.type, l.text)
+        end
+      end
+    end
+  end
+  ```
+
+#### `git_changes{paths=..., context=..., stat_only=...}`
+Convenience function that returns **all** status entries (both staged and worktree) with diff fields attached for files that have content changes. Covers the 90 % use case of "what changed and how".
+- **Parameters** (table, optional):
+  - `paths` (array of strings, optional): Restrict to specific relative paths.
+  - `context` (integer, optional): Context lines per hunk. Defaults to `3`.
+  - `stat_only` (boolean, optional): If `true`, omit `hunks` and return only stat summary.
+- **Returns**: `(array_of_entries, nil)` or `(nil, error)`
+- **Note**: Each entry has the same fields as `git_status`, plus:
+  - `diff` (object or nil): worktree changes (index vs worktree), same shape as `git_diff` deltas.
+  - `staged_diff` (object or nil): staged changes (HEAD vs index), same shape.
+- **Example**:
+  ```lua
+  local changes, err = git_changes()
+  if not changes then error(err) end
+  for _, e in ipairs(changes) do
+    if e.diff then
+      print(e.path, "worktree:", #e.diff.hunks, "hunks")
+    end
+    if e.staged_diff then
+      print(e.path, "staged:", #e.staged_diff.hunks, "hunks")
+    end
+  end
+  ```
+
+#### `git_show{path=..., ref=...}`
+Reads a file at a specific git ref without checking it out.
+- **Parameters** (table):
+  - `path` (string): Relative path to the file.
+  - `ref` (string, optional): Git ref (e.g. `"HEAD"`, `"HEAD~1"`, `"abc123"`). Defaults to `HEAD`.
+- **Returns**: `(file_content_string, nil)` or `(nil, error)`
+- **Example**:
+  ```lua
+  local content, err = git_show{path="src/main.rs", ref="HEAD~1"}
+  if not content then error(err) end
+  print(content)
+  ```
+
+#### `git_log{paths=..., n=...}`
+Returns brief commit history for a set of paths.
+- **Parameters** (table, optional):
+  - `paths` (array of strings, optional): Restrict to specific relative paths.
+  - `n` (integer, optional): Max number of commits. Defaults to `10`.
+- **Returns**: `(log_text, nil)` or `(nil, error)`
+- **Note**: Returns plain text (one line per commit in `--oneline` format), not JSON.
+- **Example**:
+  ```lua
+  local log, err = git_log{paths={"src/main.rs"}, n=5}
+  if not log then error(err) end
+  print(log)
+  ```
+
+---
+
+### 4. Skills Discovery & Loading
 
 #### `list_skills()`
 Lists all available skill prompt templates from `.ogent/skills/` and `~/.ogent/skills/`.
@@ -209,7 +328,7 @@ Securely reads an asset file inside a skill's directory (e.g. reference manual).
 
 ---
 
-### 4. Web Search & Integration
+### 5. Web Search & Integration
 
 #### `web_search{query=..., num_results=..., type=...}`
 Queries Exa search for highlights and excerpts.
@@ -234,7 +353,7 @@ Queries Exa specifically for code snippets, library details, or API signatures. 
 
 ---
 
-### 5. Subagent Workflows & DSL
+### 6. Subagent Workflows & DSL
 
 #### `task_update(status, summary)`
 Sends a task status or progress update message. In non-verbose mode, these updates are printed directly to standard output, allowing progress monitoring of complex orchestrations.

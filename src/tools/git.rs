@@ -1,0 +1,1034 @@
+use anyhow::{Result, bail};
+use serde::{Deserialize, Serialize};
+use serde_json::json;
+use std::collections::HashMap;
+use tokio::process::Command;
+use tokio::time::{Duration, timeout};
+
+use crate::tools::{Handler, ToolContext, ToolDef, parse_args};
+
+pub fn tools() -> Vec<ToolDef> {
+  vec![
+    ToolDef {
+      name: "git_status",
+      description: "Return structured git status entries for the workspace. Returns a JSON array of file changes.",
+      parameters: json!({
+        "type": "object",
+        "properties": {
+          "staged": {"type": "boolean", "description": "true = staged only; false = unstaged only; omit = all."},
+          "paths": {"type": "array", "items": {"type": "string"}, "description": "Restrict to specific paths."},
+          "untracked": {"type": "boolean", "description": "Include untracked files (default true)."}
+        },
+        "additionalProperties": false
+      }),
+      handler: Handler::async_fn(|ctx, args| async move { git_status(ctx, &args).await }),
+    },
+    ToolDef {
+      name: "git_diff",
+      description: "Return a structured git diff for the workspace. Returns a JSON array of file deltas with hunks.",
+      parameters: json!({
+        "type": "object",
+        "properties": {
+          "staged": {"type": "boolean", "description": "true = diff --cached (index vs HEAD). Default false (worktree vs index)."},
+          "base": {"type": "string", "description": "Diff against a specific ref (e.g. 'HEAD~1'). Ignored when staged is true."},
+          "paths": {"type": "array", "items": {"type": "string"}, "description": "Restrict to specific paths."},
+          "context": {"type": "integer", "description": "Context lines per hunk (default 3)."},
+          "stat_only": {"type": "boolean", "description": "If true, omit hunks and return only path, change_type, insertions, deletions."}
+        },
+        "additionalProperties": false
+      }),
+      handler: Handler::async_fn(|ctx, args| async move { git_diff(ctx, &args).await }),
+    },
+    ToolDef {
+      name: "git_changes",
+      description: "Convenience function returning all status entries (staged and worktree) with diff and staged_diff fields attached for files that have content changes.",
+      parameters: json!({
+        "type": "object",
+        "properties": {
+          "paths": {"type": "array", "items": {"type": "string"}, "description": "Restrict to specific paths."},
+          "context": {"type": "integer", "description": "Context lines per hunk (default 3)."},
+          "stat_only": {"type": "boolean", "description": "If true, omit hunks and return only path, change_type, insertions, deletions."}
+        },
+        "additionalProperties": false
+      }),
+      handler: Handler::async_fn(|ctx, args| async move { git_changes(ctx, &args).await }),
+    },
+    ToolDef {
+      name: "git_show",
+      description: "Read a file at a specific git ref without checking it out.",
+      parameters: json!({
+        "type": "object",
+        "properties": {
+          "path": {"type": "string", "description": "Relative path to the file."},
+          "ref": {"type": "string", "description": "Git ref (e.g. 'HEAD', 'HEAD~1', 'abc123'). Defaults to HEAD."}
+        },
+        "required": ["path"],
+        "additionalProperties": false
+      }),
+      handler: Handler::async_fn(|ctx, args| async move { git_show(ctx, &args).await }),
+    },
+    ToolDef {
+      name: "git_log",
+      description: "Return brief commit history for a set of paths.",
+      parameters: json!({
+        "type": "object",
+        "properties": {
+          "paths": {"type": "array", "items": {"type": "string"}, "description": "Restrict to specific paths."},
+          "n": {"type": "integer", "description": "Max number of commits (default 10)."}
+        },
+        "additionalProperties": false
+      }),
+      handler: Handler::async_fn(|ctx, args| async move { git_log(ctx, &args).await }),
+    },
+  ]
+}
+
+#[derive(Deserialize)]
+struct GitStatusArgs {
+  staged: Option<bool>,
+  #[serde(default)]
+  paths: Vec<String>,
+  #[serde(default = "default_true")]
+  untracked: bool,
+}
+
+#[derive(Deserialize)]
+struct GitDiffArgs {
+  staged: Option<bool>,
+  base: Option<String>,
+  #[serde(default)]
+  paths: Vec<String>,
+  #[serde(default = "default_three")]
+  context: u32,
+  #[serde(default)]
+  stat_only: bool,
+}
+
+#[derive(Deserialize)]
+struct GitChangesArgs {
+  #[serde(default)]
+  paths: Vec<String>,
+  #[serde(default = "default_three")]
+  context: u32,
+  #[serde(default)]
+  stat_only: bool,
+}
+
+#[derive(Deserialize)]
+struct GitShowArgs {
+  path: String,
+  #[serde(default = "default_head")]
+  git_ref: String,
+}
+
+#[derive(Deserialize)]
+struct GitLogArgs {
+  #[serde(default)]
+  paths: Vec<String>,
+  #[serde(default = "default_ten")]
+  n: u32,
+}
+
+fn default_true() -> bool {
+  true
+}
+fn default_three() -> u32 {
+  3
+}
+fn default_head() -> String {
+  "HEAD".to_string()
+}
+fn default_ten() -> u32 {
+  10
+}
+
+#[derive(Serialize)]
+struct GitStatusEntry {
+  path: String,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  old_path: Option<String>,
+  status: String,
+  staged: bool,
+  worktree: bool,
+  index_char: String,
+  worktree_char: String,
+  display: String,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  diff: Option<GitDiffDelta>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  staged_diff: Option<GitDiffDelta>,
+}
+
+#[derive(Serialize, Clone)]
+struct GitDiffDelta {
+  path: String,
+  old_path: String,
+  change_type: String,
+  is_binary: bool,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  old_mode: Option<String>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  new_mode: Option<String>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  similarity: Option<u32>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  insertions: Option<usize>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  deletions: Option<usize>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  hunks: Option<Vec<GitDiffHunk>>,
+}
+
+#[derive(Serialize, Clone)]
+struct GitDiffHunk {
+  old_start: u32,
+  old_lines: u32,
+  new_start: u32,
+  new_lines: u32,
+  header: String,
+  lines: Vec<GitDiffLine>,
+}
+
+#[derive(Serialize, Clone)]
+struct GitDiffLine {
+  r#type: String,
+  text: String,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  old_line: Option<u32>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  new_line: Option<u32>,
+}
+
+async fn run_git(workspace: &std::path::Path, args: &[&str]) -> Result<std::process::Output> {
+  let mut cmd = Command::new("git");
+  cmd.arg("-C").arg(workspace);
+  for arg in args {
+    cmd.arg(arg);
+  }
+  cmd.stdout(std::process::Stdio::piped());
+  cmd.stderr(std::process::Stdio::piped());
+
+  let output = timeout(Duration::from_secs(30), cmd.output()).await;
+  match output {
+    Err(_) => bail!("git command timed out after 30s"),
+    Ok(Err(e)) => bail!("failed to run git: {e}"),
+    Ok(Ok(out)) => {
+      if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        bail!("git failed: {stderr}");
+      }
+      Ok(out)
+    }
+  }
+}
+
+async fn git_status(ctx: ToolContext, args: &str) -> Result<String> {
+  let args: GitStatusArgs = parse_args(args)?;
+
+  let mut git_args: Vec<String> = vec![
+    "status".to_string(),
+    "--porcelain=1".to_string(),
+    "-z".to_string(),
+  ];
+  if !args.untracked {
+    git_args.push("--untracked-files=no".to_string());
+  }
+  if !args.paths.is_empty() {
+    git_args.push("--".to_string());
+    for p in &args.paths {
+      git_args.push(p.clone());
+    }
+  }
+
+  let output = run_git(
+    ctx.workspace.root(),
+    &git_args.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+  )
+  .await?;
+  let entries = parse_porcelain_v1_z(&output.stdout)?;
+
+  let filtered: Vec<_> = entries
+    .into_iter()
+    .filter(|e| match args.staged {
+      Some(true) => e.staged,
+      Some(false) => e.worktree || e.status == "untracked",
+      None => true,
+    })
+    .collect();
+
+  Ok(serde_json::to_string(&filtered)?)
+}
+
+fn parse_porcelain_v1_z(stdout: &[u8]) -> Result<Vec<GitStatusEntry>> {
+  let mut entries = Vec::new();
+
+  let fields: Vec<&[u8]> = stdout.split(|&b| b == 0).collect();
+
+  let mut i = 0;
+  while i < fields.len() {
+    let field = fields[i];
+    i += 1;
+    if field.is_empty() {
+      continue;
+    }
+    if field.len() < 2 {
+      continue;
+    }
+
+    let display = std::str::from_utf8(&field[0..2])
+      .unwrap_or("  ")
+      .to_string();
+
+    match &field[..2] {
+      b"??" => {
+        let path = std::str::from_utf8(&field[3..])
+          .unwrap_or("")
+          .to_string();
+        entries.push(GitStatusEntry {
+          path,
+          old_path: None,
+          status: "untracked".to_string(),
+          staged: false,
+          worktree: true,
+          index_char: "?".to_string(),
+          worktree_char: "?".to_string(),
+          display,
+          diff: None,
+          staged_diff: None,
+        });
+      }
+      b"!!" => {
+        let path = std::str::from_utf8(&field[3..])
+          .unwrap_or("")
+          .to_string();
+        entries.push(GitStatusEntry {
+          path,
+          old_path: None,
+          status: "ignored".to_string(),
+          staged: false,
+          worktree: false,
+          index_char: "!".to_string(),
+          worktree_char: "!".to_string(),
+          display,
+          diff: None,
+          staged_diff: None,
+        });
+      }
+      _ => {
+        let x = field[0] as char;
+        let y = field[1] as char;
+
+        let path = std::str::from_utf8(&field[3..]).unwrap_or("").to_string();
+
+        let status = resolve_status(x, y);
+        let staged = x != ' ' && x != '?' && x != '!';
+        let worktree = y != ' ' && y != '?' && y != '!';
+
+        let (entry_path, old_p) = if x == 'R' || x == 'C' || y == 'R' || y == 'C' {
+          let orig = if i < fields.len() {
+            let f = fields[i];
+            i += 1;
+            std::str::from_utf8(f).unwrap_or("").to_string()
+          } else {
+            String::new()
+          };
+          (path, if orig.is_empty() { None } else { Some(orig) })
+        } else {
+          (path, None)
+        };
+
+        entries.push(GitStatusEntry {
+          path: entry_path,
+          old_path: old_p,
+          status,
+          staged,
+          worktree,
+          index_char: x.to_string(),
+          worktree_char: y.to_string(),
+          display,
+          diff: None,
+          staged_diff: None,
+        });
+      }
+    }
+  }
+
+  Ok(entries)
+}
+
+/// Resolve a single status string from the two porcelain characters.
+///
+/// Precedence (highest first):
+/// 1. Unmerged (U on either side) → "unmerged"
+/// 2. Rename (R on either side) → "renamed"
+/// 3. Copy (C on either side) → "copied"
+/// 4. Type change (T on either side) → "type_changed"
+/// 5. Fallback to the active side: worktree (y) takes priority over index (x)
+///    because worktree is the most recent state.
+fn resolve_status(x: char, y: char) -> String {
+  if x == 'U' || y == 'U' {
+    return "unmerged".to_string();
+  }
+  if x == 'R' || y == 'R' {
+    return "renamed".to_string();
+  }
+  if x == 'C' || y == 'C' {
+    return "copied".to_string();
+  }
+  if x == 'T' || y == 'T' {
+    return "type_changed".to_string();
+  }
+  let c = if y != ' ' { y } else { x };
+  match c {
+    'A' => "added",
+    'D' => "deleted",
+    'M' => "modified",
+    '?' => "untracked",
+    '!' => "ignored",
+    _ => "modified",
+  }
+  .to_string()
+}
+
+async fn git_diff(ctx: ToolContext, args: &str) -> Result<String> {
+  let args: GitDiffArgs = parse_args(args)?;
+
+  let mut git_args: Vec<String> = vec!["diff".to_string(), "--no-ext-diff".to_string()];
+
+  if let Some(true) = args.staged {
+    git_args.push("--cached".to_string());
+  } else if let Some(ref base) = args.base {
+    git_args.push(base.clone());
+  }
+
+  git_args.push(format!("-U{}", args.context));
+
+  if !args.paths.is_empty() {
+    git_args.push("--".to_string());
+    for p in &args.paths {
+      git_args.push(p.clone());
+    }
+  }
+
+  let output = run_git(
+    ctx.workspace.root(),
+    &git_args.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+  )
+  .await?;
+
+  let text = String::from_utf8_lossy(&output.stdout);
+  let deltas = parse_unified_diff(&text, args.stat_only)?;
+  Ok(serde_json::to_string(&deltas)?)
+}
+
+fn parse_unified_diff(text: &str, stat_only: bool) -> Result<Vec<GitDiffDelta>> {
+  let mut deltas: Vec<GitDiffDelta> = Vec::new();
+  let mut current: Option<GitDiffDelta> = None;
+  let mut current_hunk: Option<GitDiffHunk> = None;
+  let mut old_line: u32 = 0;
+  let mut new_line: u32 = 0;
+
+  fn maybe_push_delta(deltas: &mut Vec<GitDiffDelta>, delta: &mut Option<GitDiffDelta>) {
+    if let Some(mut d) = delta.take() {
+      if d.change_type == "modified" && d.old_mode.is_some() && d.new_mode.is_some() {
+        d.change_type = "type_changed".to_string();
+      }
+      deltas.push(d);
+    }
+  }
+
+  for line in text.lines() {
+    if line.starts_with("diff --git ") {
+      if let Some(h) = current_hunk.take() {
+        if let Some(d) = current.as_mut() {
+          if let Some(hunks) = &mut d.hunks {
+            hunks.push(h);
+          }
+        }
+      }
+      maybe_push_delta(&mut deltas, &mut current);
+
+      let after = &line["diff --git ".len()..];
+      let parts: Vec<&str> = after.split_whitespace().collect();
+      let old_raw = strip_quotes(parts.get(0).unwrap_or(&""));
+      let new_raw = strip_quotes(parts.get(1).unwrap_or(&""));
+      let old_path = strip_prefix(old_raw, "a/").unwrap_or(old_raw).to_string();
+      let new_path = strip_prefix(new_raw, "b/").unwrap_or(new_raw).to_string();
+
+      current = Some(GitDiffDelta {
+        path: new_path,
+        old_path: old_path,
+        change_type: "modified".to_string(),
+        is_binary: false,
+        old_mode: None,
+        new_mode: None,
+        similarity: None,
+        insertions: Some(0),
+        deletions: Some(0),
+        hunks: if stat_only { None } else { Some(Vec::new()) },
+      });
+      continue;
+    }
+
+    if current.is_none() {
+      continue;
+    }
+
+    // Helper closure to push a hunk to current delta
+    let push_hunk = |cur: &mut Option<GitDiffDelta>, hunk: &mut Option<GitDiffHunk>| {
+      if let Some(h) = hunk.take() {
+        if let Some(d) = cur {
+          if let Some(hunks) = &mut d.hunks {
+            hunks.push(h);
+          }
+        }
+      }
+    };
+
+    if line.starts_with("old mode ") {
+      if let Some(cur) = current.as_mut() {
+        cur.old_mode = Some(line["old mode ".len()..].to_string());
+      }
+    } else if line.starts_with("new mode ") {
+      if let Some(cur) = current.as_mut() {
+        cur.new_mode = Some(line["new mode ".len()..].to_string());
+      }
+    } else if line.starts_with("deleted file mode ") {
+      if let Some(cur) = current.as_mut() {
+        cur.change_type = "deleted".to_string();
+        cur.old_mode = Some(line["deleted file mode ".len()..].to_string());
+      }
+    } else if line.starts_with("new file mode ") {
+      if let Some(cur) = current.as_mut() {
+        cur.change_type = "added".to_string();
+        cur.new_mode = Some(line["new file mode ".len()..].to_string());
+      }
+    } else if line.starts_with("similarity index ") {
+      if let Some(cur) = current.as_mut() {
+        let pct = line["similarity index ".len()..].trim_end_matches('%');
+        cur.similarity = pct.parse().ok();
+      }
+    } else if line.starts_with("rename from ") {
+      if let Some(cur) = current.as_mut() {
+        cur.change_type = "renamed".to_string();
+        cur.old_path = strip_quotes(&line["rename from ".len()..]).to_string();
+      }
+    } else if line.starts_with("rename to ") {
+      if let Some(cur) = current.as_mut() {
+        cur.path = strip_quotes(&line["rename to ".len()..]).to_string();
+      }
+    } else if line.starts_with("copy from ") {
+      if let Some(cur) = current.as_mut() {
+        cur.change_type = "copied".to_string();
+        cur.old_path = strip_quotes(&line["copy from ".len()..]).to_string();
+      }
+    } else if line.starts_with("copy to ") {
+      if let Some(cur) = current.as_mut() {
+        cur.path = strip_quotes(&line["copy to ".len()..]).to_string();
+      }
+    } else if line.starts_with("index ") {
+      // skip
+    } else if line.starts_with("Binary files ") {
+      if let Some(cur) = current.as_mut() {
+        cur.is_binary = true;
+        cur.hunks = None;
+        current_hunk = None;
+      }
+    } else if line.starts_with("--- ") {
+      // skip
+    } else if line.starts_with("+++ ") {
+      // skip
+    } else if line.starts_with("@@") {
+      push_hunk(&mut current, &mut current_hunk);
+      if let Some(h) = parse_hunk_header(line) {
+        old_line = h.old_start;
+        new_line = h.new_start;
+        if let Some(cur) = current.as_mut() {
+          if cur.hunks.is_some() {
+            current_hunk = Some(h);
+          }
+        }
+      }
+    } else if line.starts_with(" ") {
+      if let Some(h) = current_hunk.as_mut() {
+        h.lines.push(GitDiffLine {
+          r#type: "context".to_string(),
+          text: line[1..].to_string(),
+          old_line: Some(old_line),
+          new_line: Some(new_line),
+        });
+        old_line += 1;
+        new_line += 1;
+      }
+    } else if line.starts_with("-") {
+      if let Some(h) = current_hunk.as_mut() {
+        h.lines.push(GitDiffLine {
+          r#type: "deletion".to_string(),
+          text: line[1..].to_string(),
+          old_line: Some(old_line),
+          new_line: None,
+        });
+        old_line += 1;
+      }
+      if let Some(cur) = current.as_mut() {
+        if let Some(del) = &mut cur.deletions {
+          *del += 1;
+        }
+      }
+    } else if line.starts_with("+") {
+      if let Some(h) = current_hunk.as_mut() {
+        h.lines.push(GitDiffLine {
+          r#type: "addition".to_string(),
+          text: line[1..].to_string(),
+          old_line: None,
+          new_line: Some(new_line),
+        });
+        new_line += 1;
+      }
+      if let Some(cur) = current.as_mut() {
+        if let Some(ins) = &mut cur.insertions {
+          *ins += 1;
+        }
+      }
+    } else if line == "\\ No newline at end of file" {
+      // skip
+    }
+  }
+
+  if let Some(h) = current_hunk.take() {
+    if let Some(d) = current.as_mut() {
+      if let Some(hunks) = &mut d.hunks {
+        hunks.push(h);
+      }
+    }
+  }
+  maybe_push_delta(&mut deltas, &mut current);
+
+  Ok(deltas)
+}
+
+fn strip_quotes(s: &str) -> &str {
+  let s = s.trim();
+  if s.len() >= 2 && s.starts_with('"') && s.ends_with('"') {
+    &s[1..s.len() - 1]
+  } else {
+    s
+  }
+}
+
+fn strip_prefix<'a>(s: &'a str, prefix: &str) -> Option<&'a str> {
+  s.strip_prefix(prefix)
+}
+
+fn parse_hunk_header(line: &str) -> Option<GitDiffHunk> {
+  let inner = line
+    .trim_start_matches('@')
+    .trim_start_matches(' ')
+    .trim_end_matches('@')
+    .trim_end_matches(' ')
+    .trim();
+
+  let mut parts = inner.split_whitespace();
+  let old_part = parts.next()?;
+  let new_part = parts.next()?;
+
+  let (old_start, old_lines) = parse_range(old_part);
+  let (new_start, new_lines) = parse_range(new_part);
+
+  Some(GitDiffHunk {
+    old_start,
+    old_lines,
+    new_start,
+    new_lines,
+    header: line.to_string(),
+    lines: Vec::new(),
+  })
+}
+
+fn parse_range(s: &str) -> (u32, u32) {
+  let s = s.trim_start_matches(|c: char| c == '+' || c == '-');
+  if let Some((start, count)) = s.split_once(',') {
+    let start = start.parse().unwrap_or(0);
+    let count = count.parse().unwrap_or(0);
+    (start, count)
+  } else {
+    (s.parse().unwrap_or(0), 1)
+  }
+}
+
+async fn run_diff(
+  workspace: &std::path::Path,
+  paths: &[String],
+  context: u32,
+  staged: bool,
+  stat_only: bool,
+) -> Result<HashMap<String, GitDiffDelta>> {
+  let mut git_args: Vec<String> = vec![
+    "diff".to_string(),
+    "--no-ext-diff".to_string(),
+    format!("-U{}", context),
+  ];
+  if staged {
+    git_args.push("--cached".to_string());
+  }
+  git_args.push("--".to_string());
+  for p in paths {
+    git_args.push(p.clone());
+  }
+
+  let output = run_git(
+    workspace,
+    &git_args.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+  )
+  .await?;
+  let text = String::from_utf8_lossy(&output.stdout);
+  let deltas = parse_unified_diff(&text, stat_only)?;
+  Ok(deltas.into_iter().map(|d| (d.path.clone(), d)).collect())
+}
+
+async fn git_changes(ctx: ToolContext, args: &str) -> Result<String> {
+  let args: GitChangesArgs = parse_args(args)?;
+
+  // 1. Get status
+  let mut git_args: Vec<String> = vec![
+    "status".to_string(),
+    "--porcelain=1".to_string(),
+    "-z".to_string(),
+  ];
+  if !args.paths.is_empty() {
+    git_args.push("--".to_string());
+    for p in &args.paths {
+      git_args.push(p.clone());
+    }
+  }
+
+  let output = run_git(
+    ctx.workspace.root(),
+    &git_args.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+  )
+  .await?;
+  let mut entries = parse_porcelain_v1_z(&output.stdout)?;
+
+  // 2. Categorize paths by what diff sources they need
+  let mut worktree_paths: Vec<String> = Vec::new();
+  let mut staged_paths: Vec<String> = Vec::new();
+
+  for e in &entries {
+    if e.status == "untracked" || e.status == "ignored" {
+      continue;
+    }
+    if e.worktree {
+      worktree_paths.push(e.path.clone());
+    }
+    if e.staged {
+      staged_paths.push(e.path.clone());
+    }
+  }
+
+  // 3. Run diffs
+  let worktree_deltas = if !worktree_paths.is_empty() {
+    run_diff(
+      ctx.workspace.root(),
+      &worktree_paths,
+      args.context,
+      false,
+      args.stat_only,
+    )
+    .await?
+  } else {
+    HashMap::new()
+  };
+
+  let staged_deltas = if !staged_paths.is_empty() {
+    run_diff(
+      ctx.workspace.root(),
+      &staged_paths,
+      args.context,
+      true,
+      args.stat_only,
+    )
+    .await?
+  } else {
+    HashMap::new()
+  };
+
+  // 4. Attach diffs
+  for entry in &mut entries {
+    if let Some(delta) = worktree_deltas.get(&entry.path) {
+      entry.diff = Some(delta.clone());
+    }
+    if let Some(delta) = staged_deltas.get(&entry.path) {
+      entry.staged_diff = Some(delta.clone());
+    }
+  }
+
+  Ok(serde_json::to_string(&entries)?)
+}
+
+async fn git_show(ctx: ToolContext, args: &str) -> Result<String> {
+  let args: GitShowArgs = parse_args(args)?;
+
+  let spec = format!("{}:{}", args.git_ref, args.path);
+  let output = run_git(ctx.workspace.root(), &["show", &spec]).await?;
+  let content = String::from_utf8_lossy(&output.stdout);
+  Ok(content.into_owned())
+}
+
+async fn git_log(ctx: ToolContext, args: &str) -> Result<String> {
+  let args: GitLogArgs = parse_args(args)?;
+
+  let mut git_args: Vec<String> = vec![
+    "log".to_string(),
+    "--oneline".to_string(),
+    "--no-decorate".to_string(),
+    format!("-n{}", args.n),
+  ];
+  if !args.paths.is_empty() {
+    git_args.push("--".to_string());
+    for p in &args.paths {
+      git_args.push(p.clone());
+    }
+  }
+
+  let output = run_git(
+    ctx.workspace.root(),
+    &git_args.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+  )
+  .await?;
+  let text = String::from_utf8_lossy(&output.stdout);
+  Ok(text.into_owned())
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn test_parse_hunk_header() {
+    let h = parse_hunk_header("@@ -10,5 +10,7 @@").unwrap();
+    assert_eq!(h.old_start, 10);
+    assert_eq!(h.old_lines, 5);
+    assert_eq!(h.new_start, 10);
+    assert_eq!(h.new_lines, 7);
+
+    let h = parse_hunk_header("@@ -0,0 +1 @@").unwrap();
+    assert_eq!(h.old_start, 0);
+    assert_eq!(h.old_lines, 0);
+    assert_eq!(h.new_start, 1);
+    assert_eq!(h.new_lines, 1);
+
+    let h = parse_hunk_header("@@ -1,3 +0,0 @@").unwrap();
+    assert_eq!(h.old_start, 1);
+    assert_eq!(h.old_lines, 3);
+    assert_eq!(h.new_start, 0);
+    assert_eq!(h.new_lines, 0);
+  }
+
+  #[test]
+  fn test_parse_unified_diff_basic() {
+    let text = r#"diff --git a/src/main.rs b/src/main.rs
+index abc..def 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -10,5 +10,7 @@
+     let x = 1;
+-    let y = 2;
++    let z = 3;
+     context
+"#;
+    let deltas = parse_unified_diff(text, false).unwrap();
+    assert_eq!(deltas.len(), 1);
+    let d = &deltas[0];
+    assert_eq!(d.path, "src/main.rs");
+    assert_eq!(d.old_path, "src/main.rs");
+    assert_eq!(d.change_type, "modified");
+    assert!(!d.is_binary);
+    assert_eq!(d.hunks.as_ref().unwrap().len(), 1);
+    let h = &d.hunks.as_ref().unwrap()[0];
+    assert_eq!(h.old_start, 10);
+    assert_eq!(h.lines.len(), 4);
+    assert_eq!(h.lines[0].r#type, "context");
+    assert_eq!(h.lines[0].old_line, Some(10));
+    assert_eq!(h.lines[0].new_line, Some(10));
+    assert_eq!(h.lines[1].r#type, "deletion");
+    assert_eq!(h.lines[1].old_line, Some(11));
+    assert_eq!(h.lines[1].new_line, None);
+    assert_eq!(h.lines[2].r#type, "addition");
+    assert_eq!(h.lines[2].old_line, None);
+    assert_eq!(h.lines[2].new_line, Some(11));
+    assert_eq!(h.lines[3].r#type, "context");
+    assert_eq!(h.lines[3].old_line, Some(12));
+    assert_eq!(h.lines[3].new_line, Some(12));
+    assert_eq!(d.insertions, Some(1));
+    assert_eq!(d.deletions, Some(1));
+  }
+
+  #[test]
+  fn test_parse_unified_diff_rename() {
+    let text = r#"diff --git a/old.rs b/new.rs
+similarity index 100%
+rename from old.rs
+rename to new.rs
+index abc..def 100644
+--- a/old.rs
++++ b/new.rs
+"#;
+    let deltas = parse_unified_diff(text, false).unwrap();
+    assert_eq!(deltas.len(), 1);
+    let d = &deltas[0];
+    assert_eq!(d.path, "new.rs");
+    assert_eq!(d.old_path, "old.rs");
+    assert_eq!(d.change_type, "renamed");
+    assert_eq!(d.similarity, Some(100));
+  }
+
+  #[test]
+  fn test_parse_unified_diff_new_file() {
+    let text = r#"diff --git a/new.rs b/new.rs
+new file mode 100644
+index 0000000..abc
+--- /dev/null
++++ b/new.rs
+@@ -0,0 +1,3 @@
++line1
++line2
++line3
+"#;
+    let deltas = parse_unified_diff(text, false).unwrap();
+    assert_eq!(deltas.len(), 1);
+    let d = &deltas[0];
+    assert_eq!(d.path, "new.rs");
+    assert_eq!(d.change_type, "added");
+    assert_eq!(d.new_mode, Some("100644".to_string()));
+    assert_eq!(d.insertions, Some(3));
+  }
+
+  #[test]
+  fn test_parse_unified_diff_deleted_file() {
+    let text = r#"diff --git a/del.rs b/del.rs
+deleted file mode 100644
+index abc..0000000
+--- a/del.rs
++++ /dev/null
+@@ -1,3 +0,0 @@
+-line1
+-line2
+-line3
+"#;
+    let deltas = parse_unified_diff(text, false).unwrap();
+    assert_eq!(deltas.len(), 1);
+    let d = &deltas[0];
+    assert_eq!(d.path, "del.rs");
+    assert_eq!(d.change_type, "deleted");
+    assert_eq!(d.old_mode, Some("100644".to_string()));
+    assert_eq!(d.deletions, Some(3));
+  }
+
+  #[test]
+  fn test_parse_unified_diff_stat_only() {
+    let text = r#"diff --git a/src/main.rs b/src/main.rs
+index abc..def 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -10,5 +10,7 @@
+     let x = 1;
+-    let y = 2;
++    let z = 3;
+     context
+"#;
+    let deltas = parse_unified_diff(text, true).unwrap();
+    assert_eq!(deltas.len(), 1);
+    let d = &deltas[0];
+    assert!(d.hunks.is_none());
+    assert_eq!(d.insertions, Some(1));
+    assert_eq!(d.deletions, Some(1));
+  }
+
+  #[test]
+  fn test_parse_porcelain_v1_z_simple() {
+    let data = b" M README.md\0?? untracked.txt\0!! ignored.txt\0";
+    let entries = parse_porcelain_v1_z(data).unwrap();
+    assert_eq!(entries.len(), 3);
+
+    assert_eq!(entries[0].path, "README.md");
+    assert_eq!(entries[0].status, "modified");
+    assert_eq!(entries[0].staged, false);
+    assert_eq!(entries[0].worktree, true);
+    assert_eq!(entries[0].index_char, " ");
+    assert_eq!(entries[0].worktree_char, "M");
+    assert_eq!(entries[0].display, " M");
+
+    assert_eq!(entries[1].path, "untracked.txt");
+    assert_eq!(entries[1].status, "untracked");
+    assert_eq!(entries[1].index_char, "?");
+    assert_eq!(entries[1].worktree_char, "?");
+
+    assert_eq!(entries[2].path, "ignored.txt");
+    assert_eq!(entries[2].status, "ignored");
+    assert_eq!(entries[2].index_char, "!");
+    assert_eq!(entries[2].worktree_char, "!");
+  }
+
+  #[test]
+  fn test_parse_porcelain_v1_z_rename() {
+    let data = b"R  new.rs\0old.rs\0";
+    let entries = parse_porcelain_v1_z(data).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].path, "new.rs");
+    assert_eq!(entries[0].old_path, Some("old.rs".to_string()));
+    assert_eq!(entries[0].status, "renamed");
+    assert_eq!(entries[0].staged, true);
+    assert_eq!(entries[0].worktree, false);
+    assert_eq!(entries[0].index_char, "R");
+    assert_eq!(entries[0].worktree_char, " ");
+  }
+
+  #[test]
+  fn test_parse_porcelain_v1_z_staged_and_worktree() {
+    let data = b"AM file.rs\0";
+    let entries = parse_porcelain_v1_z(data).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].path, "file.rs");
+    assert_eq!(entries[0].status, "modified");
+    assert_eq!(entries[0].staged, true);
+    assert_eq!(entries[0].worktree, true);
+  }
+
+  #[test]
+  fn test_parse_porcelain_v1_z_unmerged() {
+    // UU = both modified, AU = added by us, UA = added by them
+    let data = b"UU conflict.rs\0AU added_by_us.rs\0UA added_by_them.rs\0";
+    let entries = parse_porcelain_v1_z(data).unwrap();
+    assert_eq!(entries.len(), 3);
+
+    assert_eq!(entries[0].path, "conflict.rs");
+    assert_eq!(entries[0].status, "unmerged");
+    assert_eq!(entries[0].index_char, "U");
+    assert_eq!(entries[0].worktree_char, "U");
+    assert_eq!(entries[0].staged, true);
+    assert_eq!(entries[0].worktree, true);
+
+    assert_eq!(entries[1].path, "added_by_us.rs");
+    assert_eq!(entries[1].status, "unmerged");
+    assert_eq!(entries[1].index_char, "A");
+    assert_eq!(entries[1].worktree_char, "U");
+
+    assert_eq!(entries[2].path, "added_by_them.rs");
+    assert_eq!(entries[2].status, "unmerged");
+    assert_eq!(entries[2].index_char, "U");
+    assert_eq!(entries[2].worktree_char, "A");
+  }
+
+  #[test]
+  fn test_parse_porcelain_v1_z_type_changed() {
+    let data = b"T  file.rs\0";
+    let entries = parse_porcelain_v1_z(data).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].path, "file.rs");
+    assert_eq!(entries[0].status, "type_changed");
+    assert_eq!(entries[0].index_char, "T");
+    assert_eq!(entries[0].worktree_char, " ");
+    assert_eq!(entries[0].staged, true);
+    assert_eq!(entries[0].worktree, false);
+  }
+}

@@ -7,6 +7,7 @@ use std::sync::OnceLock;
 use crate::types::{Tool, ToolFunction};
 
 pub mod fs;
+pub mod git;
 pub mod lua;
 pub mod repo;
 pub mod shell;
@@ -83,6 +84,7 @@ pub fn all_tools() -> &'static [ToolDef] {
   ALL_TOOLS.get_or_init(|| {
     let mut tools = Vec::new();
     tools.extend(fs::tools());
+    tools.extend(git::tools());
     tools.extend(lua::tools());
     tools.extend(shell::tools());
     tools.extend(repo::tools());

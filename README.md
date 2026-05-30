@@ -70,6 +70,13 @@ Within the Lua execution sandbox, scripts can invoke workspace operations direct
 * `repo_map{path=..., levels=...}` / `repo_map()`: Displays the directory structure tree of the workspace, automatically respecting `.gitignore` files and ignoring hidden paths.
 * `glob(pattern)`: Searches for files matching a glob pattern (e.g. `"**/*.rs"`, `"src/tools/*.rs"`) and returns a Lua array of matching relative paths. Automatically respects `.gitignore` rules.
 
+### Git Operations (Structured)
+* `git_status{staged=..., paths=..., untracked=...}`: Returns a JSON array of file changes with `path`, `old_path` (for renames/copies), `status` (`added`, `deleted`, `modified`, `renamed`, `copied`, `untracked`, `ignored`, `type_changed`, `unmerged`), `staged`, `worktree`, `index_char`, `worktree_char`, and `display` fields.
+* `git_diff{staged=..., base=..., paths=..., context=..., stat_only=...}`: Returns a JSON array of file deltas with `path`, `old_path`, `change_type`, `is_binary`, `old_mode`, `new_mode`, `similarity`, `insertions`, `deletions`, and `hunks` (each hunk has `old_start`, `old_lines`, `new_start`, `new_lines`, `header`, and `lines` with `type`, `text`, `old_line`, `new_line`).
+* `git_changes{paths=..., context=..., stat_only=...}`: Convenience function returning **all** `git_status` entries (staged + worktree) with `diff` (worktree changes) and `staged_diff` (staged changes) attached.
+* `git_show{path=..., ref=...}`: Reads a file at a specific git ref without checking it out.
+* `git_log{paths=..., n=...}`: Returns brief commit history (plain text, `--oneline` format).
+
 ### Web Search (Exa)
 * `web_search{query=..., num_results=..., type=...}` / `web_read{urls=..., mode=...}` / `web_code_context{query=...}`: Queries the web, reads highlight summaries, or fetches real-world code snippets.
 
@@ -111,3 +118,4 @@ cargo test
 
 ## Docs
 - [ARCHITECTURE.md](ARCHITECTURE.md)
+# extra

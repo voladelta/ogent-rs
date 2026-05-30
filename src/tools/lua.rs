@@ -301,6 +301,11 @@ _t.load_skill = load_skill
 _t.list_skills = list_skills
 _t.load_skill_asset = load_skill_asset
 _t.glob = glob
+_t.git_status = git_status
+_t.git_diff = git_diff
+_t.git_changes = git_changes
+_t.git_show = git_show
+_t.git_log = git_log
 
 function read_file(path, offset, limit)
   return _t.read_file({path=path, offset=offset, limit=limit})
@@ -344,6 +349,28 @@ function glob(pattern)
   local ok, err = _t.glob({pattern=pattern})
   if ok then ok = json_decode(ok) end
   return ok, err
+end
+function git_status(opts)
+  local ok, err = _t.git_status(opts or {})
+  if ok then ok = json_decode(ok) end
+  return ok, err
+end
+function git_diff(opts)
+  local ok, err = _t.git_diff(opts or {})
+  if ok then ok = json_decode(ok) end
+  return ok, err
+end
+function git_changes(opts)
+  local ok, err = _t.git_changes(opts or {})
+  if ok then ok = json_decode(ok) end
+  return ok, err
+end
+function git_show(path, git_ref)
+  local ok, err = _t.git_show({path=path, ref=git_ref})
+  return ok, err
+end
+function git_log(opts)
+  return _t.git_log(opts or {})
 end
 "#;
   lua.load(positional_wrappers).exec()?;
@@ -779,5 +806,139 @@ mod tests {
       res.contains("42"),
       "eval should recover after panic. Got: {res}"
     );
+  }
+
+  #[tokio::test]
+  async fn test_git_tools_from_lua() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+
+    // init git repo and make an initial commit
+    std::process::Command::new("git")
+      .arg("-C")
+      .arg(root)
+      .arg("init")
+      .output()
+      .unwrap();
+    std::process::Command::new("git")
+      .arg("-C")
+      .arg(root)
+      .args(&["config", "user.email", "test@test.com"])
+      .output()
+      .unwrap();
+    std::process::Command::new("git")
+      .arg("-C")
+      .arg(root)
+      .args(&["config", "user.name", "Test"])
+      .output()
+      .unwrap();
+
+    std::fs::write(root.join("test.txt"), "hello\n").unwrap();
+    std::process::Command::new("git")
+      .arg("-C")
+      .arg(root)
+      .args(&["add", "test.txt"])
+      .output()
+      .unwrap();
+    std::process::Command::new("git")
+      .arg("-C")
+      .arg(root)
+      .args(&["commit", "-m", "init"])
+      .output()
+      .unwrap();
+
+    // modify the file in the worktree
+    std::fs::write(root.join("test.txt"), "hello world\n").unwrap();
+
+    // create a fully staged file (no worktree changes)
+    std::fs::write(root.join("staged.txt"), "staged content\n").unwrap();
+    std::process::Command::new("git")
+      .arg("-C")
+      .arg(root)
+      .args(&["add", "staged.txt"])
+      .output()
+      .unwrap();
+
+    let workspace = Workspace::from_root(root.to_path_buf());
+    let skill_store = Arc::new(crate::skills::SkillStore::new(workspace.root()));
+    let client = crate::client::Client::new(
+      "http://localhost",
+      "dummy".into(),
+      |_, _| Ok(serde_json::Value::Null),
+      30,
+    )
+    .unwrap();
+    let ctx = ToolContext {
+      workspace,
+      skill_store,
+      lua_session: Arc::new(Mutex::new(None)),
+      client,
+      output_sink: None,
+      verbose: false,
+      actor_id: "director".to_string(),
+      agent_depth: 0,
+    };
+
+    // Test git_status
+    let res = exec_tool(
+      ctx.clone(),
+      r#"{"code": "local status, err = git_status(); if not status then error(err) end; local out = {}; for _, e in ipairs(status) do table.insert(out, e.path .. ':' .. e.status) end; return table.concat(out, ',')"}"#,
+    )
+    .await
+    .unwrap();
+    assert!(
+      res.contains("test.txt:modified"),
+      "git_status result: {res}"
+    );
+    assert!(
+      res.contains("staged.txt:added"),
+      "git_status result: {res}"
+    );
+
+    // Test git_diff
+    let res = exec_tool(
+      ctx.clone(),
+      r#"{"code": "local diff, err = git_diff(); if not diff then error(err) end; return diff[1].path .. ':' .. diff[1].change_type .. ':' .. #diff[1].hunks"}"#,
+    )
+    .await
+    .unwrap();
+    assert!(
+      res.contains("test.txt:modified:1"),
+      "git_diff result: {res}"
+    );
+
+    // Test git_changes — worktree diff on test.txt, staged_diff on staged.txt
+    let res = exec_tool(
+      ctx.clone(),
+      r#"{"code": "local changes, err = git_changes(); if not changes then error(err) end; local out = {}; for _, e in ipairs(changes) do if e.diff then table.insert(out, e.path .. ':diff:' .. #e.diff.hunks) end if e.staged_diff then table.insert(out, e.path .. ':staged_diff:' .. #e.staged_diff.hunks) end end; return table.concat(out, ',')"}"#,
+    )
+    .await
+    .unwrap();
+    assert!(
+      res.contains("test.txt:diff:1"),
+      "git_changes expected worktree diff on test.txt: {res}"
+    );
+    assert!(
+      res.contains("staged.txt:staged_diff:1"),
+      "git_changes expected staged diff on staged.txt: {res}"
+    );
+
+    // Test git_show
+    let res = exec_tool(
+      ctx.clone(),
+      r#"{"code": "local content, err = git_show('test.txt', 'HEAD'); if not content then error(err) end; return content:find('hello') ~= nil"}"#,
+    )
+    .await
+    .unwrap();
+    assert!(res.contains("true"), "git_show result: {res}");
+
+    // Test git_log
+    let res = exec_tool(
+      ctx,
+      r#"{"code": "local log, err = git_log({n=5}); if not log then error(err) end; return log:find('init') ~= nil"}"#,
+    )
+    .await
+    .unwrap();
+    assert!(res.contains("true"), "git_log result: {res}");
   }
 }

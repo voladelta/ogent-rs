@@ -26,11 +26,12 @@ User prompt
   └─> Agent (turn loop)
         └─> LLM (exec / eval only)
               └─> Lua VM
-                    ├─> read_file, write_file, apply_anchor_edits
-                    ├─> shell, glob, repo_map
-                    ├─> web_search, web_read
-                    ├─> list_skills, load_skill
-                    └─> agent{...}, parallel{...}   ← spawns subagents
+                     ├─> read_file, write_file, apply_anchor_edits
+                     ├─> shell, glob, repo_map
+                     ├─> git_status, git_diff, git_changes, git_show, git_log
+                     ├─> web_search, web_read
+                     ├─> list_skills, load_skill
+                     └─> agent{...}, parallel{...}   ← spawns subagents
 ```
 
 ## Code Map
