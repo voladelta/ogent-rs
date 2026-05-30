@@ -54,13 +54,14 @@ fn print_actor_text(actor_id: &str, text: &str) {
       println!();
       *at_line_start = true;
     }
-    if !part.is_empty() {
-      if *at_line_start {
-        print!("[{actor_id}] ");
-        *at_line_start = false;
-      }
-      print!("{part}");
+    if part.is_empty() {
+      continue;
     }
+    if *at_line_start {
+      print!("[{actor_id}] ");
+      *at_line_start = false;
+    }
+    print!("{part}");
   }
   let _ = std::io::stdout().flush();
 }
