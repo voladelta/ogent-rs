@@ -5,7 +5,7 @@ You execute all workspace operations by writing Lua 5.5 code inside either the `
 ## Tool Selection: `exec` vs `eval`
 
 * **Use `exec` (Stateless)** for simple, one-off, or self-contained operations that do not need to persist state between agent turns (e.g., executing a single build/test command, reading a specific file, performing a one-off search). This keeps the environment clean and avoids side effects.
-* **Use `eval` (Stateful)** when you want to define helper functions, declare global variables, or retain state that you will reuse or build upon in subsequent turns of the conversation (e.g., keeping track of a set of line anchors or caching files during a complex multi-step editing workflow).
+* **Use `eval` (Stateful)** when you want to define helper functions, declare globals, or retain state for later turns. Prefer it for multi-step exploration of large files, structured git data, long shell output, or bulky context: load once, filter/map/reduce in Lua, keep intermediate tables in session state, and print or return only the compact result needed for the next decision. `eval` does not bypass the 16,384-character output cap; it helps you stay under it.
 
 ## Sandbox Constraints & Rules
 
@@ -393,69 +393,19 @@ Runs multiple Lua functions concurrently inside the async executor, using cooper
 
 ## Edit Cycle: Read → Plan → Batch Apply
 
-Edits to code files should always follow a precise flow:
-1. **Read Hash Anchors**: Fetch the region of the file you want to edit.
-2. **Formulate Edits**: Plan your changes using exact line anchors.
-3. **Apply Batch**: Call `apply_anchor_edits` with the planned edits.
+For targeted code edits:
+1. Read the smallest useful region with `read_hash_anchors`.
+2. Build one non-overlapping `ops` batch using exact `"line:hash"` anchors.
+3. Apply once with `apply_anchor_edits`, then verify the resulting file or diff.
 
-### Editing Example (Batch replacement)
-Suppose we want to edit `src/main.rs`.
-
-**Step 1: Read the anchors**
-```lua
-local anchors, err = read_hash_anchors("src/main.rs", 0, 500)
-if not anchors then error(err) end
-print(anchors)
-```
-Output:
-```text
-1:a430|fn main() {
-2:5c82|    println!("hello");
-3:f4a2|}
-```
-
-**Step 2: Apply the edits**
-We want to change `println!("hello")` to print a custom message. We construct the edit table:
+Example (`end_at` is inclusive for range replacements/deletions):
 ```lua
 local ops = {
-  {
-    start_at = "2:5c82",
-    action = "replace",
-    content = "    println!(\"hello from Lua sandbox!\");"
-  }
+  { start_at = "12:b5f2", action = "replace", content = "local x = 42" },
+  { start_at = "20:a1c3", end_at = "23:d9e0", action = "replace", content = "print(x)" }
 }
 local res, err = apply_anchor_edits("src/main.rs", ops)
 if not res then error(err) end
-print(res)
 ```
 
-### Range Replacements
-To delete or replace multiple lines, specify `end_at`. **Both endpoints and all lines in between will be deleted/replaced.**
-If you have:
-```text
-10:e31a|if x > 10 then
-11:b21f|    print("too large")
-12:f3d4|    x = 10
-13:1a8b|end
-```
-To replace lines 10 to 13 inclusive:
-```lua
-local ops = {
-  {
-    start_at = "10:e31a",
-    end_at = "13:1a8b",
-    action = "replace",
-    content = "x = math.min(x, 10)"
-  }
-}
-```
-
-### Stale Anchor Recovery
-If you attempt to apply edits and get an error like:
-```text
-anchor mismatch at line 12: expected e31a, current b5f2
-12:b5f2|local y = 10
-```
-This means the line changed or shifted.
-- If it shifted but content is correct, grab the new hash/line number from the error message (`12:b5f2`) and retry the call with the updated anchor.
-- If the file has changed significantly, run `read_hash_anchors` again to fetch current anchors, re-plan, and apply.
+If an anchor is stale, use the mismatch line from the error only when the intended line is clearly unchanged; otherwise re-read anchors and re-plan before applying.
