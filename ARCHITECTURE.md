@@ -193,6 +193,15 @@ skipping hidden paths.
 `glob` — searches for files matching a glob pattern and returns a Lua array of matching
 relative paths. Respects `.gitignore` rules.
 
+### [`src/tools/git.rs`](src/tools/git.rs)
+
+Structured git inspection tools: `git_status`, `git_diff`, `git_changes`, `git_show`, and
+`git_log`.
+
+Git path arguments are validated as workspace-relative paths before being passed to `git`.
+Agent-controlled output knobs are bounded: diff context is capped and `git_log` limits the
+number of commits returned.
+
 ### [`src/tools/search.rs`](src/tools/search.rs)
 
 Structured workspace inspection tools.
@@ -212,6 +221,10 @@ error.
 ### [`src/tools/skills.rs`](src/tools/skills.rs)
 
 `list_skills`, `load_skill`, `load_skill_asset` — delegates to `src/skills.rs`.
+
+`load_skill_asset` reads only inside discovered skill roots. It canonicalizes the skill root
+and requested asset path before the boundary check, so `..` traversal and symlink escapes are
+rejected before reading.
 
 ### [`src/workspace.rs`](src/workspace.rs)
 
