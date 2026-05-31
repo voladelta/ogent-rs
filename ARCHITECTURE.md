@@ -14,7 +14,7 @@ At the highest level, the process looks like this:
 2. The `Agent` runs a loop: it sends the conversation to an LLM, receives a response,
    executes any tool calls, and appends results back to the conversation.
 3. The loop ends when the model returns a message with no tool calls.
-4. The conversation is persisted as a session transcript and the process exits.
+4. Unless the run is temporary, the conversation is persisted as a session transcript and the process exits.
 
 The key design decision: **the LLM is given exactly two tools — `exec` and `eval` — both of
 which run Lua scripts**. All real capabilities (file I/O, shell commands, web search, subagents)
@@ -39,11 +39,13 @@ User prompt
 
 ### [`src/main.rs`](src/main.rs)
 
-Entry point. Parses CLI args (`--profile`, `--verbose`, and the task prompt), checks that
+Entry point. Parses CLI args (`--profile`, `--verbose`, `--temp`, `--resume`, and the task prompt), checks that
 `EXA_API_KEY` is set, loads config, builds the `Client`, and calls `run_agent_cli`.
 
-`run_agent_cli` constructs the initial message list via `prompts::build_initial_messages`,
-creates the `Agent`, attaches a `CliOutputSink`, runs the loop, and persists the session.
+`run_agent_cli` either constructs the initial message list via `prompts::build_initial_messages`
+or loads a previous transcript via `session::load_session_in` when `--resume` is set. It
+creates the `Agent`, attaches a `CliOutputSink`, runs the loop, and persists the session
+unless `--temp` is set.
 
 The `director` actor ID is assigned here — it is the root agent's identifier in all output.
 
@@ -261,10 +263,17 @@ the entire batch is rejected and the file is left unchanged.
 `persist_session_in(&workspace, &messages, &session_id)` serializes `messages` to JSONL at
 `{workspace_root}/.ogent/sessions/{session_id}.jsonl`. Each line is one `Message`.
 
+`load_session_in(&workspace, &session_id)` reads the same JSONL format for `--resume`. Resume
+loads the prior transcript directly and does not rebuild the initial system/tool messages.
+
 Session IDs are timestamped (`generate_session_id`) to avoid collisions.
 
+Session IDs are restricted to ASCII letters, digits, and `-` before read or write path
+construction.
+
 **Architecture Invariant:** session files are written only by the root CLI agent, never by
-subagents. Subagent conversations exist only in memory for the duration of the run.
+subagents. Temporary root runs and subagent conversations exist only in memory for the duration
+of the run.
 
 ### [`src/skills.rs`](src/skills.rs)
 

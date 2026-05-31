@@ -28,11 +28,29 @@ pub fn session_file_in(workspace: &Workspace, session_id: &str) -> PathBuf {
     .join(format!("{}.jsonl", session_id))
 }
 
+pub fn load_session_in(workspace: &Workspace, session_id: &str) -> Result<Vec<Message>> {
+  ensure_valid_session_id(session_id)?;
+  let path = session_file_in(workspace, session_id);
+  let data =
+    fs::read_to_string(&path).with_context(|| format!("session not found: {}", path.display()))?;
+  let mut messages = Vec::new();
+  for (idx, line) in data.lines().enumerate() {
+    if line.trim().is_empty() {
+      continue;
+    }
+    let message = serde_json::from_str::<Message>(line)
+      .with_context(|| format!("invalid session line {}", idx + 1))?;
+    messages.push(message);
+  }
+  Ok(messages)
+}
+
 pub fn persist_session_in(
   workspace: &Workspace,
   messages: &[Message],
   session_id: &str,
 ) -> Result<()> {
+  ensure_valid_session_id(session_id)?;
   if messages.is_empty() {
     return Ok(());
   }
@@ -47,6 +65,17 @@ pub fn persist_session_in(
     file.write_all(b"\n")?;
   }
   Ok(())
+}
+
+fn ensure_valid_session_id(session_id: &str) -> Result<()> {
+  if !session_id.is_empty()
+    && session_id
+      .chars()
+      .all(|ch| ch.is_ascii_alphanumeric() || ch == '-')
+  {
+    return Ok(());
+  }
+  anyhow::bail!("invalid session id: {session_id}");
 }
 
 fn elapsed_since_epoch() -> std::time::Duration {
@@ -86,5 +115,12 @@ mod tests {
       session_file_in(&ws, "abc"),
       PathBuf::from("/tmp/ogent-session-test/.ogent/sessions/abc.jsonl")
     );
+  }
+
+  #[test]
+  fn load_session_rejects_path_like_id() {
+    let ws = Workspace::from_root(PathBuf::from("/tmp/ogent-session-test"));
+    let err = load_session_in(&ws, "../outside").unwrap_err();
+    assert!(err.to_string().contains("invalid session id"));
   }
 }

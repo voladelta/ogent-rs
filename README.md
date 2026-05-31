@@ -34,6 +34,8 @@ ogent --profile kimi "Review the staged diff"
 | --- | --- |
 | `--profile <name>` | Model/profile selection, overriding the default in `config.yaml`. Available profiles: `ds-flash`, `ds-flash-max`, `ds-pro`, `ds-pro-max`, `kimi`, `glm`, `mimo`, `mimo-pro`. |
 | `-v`, `--verbose`  | Show full thinking reasoning trace (`[thinking]`), Lua execution code, and tool returns. Default mode only prints actor explanation reasons, task updates, and final assistant replies. |
+| `-t`, `--temp` | Run a temporary session. The transcript is not persisted on exit. |
+| `-r`, `--resume <session_id>` | Resume a previous session from `.ogent/sessions/{session_id}.jsonl`. If the session does not exist, `ogent` prints an error and exits. |
 
 ---
 
@@ -41,7 +43,8 @@ ogent --profile kimi "Review the staged diff"
 
 - **Agent Process**: Each invocation runs one standalone CLI agent process.
 - **System Prompt**: It relies on [PROMPT_SYSTEM.md](PROMPT_SYSTEM.md) for its prompt loop, state, and result formatting guidelines.
-- **Session Persistence**: CLI runs persist conversation transcripts to `.ogent/sessions/{session_id}.jsonl` on exit.
+- **Session Persistence**: CLI runs persist conversation transcripts to `.ogent/sessions/{session_id}.jsonl` on exit unless `--temp` is set.
+- **Session Resume**: Non-temporary runs print a resume hint (`ogent -r {session_id}`) after completion. `ogent -r {session_id}` loads that transcript and continues without rebuilding the initial system/tool messages. You may also pass a new prompt after the session ID to append a human turn before continuing.
 - **Run Completion**: A run terminates when the agent returns a final message without calling any more tools.
 
 ---
