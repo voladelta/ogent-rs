@@ -197,8 +197,9 @@ Structured workspace inspection tools.
 `.gitignore` is respected, skips unreadable/non-UTF-8/large files, and returns bounded
 structured match rows for Lua-side filtering instead of raw shell pipeline output.
 
-`outline` — lightweight Rust navigation outline for `.rs` files. It is a source scanner for
-agent navigation, not a compiler symbol table; unsupported file types return an error.
+`outline` — lightweight best-effort tree-sitter navigation outline for Rust, Go, and Python
+files. It is for agent navigation, not a compiler symbol table; unsupported file types return an
+error.
 
 ### [`src/tools/web.rs`](src/tools/web.rs)
 

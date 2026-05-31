@@ -178,9 +178,9 @@ Searches workspace text files for matching lines by exact string or regex. Autom
 - **Returns**: `(array_of_matches, nil)` or `(nil, error_string)`. Each match is one matching line with `path`, `line`, `column` (1-indexed byte column of the first match on that line), `text`, `before`, and `after`.
 
 #### `outline(path)`
-Returns a lightweight Rust navigation outline for a `.rs` file. This is a Rust-first source scan, not a compiler symbol table; unsupported file types return an error.
-- **Parameters**: `path` (string): Relative Rust file path.
-- **Returns**: `(array_of_entries, nil)` or `(nil, error_string)`. Each entry has `name`, `kind` (`function`, `struct`, `enum`, `trait`, `impl`, `mod`), `start_line`, optional `end_line`, and compact `signature`.
+Returns a lightweight best-effort tree-sitter navigation outline for `.rs`, `.go`, and `.py` files. This is for navigation, not a compiler symbol table; unsupported file types return an error.
+- **Parameters**: `path` (string): Relative Rust, Go, or Python file path.
+- **Returns**: `(array_of_entries, nil)` or `(nil, error_string)`. Each entry has `name`, `kind` (such as `function`, `method`, `struct`, `enum`, `trait`, `impl`, `mod`, `type`, `interface`, `class`), `start_line`, optional `end_line`, and compact `signature`.
 
 #### `shell{command=..., timeout_seconds=...}`
 Executes a command inside the workspace root.

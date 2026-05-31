@@ -3,6 +3,7 @@ use regex::{Regex, RegexBuilder};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
+use tree_sitter::{Language, Node, Parser, TreeCursor};
 
 use crate::tools::{ToolContext, parse_args, require_nonempty};
 
@@ -108,9 +109,7 @@ struct OutlineEntry {
 pub fn outline(ctx: ToolContext, args: &str) -> Result<String> {
   let args: OutlineArgs = parse_args(args)?;
   require_nonempty(&args.path, "path")?;
-  if Path::new(&args.path).extension().and_then(|e| e.to_str()) != Some("rs") {
-    bail!("outline currently supports Rust .rs files only");
-  }
+  let language = OutlineLanguage::from_path(&args.path)?;
 
   let path = ctx.workspace.workspace_path(&args.path)?;
   let meta = fs::metadata(&path).with_context(|| format!("stat {}", args.path))?;
@@ -123,22 +122,15 @@ pub fn outline(ctx: ToolContext, args: &str) -> Result<String> {
     );
   }
   let source = fs::read_to_string(&path).with_context(|| format!("read {}", args.path))?;
-  let lines: Vec<&str> = source.lines().collect();
-  let mut entries = Vec::new();
+  let mut parser = Parser::new();
+  parser
+    .set_language(&language.tree_sitter_language())
+    .with_context(|| format!("load tree-sitter parser for {}", language.name()))?;
+  let tree = parser
+    .parse(&source, None)
+    .with_context(|| format!("parse {}", args.path))?;
 
-  for (idx, line) in lines.iter().enumerate() {
-    let Some((kind, name)) = rust_item(line) else {
-      continue;
-    };
-    entries.push(OutlineEntry {
-      name,
-      kind,
-      start_line: idx + 1,
-      end_line: item_end_line(&lines, idx),
-      signature: compact_signature(line),
-    });
-  }
-
+  let entries = language.outline_entries(&source, tree.root_node());
   Ok(serde_json::to_string(&entries)?)
 }
 
@@ -205,91 +197,175 @@ fn search_file(
   Ok(())
 }
 
-fn rust_item(line: &str) -> Option<(String, String)> {
-  let trimmed = line.trim_start();
-  if trimmed.starts_with("//") || trimmed.starts_with("#[") {
-    return None;
-  }
-  let without_vis = trimmed
-    .strip_prefix("pub(crate) ")
-    .or_else(|| trimmed.strip_prefix("pub(super) "))
-    .or_else(|| trimmed.strip_prefix("pub "))
-    .unwrap_or(trimmed);
-  let without_async = without_vis.strip_prefix("async ").unwrap_or(without_vis);
-
-  for (keyword, kind) in [
-    ("fn ", "function"),
-    ("struct ", "struct"),
-    ("enum ", "enum"),
-    ("trait ", "trait"),
-    ("mod ", "mod"),
-  ] {
-    if let Some(rest) = without_async.strip_prefix(keyword) {
-      return Some((kind.to_string(), leading_ident(rest)?));
-    }
-  }
-  without_vis
-    .strip_prefix("impl")
-    .map(|rest| ("impl".to_string(), impl_name(rest)))
-}
-
-fn leading_ident(rest: &str) -> Option<String> {
-  let name: String = rest
-    .chars()
-    .skip_while(|ch| ch.is_whitespace())
-    .take_while(|ch| ch.is_alphanumeric() || *ch == '_')
-    .collect();
-  if name.is_empty() { None } else { Some(name) }
-}
-
-fn impl_name(rest: &str) -> String {
-  let head = rest
-    .split('{')
-    .next()
-    .unwrap_or(rest)
-    .split(" where ")
-    .next()
-    .unwrap_or(rest)
-    .trim();
-  if head.is_empty() {
-    "impl".to_string()
-  } else {
-    head.to_string()
-  }
-}
-
 fn compact_signature(line: &str) -> String {
   line.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-fn item_end_line(lines: &[&str], start_idx: usize) -> Option<usize> {
-  let mut depth = 0usize;
-  let mut saw_open = false;
-  for (idx, line) in lines.iter().enumerate().skip(start_idx) {
-    for ch in line.chars() {
-      match ch {
-        '{' => {
-          saw_open = true;
-          depth += 1;
-        }
-        '}' if depth > 0 => {
-          depth -= 1;
-          if saw_open && depth == 0 {
-            return Some(idx + 1);
-          }
-        }
-        _ => {}
-      }
-    }
-    if !saw_open && line.trim_end().ends_with(';') {
-      return Some(idx + 1);
+enum OutlineLanguage {
+  Rust,
+  Go,
+  Python,
+}
+
+impl OutlineLanguage {
+  fn from_path(path: &str) -> Result<Self> {
+    match Path::new(path).extension().and_then(|e| e.to_str()) {
+      Some("rs") => Ok(Self::Rust),
+      Some("go") => Ok(Self::Go),
+      Some("py") => Ok(Self::Python),
+      _ => bail!("outline supports .rs, .go, and .py files only"),
     }
   }
-  None
+
+  fn name(&self) -> &'static str {
+    match self {
+      Self::Rust => "Rust",
+      Self::Go => "Go",
+      Self::Python => "Python",
+    }
+  }
+
+  fn tree_sitter_language(&self) -> Language {
+    match self {
+      Self::Rust => tree_sitter_rust::LANGUAGE.into(),
+      Self::Go => tree_sitter_go::LANGUAGE.into(),
+      Self::Python => tree_sitter_python::LANGUAGE.into(),
+    }
+  }
+
+  fn outline_entries(&self, source: &str, root: Node<'_>) -> Vec<OutlineEntry> {
+    let mut entries = Vec::new();
+    let mut cursor = root.walk();
+    self.visit_node(source, root, &mut cursor, &mut entries);
+    entries
+  }
+
+  fn visit_node(
+    &self,
+    source: &str,
+    node: Node<'_>,
+    cursor: &mut TreeCursor<'_>,
+    entries: &mut Vec<OutlineEntry>,
+  ) {
+    if let Some(entry) = self.entry_for_node(source, node) {
+      entries.push(entry);
+    }
+
+    if cursor.goto_first_child() {
+      loop {
+        self.visit_node(source, cursor.node(), cursor, entries);
+        if !cursor.goto_next_sibling() {
+          break;
+        }
+      }
+      cursor.goto_parent();
+    }
+  }
+
+  fn entry_for_node(&self, source: &str, node: Node<'_>) -> Option<OutlineEntry> {
+    let (kind, name) = match self {
+      Self::Rust => rust_entry(source, node)?,
+      Self::Go => go_entry(source, node)?,
+      Self::Python => python_entry(source, node)?,
+    };
+    Some(OutlineEntry {
+      name,
+      kind: kind.to_string(),
+      start_line: node.start_position().row + 1,
+      end_line: Some(node.end_position().row + 1),
+      signature: node_signature(source, node),
+    })
+  }
 }
 
 fn default_true() -> bool {
   true
+}
+
+fn rust_entry<'a>(source: &str, node: Node<'a>) -> Option<(&'static str, String)> {
+  match node.kind() {
+    "function_item" => Some((
+      if has_ancestor_kind(node, "impl_item") {
+        "method"
+      } else {
+        "function"
+      },
+      node_name(source, node)?,
+    )),
+    "struct_item" => Some(("struct", node_name(source, node)?)),
+    "enum_item" => Some(("enum", node_name(source, node)?)),
+    "trait_item" => Some(("trait", node_name(source, node)?)),
+    "mod_item" => Some(("mod", node_name(source, node)?)),
+    "impl_item" => Some(("impl", rust_impl_name(source, node))),
+    _ => None,
+  }
+}
+
+fn go_entry(source: &str, node: Node<'_>) -> Option<(&'static str, String)> {
+  match node.kind() {
+    "function_declaration" => Some(("function", node_name(source, node)?)),
+    "method_declaration" => Some(("method", node_name(source, node)?)),
+    "type_declaration" => Some(("type", node_name(source, node)?)),
+    "type_spec" => {
+      let kind = match node.child_by_field_name("type").map(|n| n.kind()) {
+        Some("struct_type") => "struct",
+        Some("interface_type") => "interface",
+        _ => "type",
+      };
+      Some((kind, node_name(source, node)?))
+    }
+    _ => None,
+  }
+}
+
+fn python_entry(source: &str, node: Node<'_>) -> Option<(&'static str, String)> {
+  match node.kind() {
+    "function_definition" => Some(("function", node_name(source, node)?)),
+    "class_definition" => Some(("class", node_name(source, node)?)),
+    _ => None,
+  }
+}
+
+fn node_name(source: &str, node: Node<'_>) -> Option<String> {
+  node
+    .child_by_field_name("name")
+    .and_then(|name| name.utf8_text(source.as_bytes()).ok())
+    .map(|name| name.to_string())
+}
+
+fn rust_impl_name(source: &str, node: Node<'_>) -> String {
+  if let Some(type_node) = node.child_by_field_name("type")
+    && let Ok(name) = type_node.utf8_text(source.as_bytes())
+  {
+    return compact_signature(name);
+  }
+
+  node
+    .utf8_text(source.as_bytes())
+    .ok()
+    .and_then(|text| text.split('{').next())
+    .map(|head| compact_signature(head.trim_start_matches("impl").trim()))
+    .filter(|name| !name.is_empty())
+    .unwrap_or_else(|| "impl".to_string())
+}
+
+fn has_ancestor_kind(mut node: Node<'_>, kind: &str) -> bool {
+  while let Some(parent) = node.parent() {
+    if parent.kind() == kind {
+      return true;
+    }
+    node = parent;
+  }
+  false
+}
+
+fn node_signature(source: &str, node: Node<'_>) -> String {
+  let start = node.start_byte();
+  let line_end = source[start..]
+    .find('\n')
+    .map(|offset| start + offset)
+    .unwrap_or_else(|| node.end_byte());
+  compact_signature(&source[start..line_end.min(node.end_byte())])
 }
 
 #[cfg(test)]
@@ -354,7 +430,7 @@ mod tests {
   }
 
   #[test]
-  fn outline_returns_lightweight_rust_items() -> Result<()> {
+  fn outline_returns_tree_sitter_rust_items() -> Result<()> {
     let temp = tempfile::tempdir()?;
     let root = temp.path();
     fs::write(
@@ -378,8 +454,122 @@ mod tests {
     assert!(
       entries
         .iter()
-        .any(|e| e.kind == "function" && e.name == "new")
+        .any(|e| e.kind == "method" && e.name == "new")
     );
+
+    Ok(())
+  }
+
+  #[test]
+  fn outline_returns_tree_sitter_go_items() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let root = temp.path();
+    fs::write(
+      root.join("main.go"),
+      "package main\n\ntype Server struct {\n  addr string\n}\n\ntype Runner interface {\n  Run() error\n}\n\nfunc NewServer() *Server {\n  return &Server{}\n}\n\nfunc (s *Server) Start() {}\n",
+    )?;
+
+    let res = outline(test_context(root.to_path_buf()), r#"{"path":"main.go"}"#)?;
+    let entries: Vec<OutlineEntry> = serde_json::from_str(&res)?;
+    assert!(
+      entries
+        .iter()
+        .any(|e| e.kind == "struct" && e.name == "Server" && e.end_line == Some(5))
+    );
+    assert!(
+      entries
+        .iter()
+        .any(|e| e.kind == "interface" && e.name == "Runner")
+    );
+    assert!(
+      entries
+        .iter()
+        .any(|e| e.kind == "function" && e.name == "NewServer")
+    );
+    assert!(
+      entries
+        .iter()
+        .any(|e| e.kind == "method" && e.name == "Start")
+    );
+
+    Ok(())
+  }
+
+  #[test]
+  fn outline_returns_tree_sitter_python_items() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let root = temp.path();
+    fs::write(
+      root.join("app.py"),
+      "class Service:\n    def run(self):\n        return 1\n\nasync def build():\n    return Service()\n",
+    )?;
+
+    let res = outline(test_context(root.to_path_buf()), r#"{"path":"app.py"}"#)?;
+    let entries: Vec<OutlineEntry> = serde_json::from_str(&res)?;
+    assert!(
+      entries
+        .iter()
+        .any(|e| e.kind == "class" && e.name == "Service" && e.end_line == Some(3))
+    );
+    assert!(
+      entries
+        .iter()
+        .any(|e| e.kind == "function" && e.name == "run")
+    );
+    assert!(
+      entries
+        .iter()
+        .any(|e| e.kind == "function" && e.name == "build")
+    );
+    assert!(
+      entries
+        .iter()
+        .all(|e| !e.signature.contains("return Service()"))
+    );
+
+    Ok(())
+  }
+
+  #[test]
+  fn outline_is_best_effort_for_parse_errors() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let root = temp.path();
+    let source = "class Service:\n    def run(self):\n        return 1\n\nif True\n";
+    fs::write(root.join("app.py"), source)?;
+
+    let mut parser = Parser::new();
+    let language: Language = tree_sitter_python::LANGUAGE.into();
+    parser.set_language(&language)?;
+    let tree = parser
+      .parse(source, None)
+      .expect("python parser returns a tree");
+    assert!(tree.root_node().has_error());
+
+    let res = outline(test_context(root.to_path_buf()), r#"{"path":"app.py"}"#)?;
+    let entries: Vec<OutlineEntry> = serde_json::from_str(&res)?;
+    assert!(
+      entries
+        .iter()
+        .any(|e| e.kind == "class" && e.name == "Service")
+    );
+    assert!(
+      entries
+        .iter()
+        .any(|e| e.kind == "function" && e.name == "run")
+    );
+
+    Ok(())
+  }
+
+  #[test]
+  fn outline_rejects_unsupported_extensions() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let root = temp.path();
+    fs::write(root.join("notes.txt"), "hello\n")?;
+
+    let err = outline(test_context(root.to_path_buf()), r#"{"path":"notes.txt"}"#)
+      .expect_err("unsupported extension should fail");
+    assert!(err.to_string().contains(".rs, .go, and .py"));
 
     Ok(())
   }
