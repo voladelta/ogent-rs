@@ -180,8 +180,10 @@ size limit. `preview_anchor_edits` validates edits through the same anchored edi
 (max 600 s). The working directory is always `workspace.root()`, never arbitrary. The
 command is passed to the OS shell as a string.
 
-**Architecture Invariant:** the shell tool does not accept a `cwd` argument. The working
-directory is always the workspace root. This prevents shell commands from escaping the sandbox.
+**Architecture Invariant:** the shell tool does not accept a `cwd` argument. Shell commands
+start in the workspace root, and the tool rejects obvious `cd` commands outside the workspace
+or `/tmp`. This is a usability guard, not a full security sandbox: shell commands are
+privileged relative to file tools and should be used deliberately.
 
 ### [`src/tools/repo.rs`](src/tools/repo.rs)
 

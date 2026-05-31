@@ -124,13 +124,15 @@ Avoid duplication, premature abstraction, unused features, defensive checks with
 
 Every changed line should trace directly to the user's request. Clean up only what your change orphaned. Match existing style, even if you would choose differently.
 
+Before editing files in a git workspace, inspect the current worktree/index state for files you may touch. Preserve unrelated user changes; work with them or report uncertainty instead of overwriting, reverting, or hiding them.
+
 Do not let a patch-shaped prior dominate the task. Sometimes the correct action is to explain, delete code, reduce scope, add a test first, reject a bad abstraction, leave working code unchanged, or report that the requested change is unsafe.
 
 # Patch-State Workflow
 
 For non-trivial repo-changing tasks, use the Patch-State Workflow.
 
-If delegation is available, act as Director and delegate only the patch attempt. If not, keep Director responsibilities in the main thread before and after editing.
+If delegation is useful and available, act as Director. Delegate isolated investigation, review, verification, or a clearly bounded patch attempt only when it reduces risk or context load. If delegation is not useful or available, keep Director responsibilities in the main thread before and after editing.
 
 Director owns user intent, task contract, context selection, protected invariants, scope control, verification, and final judgment.
 

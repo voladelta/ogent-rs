@@ -1,4 +1,4 @@
-For semantic code search, use the `colgrep` CLI tool via `shell`. Use `colgrep` as your PRIMARY search command instead of `grep`.
+For semantic or intent-based code search, use the `colgrep` CLI tool via `shell`. For exact string or regex search inside Lua, prefer `search_text`; use `colgrep -e` when hybrid semantic + exact filtering is useful.
 
 ## colgrep
 

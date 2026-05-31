@@ -31,7 +31,7 @@ You execute all workspace operations by writing Lua 5.5 code inside either the `
 
 ## Global Functions Reference
 
-All functions return `(result, nil)` on success or `(nil, error_string)` on failure. Always handle errors cleanly.
+Most workspace functions return `(result, nil)` on success or `(nil, error_string)` on failure. Handle those errors cleanly. Exceptions are called out explicitly: `task_update` returns no result, while `agent` and `parallel` return their value directly or raise a Lua runtime error.
 
 > **Note on structured data**: Functions that return structured data (e.g. `glob`, `git_status`, `git_diff`, `git_changes`, `git_log`, `file_info`) automatically decode JSON into native Lua tables. There is no `json_decode` global — this keeps the abstraction clean and prevents scripts from relying on raw JSON parsing.
 
@@ -42,13 +42,13 @@ Returns metadata for a file without reading its contents.
 - **Parameters** (positional):
   - `path` (string): Relative path to the file.
 - **Returns**: `(table, nil)` with fields `path`, `size_bytes` (integer), `line_count` (integer), or `(nil, error)`
-- **Use this before `read_file` or `read_hash_anchors` to plan offset/limit when a file may be large.**
+- **Use this before `read_file`, `read_lines`, or `read_hash_anchors` to check whether a file is within the 1MB read limit.**
 - **Example**:
   ```lua
   local info, err = file_info("src/main.rs")
   if not info then error(err) end
   print(info.size_bytes, info.line_count)
-  -- If size_bytes > 1048576, read_file and read_hash_anchors will refuse it; page through with offset/limit instead
+  -- If size_bytes > 1048576, read_file, read_lines, and read_hash_anchors will refuse it.
   ```
 
 #### `read_file(path, offset, limit)`
@@ -58,7 +58,7 @@ Reads a file's contents from the workspace.
   - `offset` (integer, optional): 0-indexed byte offset. Defaults to `0`.
   - `limit` (integer, optional): Max bytes to read. Defaults to the remaining file size.
 - **Returns**: `(content_string, nil)` or `(nil, error)`
-- **Note**: For files larger than 1MB, first call `file_info` to get `size_bytes` and `line_count`, then page through using `offset`/`limit` or use `read_hash_anchors` with the same offsets.
+- **Note**: `read_file` refuses files larger than 1MB, even when `offset`/`limit` are provided. For larger files, use `file_info` to confirm size, then inspect with `search_text`, `outline` where supported, or bounded shell commands such as `sed -n`.
 - **Example**:
   ```lua
   local content, err = read_file("Cargo.toml", 0, 500)
@@ -67,9 +67,10 @@ Reads a file's contents from the workspace.
   ```
 
 #### `read_lines(path, start_line, end_line)`
-Reads a 1-indexed inclusive line range from a workspace file, under the same 1MB file size limit as `read_file`.
+Reads a 1-indexed inclusive line range from a workspace file. Refuses files larger than 1 MB; for larger files use `search_text` or bounded shell commands.
 - **Parameters**: `path` (string), `start_line` (integer, >= 1), `end_line` (integer, >= `start_line`)
 - **Returns**: `(content_string, nil)` or `(nil, error)`
+- **Note**: `read_lines` refuses files larger than 1MB. For larger files, use `search_text`, `outline` where supported, or bounded shell commands.
 
 #### `write_file{path=..., content=..., overwrite_existing=...}`
 Writes content to a file. **Replaces the entire file.**
@@ -94,8 +95,9 @@ Appends content to a file. Creates the file if it does not exist.
 
 #### `read_hash_anchors(path, offset, limit)`
 Reads a file with each line prefixed by its 1-indexed line number and 4-character FNV-1a hash (e.g. `15:af63|line content`). Use this to obtain anchors before editing.
-- **Parameters** (positional): Same as `read_file` (under the same 1MB size limit constraint).
+  - **Parameters** (positional): Same as `read_file`. Refuses files larger than 1 MB even when `offset`/`limit` are provided.
 - **Returns**: `(anchors_string, nil)` or `(nil, error)`
+- **Note**: `read_hash_anchors` refuses files larger than 1MB, even when `offset`/`limit` are provided.
 - **Example**:
   ```lua
   local anchors, err = read_hash_anchors("src/main.rs", 0, 1000)
@@ -340,7 +342,7 @@ Returns structured commit history for a set of paths.
 ### 4. Skills Discovery & Loading
 
 #### `list_skills()`
-Lists all available skill prompt templates from `.ogent/skills/` and `~/.ogent/skills/`.
+Lists all available skill prompt templates from configured repo and home skill roots (`.skills/`, `.agents/skills/`, `.ogent/skills/`, `~/.agents/skills/`, and `~/.ogent/skills/`).
 - **Returns**: `(markdown_string, nil)` or `(nil, error)`
 
 #### `load_skill(name)`
@@ -390,7 +392,7 @@ Sends a task status or progress update message. In non-verbose mode, these updat
 - **Parameters** (positional):
   - `status` (string): Current phase or state name (e.g. `'init'`, `'review'`, `'fixing'`).
   - `summary` (string): Human-readable progress description or update summary.
-- **Returns**: `(nil, nil)`
+- **Returns**: no result.
 
 #### `agent{role=..., task=..., profile=...}`
 Spawns a subagent in a fresh, isolated Lua VM sandbox sharing the parent's general configuration and system prompt, augmented by the subagent's specific role.
@@ -398,14 +400,19 @@ Spawns a subagent in a fresh, isolated Lua VM sandbox sharing the parent's gener
   - `task` (string): The description of the task for the subagent to perform.
   - `role` (string, optional): Soft-skill profile name, which dynamically loads custom instructions from `PROMPT_ROLE_<ROLE>.md` (e.g. `RUST_GURU`, `GO_GURU`). Defaults to `'subagent'`.
   - `profile` (string, optional): Overrides the model profile (e.g. `'kimi'`). Defaults to the parent's model profile.
-- **Returns**: `(response_markdown_string, nil)` or `(nil, error)`
+- **Returns**: `response_markdown_string` directly, or raises a Lua runtime error.
+- **Example**:
+  ```lua
+  local response = agent{role = "reviewer", task = "Review the staged diff"}
+  print(response)
+  ```
 
 #### `parallel{func1, func2, ...}`
 Runs multiple Lua functions concurrently inside the async executor, using cooperative multitasking, and waits for all of them to complete.
 - **Parameters** (array/list of functions):
   - An array of anonymous functions or function names to execute in parallel.
-- **Returns**: `(array_of_results, nil)` or `(nil, error)`.
-- **Error behavior**: If **any** task fails, the entire batch aborts and returns that task's error. To tolerate partial failures and collect all results regardless, wrap individual task bodies with `pcall`:
+- **Returns**: `array_of_results` directly, or raises a Lua runtime error.
+- **Error behavior**: If **any** task fails, the entire batch aborts with that task's error. To tolerate partial failures and collect all results regardless, wrap individual task bodies with `pcall`:
   ```lua
   local results = parallel({
     function()
@@ -421,12 +428,13 @@ Runs multiple Lua functions concurrently inside the async executor, using cooper
 
 ---
 
-## Edit Cycle: Read → Plan → Batch Apply
+## Edit Cycle: Inspect → Read → Plan → Batch Apply
 
 For targeted code edits:
-1. Read the smallest useful region with `read_hash_anchors`.
-2. Build one non-overlapping `ops` batch using exact `"line:hash"` anchors.
-3. Apply once with `apply_anchor_edits`, then verify the resulting file or diff.
+1. Inspect the worktree/index state for files you may touch.
+2. Read the smallest useful region with `read_hash_anchors`.
+3. Build one non-overlapping `ops` batch using exact `"line:hash"` anchors.
+4. Apply once with `apply_anchor_edits`, then verify the resulting file or diff.
 
 Example (`end_at` is inclusive for range replacements/deletions):
 ```lua
