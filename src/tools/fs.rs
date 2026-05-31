@@ -1,10 +1,15 @@
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 use serde_json::json;
+use similar::TextDiff;
 use std::fs;
 
 use crate::hashline::{apply_anchor_edits as hashline_apply_anchor_edits, render_hashlines};
 use crate::tools::{ToolContext, parse_args, require_nonempty};
+
+const PREVIEW_DIFF_MAX_CHARS: usize = 10_000;
+const PREVIEW_DIFF_TRUNCATED_MARKER: &str =
+  "\n... preview truncated to stay under the tool output cap ...\n";
 
 #[derive(Deserialize)]
 pub struct ReadFileArgs {
@@ -18,6 +23,13 @@ pub struct ReadHashAnchorsArgs {
   pub path: String,
   pub offset: Option<usize>,
   pub limit: Option<usize>,
+}
+
+#[derive(Deserialize)]
+pub struct ReadLinesArgs {
+  pub path: String,
+  pub start_line: usize,
+  pub end_line: usize,
 }
 
 pub fn read_file(ctx: ToolContext, args: &str) -> Result<String> {
@@ -38,6 +50,38 @@ pub fn read_file(ctx: ToolContext, args: &str) -> Result<String> {
   let limit = args.limit.unwrap_or(bytes.len()).min(bytes.len() - offset);
   let slice = &bytes[offset..(offset + limit)];
   Ok(String::from_utf8_lossy(slice).into_owned())
+}
+
+pub fn read_lines(ctx: ToolContext, args: &str) -> Result<String> {
+  let args: ReadLinesArgs = parse_args(args)?;
+  require_nonempty(&args.path, "path")?;
+  if args.start_line == 0 {
+    bail!("start_line must be >= 1");
+  }
+  if args.end_line < args.start_line {
+    bail!("end_line must be >= start_line");
+  }
+  let path = ctx.workspace.readable_path(&args.path)?;
+  let meta = fs::metadata(&path).with_context(|| format!("stat {}", args.path))?;
+  if meta.len() > (1 << 20) {
+    bail!(
+      "file {} exceeds size limit ({} > {} bytes)",
+      args.path,
+      meta.len(),
+      1 << 20
+    );
+  }
+  let source = fs::read_to_string(&path).with_context(|| format!("read {}", args.path))?;
+  let lines: Vec<&str> = source.split_inclusive('\n').collect();
+  if args.end_line > lines.len() {
+    bail!(
+      "line range {}-{} is outside file with {} lines",
+      args.start_line,
+      args.end_line,
+      lines.len()
+    );
+  }
+  Ok(lines[(args.start_line - 1)..args.end_line].concat())
 }
 
 #[derive(Deserialize)]
@@ -127,6 +171,44 @@ pub fn apply_anchor_edits(ctx: ToolContext, args: &str) -> Result<String> {
   Ok(format!("Applied {} edits to {}", args.ops.len(), args.path))
 }
 
+pub fn preview_anchor_edits(ctx: ToolContext, args: &str) -> Result<String> {
+  let args: EditHashAnchorsArgs = parse_args(args)?;
+  require_nonempty(&args.path, "path")?;
+  if args.ops.is_empty() {
+    bail!("ops array is required");
+  }
+  let path = ctx.workspace.workspace_path(&args.path)?;
+  let source = fs::read_to_string(&path).with_context(|| format!("read {}", args.path))?;
+  let out = hashline_apply_anchor_edits(&source, &args.ops)?;
+  Ok(render_compact_unified_diff(&args.path, &source, &out))
+}
+
+fn render_compact_unified_diff(path: &str, before: &str, after: &str) -> String {
+  if before == after {
+    return format!("No changes to {path}\n");
+  }
+
+  let next_header = format!("{path} (preview)");
+  let diff = TextDiff::from_lines(before, after);
+  let preview = diff
+    .unified_diff()
+    .context_radius(3)
+    .header(path, &next_header)
+    .to_string();
+  truncate_preview(preview)
+}
+
+fn truncate_preview(preview: String) -> String {
+  let marker_len = PREVIEW_DIFF_TRUNCATED_MARKER.chars().count();
+  let max_body = PREVIEW_DIFF_MAX_CHARS.saturating_sub(marker_len);
+  if preview.chars().count() <= PREVIEW_DIFF_MAX_CHARS {
+    return preview;
+  }
+  let mut out: String = preview.chars().take(max_body).collect();
+  out.push_str(PREVIEW_DIFF_TRUNCATED_MARKER);
+  out
+}
+
 #[derive(Deserialize)]
 struct AppendFileArgs {
   path: String,
@@ -181,4 +263,28 @@ pub fn file_info(ctx: ToolContext, args: &str) -> Result<String> {
     "size_bytes": size_bytes,
     "line_count": line_count,
   }))?)
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn preview_diff_truncates_with_visible_marker() {
+    let before = (0..300)
+      .map(|i| format!("before-{i}-{}", "x".repeat(80)))
+      .collect::<Vec<_>>()
+      .join("\n")
+      + "\n";
+    let after = (0..300)
+      .map(|i| format!("after-{i}-{}", "y".repeat(80)))
+      .collect::<Vec<_>>()
+      .join("\n")
+      + "\n";
+
+    let preview = render_compact_unified_diff("large.rs", &before, &after);
+
+    assert!(preview.contains(PREVIEW_DIFF_TRUNCATED_MARKER));
+    assert!(preview.chars().count() <= PREVIEW_DIFF_MAX_CHARS);
+  }
 }

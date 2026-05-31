@@ -52,7 +52,7 @@ The outer LLM agent loop is strictly limited to exactly two tools:
 * `exec`: Executes a stateless, one-off Lua 5.5 script.
 * `eval`: Executes a stateful Lua 5.5 script within the persistent session (retains globals/functions).
 
-Within the Lua sandbox, scripts invoke workspace operations via global functions: filesystem editing (`read_file`, `write_file`, `apply_anchor_edits`), repo exploration (`repo_map`, `glob`), shell, structured git operations (`git_status`, `git_diff`, `git_changes`, `git_show`, `git_log`), web search, skills loading, and subagent DSL (`agent`, `parallel`, `task_update`). See PROMPT_TOOLSET.md for the full API.
+Within the Lua sandbox, scripts invoke workspace operations via global functions: filesystem editing (`read_file`, `read_lines`, `write_file`, `apply_anchor_edits`, `preview_anchor_edits`), repo exploration (`repo_map`, `glob`, `search_text`, `outline`), shell, structured git operations (`git_status`, `git_diff`, `git_changes`, `git_show`, `git_log`), web search, skills loading, and subagent DSL (`agent`, `parallel`, `task_update`). See PROMPT_TOOLSET.md for the full API.
 
 
 ---
@@ -75,6 +75,11 @@ colgrep -e "<exact text>" "<intent>"
 
 # Exact string search via ripgrep
 rg "<exact symbol>"
+```
+
+Agent-facing exact/regex search inside `ogent` Lua:
+```lua
+search_text{pattern = "apply_anchor_edits", paths = {"src"}}
 ```
 
 ## Development Commands

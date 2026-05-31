@@ -299,6 +299,13 @@ fn register_tools_in_lua(lua: &Lua, ctx: ToolContext) -> Result<()> {
     lua,
     globals,
     ctx,
+    "read_lines",
+    crate::tools::fs::read_lines
+  );
+  register_sync!(
+    lua,
+    globals,
+    ctx,
     "write_file",
     crate::tools::fs::write_file
   );
@@ -324,10 +331,25 @@ fn register_tools_in_lua(lua: &Lua, ctx: ToolContext) -> Result<()> {
     "apply_anchor_edits",
     crate::tools::fs::apply_anchor_edits
   );
+  register_sync!(
+    lua,
+    globals,
+    ctx,
+    "preview_anchor_edits",
+    crate::tools::fs::preview_anchor_edits
+  );
 
   // Register repo tools
   register_sync!(lua, globals, ctx, "repo_map", crate::tools::repo::repo_map);
   register_sync!(lua, globals, ctx, "glob", crate::tools::repo::glob);
+  register_sync!(
+    lua,
+    globals,
+    ctx,
+    "search_text",
+    crate::tools::search::search_text
+  );
+  register_sync!(lua, globals, ctx, "outline", crate::tools::search::outline);
 
   // Register git tools
   register_async!(
@@ -399,14 +421,18 @@ fn register_tools_in_lua(lua: &Lua, ctx: ToolContext) -> Result<()> {
 local json_decode = ...
 local _t = {}
 _t.read_file = read_file
+_t.read_lines = read_lines
 _t.append_file = append_file
 _t.file_info = file_info
 _t.read_hash_anchors = read_hash_anchors
 _t.apply_anchor_edits = apply_anchor_edits
+_t.preview_anchor_edits = preview_anchor_edits
 _t.load_skill = load_skill
 _t.list_skills = list_skills
 _t.load_skill_asset = load_skill_asset
 _t.glob = glob
+_t.search_text = search_text
+_t.outline = outline
 _t.git_status = git_status
 _t.git_diff = git_diff
 _t.git_changes = git_changes
@@ -415,6 +441,9 @@ _t.git_log = git_log
 
 function read_file(path, offset, limit)
   return _t.read_file({path=path, offset=offset, limit=limit})
+end
+function read_lines(path, start_line, end_line)
+  return _t.read_lines({path=path, start_line=start_line, end_line=end_line})
 end
 function append_file(path, content)
   return _t.append_file({path=path, content=content})
@@ -430,6 +459,9 @@ end
 function apply_anchor_edits(path, ops)
   return _t.apply_anchor_edits({path=path, ops=ops})
 end
+function preview_anchor_edits(path, ops)
+  return _t.preview_anchor_edits({path=path, ops=ops})
+end
 function load_skill(name)
   return _t.load_skill({name=name})
 end
@@ -441,6 +473,16 @@ function load_skill_asset(root, path)
 end
 function glob(pattern)
   local ok, err = _t.glob({pattern=pattern})
+  if ok then ok = json_decode(ok) end
+  return ok, err
+end
+function search_text(opts)
+  local ok, err = _t.search_text(opts or {})
+  if ok then ok = json_decode(ok) end
+  return ok, err
+end
+function outline(path)
+  local ok, err = _t.outline({path=path})
   if ok then ok = json_decode(ok) end
   return ok, err
 end
@@ -739,6 +781,42 @@ mod tests {
   }
 
   #[tokio::test]
+  async fn test_read_lines_and_preview_anchor_edits_from_lua() {
+    let ctx = test_context();
+    let path = "temp_test_preview_anchors.txt";
+    let full_path = ctx.workspace.workspace_path(path).unwrap();
+    std::fs::write(&full_path, "alpha\nbeta\ngamma\ndelta\n").unwrap();
+
+    let lua_code = r#"
+      local lines, err = read_lines('temp_test_preview_anchors.txt', 2, 3)
+      if not lines then error(err) end
+      local anchors, err = read_hash_anchors('temp_test_preview_anchors.txt')
+      if not anchors then error(err) end
+      local hash2 = anchors:match("2:(%w+)|beta")
+      local ops = {
+        { start_at = "2:" .. hash2, action = "replace", content = "BETA" }
+      }
+      local preview, err = preview_anchor_edits('temp_test_preview_anchors.txt', ops)
+      if not preview then error(err) end
+      local after, err = read_file('temp_test_preview_anchors.txt')
+      if not after then error(err) end
+      return {lines = lines, preview = preview, after = after}
+    "#;
+
+    let res = exec(ctx, lua_code).await.unwrap();
+    let _ = std::fs::remove_file(full_path);
+
+    assert!(res.contains("beta\\ngamma\\n"), "Result was: {}", res);
+    assert!(res.contains("-beta"), "Result was: {}", res);
+    assert!(res.contains("+BETA"), "Result was: {}", res);
+    assert!(
+      res.contains("alpha\\nbeta\\ngamma\\ndelta\\n"),
+      "Result was: {}",
+      res
+    );
+  }
+
+  #[tokio::test]
   async fn test_skills_from_lua() {
     let temp = std::env::temp_dir().join(format!(
       "ogent-lua-skills-test-{}",
@@ -852,6 +930,49 @@ mod tests {
     let _ = std::fs::remove_file(temp_file);
 
     assert!(res.contains("temp_test_glob.txt"), "Res was: {res}");
+  }
+
+  #[tokio::test]
+  async fn test_search_text_and_outline_from_lua() {
+    let ctx = test_context();
+    let temp_file = ctx
+      .workspace
+      .workspace_path("temp_test_search_outline.rs")
+      .unwrap();
+    std::fs::write(
+      &temp_file,
+      "pub struct Sample {\n  value: i32,\n}\n\nimpl Sample {\n  pub fn new() -> Self {\n    Self { value: 1 }\n  }\n}\n",
+    )
+    .unwrap();
+
+    let code = r#"
+      local matches, err = search_text{pattern = "Sample", paths = {"temp_test_search_outline.rs"}, max_matches = 2}
+      if not matches then error(err) end
+      local entries, err = outline("temp_test_search_outline.rs")
+      if not entries then error(err) end
+      return {
+        match_path = matches[1].path,
+        match_line = matches[1].line,
+        outline_kind = entries[1].kind,
+        outline_name = entries[1].name
+      }
+    "#;
+    let res = exec(ctx, code).await.unwrap();
+    let _ = std::fs::remove_file(temp_file);
+
+    assert!(
+      res.contains("temp_test_search_outline.rs"),
+      "Res was: {res}"
+    );
+    assert!(res.contains("\"match_line\": 1"), "Res was: {res}");
+    assert!(
+      res.contains("\"outline_kind\": \"struct\""),
+      "Res was: {res}"
+    );
+    assert!(
+      res.contains("\"outline_name\": \"Sample\""),
+      "Res was: {res}"
+    );
   }
 
   #[tokio::test]

@@ -66,6 +66,11 @@ Reads a file's contents from the workspace.
   print(content)
   ```
 
+#### `read_lines(path, start_line, end_line)`
+Reads a 1-indexed inclusive line range from a workspace file, under the same 1MB file size limit as `read_file`.
+- **Parameters**: `path` (string), `start_line` (integer, >= 1), `end_line` (integer, >= `start_line`)
+- **Returns**: `(content_string, nil)` or `(nil, error)`
+
 #### `write_file{path=..., content=..., overwrite_existing=...}`
 Writes content to a file. **Replaces the entire file.**
 - **Parameters** (table):
@@ -122,6 +127,11 @@ Applies a batch array of range-based edits (replacements, insertions, deletions)
   if not res then error(err) end
   ```
 
+#### `preview_anchor_edits(path, ops)`
+Validates the same anchored edit operations as `apply_anchor_edits` and returns a bounded unified diff preview without writing the file.
+- **Parameters**: Same as `apply_anchor_edits`.
+- **Returns**: `(diff_string, nil)` or `(nil, error)`. Long previews are truncated with a visible marker.
+
 ---
 
 ### 2. Workspace Exploration & Shell
@@ -156,6 +166,22 @@ Returns a Lua array of relative file paths matching a glob pattern. Automaticall
   for _, path in ipairs(files) do print(path) end
   ```
 
+#### `search_text{pattern=..., paths=..., regex=..., case_sensitive=..., context=..., max_matches=...}`
+Searches workspace text files for matching lines by exact string or regex. Automatically respects `.gitignore`; skips unreadable, binary/non-UTF-8, and very large files. This is not semantic search.
+- **Parameters**:
+  - `pattern` (string, required): Text or regex pattern.
+  - `paths` (array of strings, optional): Relative files/directories to search. Defaults to `{ "." }`.
+  - `regex` (boolean, optional): Treat `pattern` as a regex. Defaults to `false`.
+  - `case_sensitive` (boolean, optional): Defaults to `true`.
+  - `context` (integer, optional): Context lines before/after each match. Defaults to `0`, capped at `5`.
+  - `max_matches` (integer, optional): Defaults to `100`, capped at `500`.
+- **Returns**: `(array_of_matches, nil)` or `(nil, error_string)`. Each match is one matching line with `path`, `line`, `column` (1-indexed byte column of the first match on that line), `text`, `before`, and `after`.
+
+#### `outline(path)`
+Returns a lightweight Rust navigation outline for a `.rs` file. This is a Rust-first source scan, not a compiler symbol table; unsupported file types return an error.
+- **Parameters**: `path` (string): Relative Rust file path.
+- **Returns**: `(array_of_entries, nil)` or `(nil, error_string)`. Each entry has `name`, `kind` (`function`, `struct`, `enum`, `trait`, `impl`, `mod`), `start_line`, optional `end_line`, and compact `signature`.
+
 #### `shell{command=..., timeout_seconds=...}`
 Executes a command inside the workspace root.
 - **Parameters** (table):
@@ -165,8 +191,11 @@ Executes a command inside the workspace root.
 - **Rules & Guidelines**:
   - `cd` commands must target paths inside the workspace root or `/tmp`.
   - **Guidelines**:
+    - Prefer structured Lua globals over shell pipelines when they exist. Use tools like `search_text`, `outline`, `glob`, `git_status`, `git_diff`, `read_lines`, and `file_info` for inspection that needs filtering, counting, line mapping, or reuse in later Lua code.
     - For copying, moving/renaming, or deleting files/directories, run standard shell commands (such as `cp`, `mv`, `rm`) within the workspace.
     - For creating new files or editing existing files, prefer the built-in `write_file` and `apply_anchor_edits` functions over shell command redirects (e.g. `echo ... > file`) or shell-based text editors.
+    - Use `shell` for build/test commands, project-specific CLIs, and one-off commands whose raw output is already the desired result.
+    - Avoid `cmd | grep | awk | head` when a structured tool can return a bounded Lua table; structured results are easier to filter in `eval` and less likely to hit the 16,384-character output cap.
     - **For semantic code search, use `colgrep` via `shell`.** See the colgrep guide (injected separately) for full usage. Quick example: `shell{command = "colgrep 'error handling' src/"}`.
 - **Example**:
   ```lua
@@ -257,6 +286,7 @@ Convenience function that returns **all** status entries (both staged and worktr
   - `diff` (object or nil): worktree changes (worktree vs base, or index vs worktree if no `base`), same shape as `git_diff` deltas.
   - `staged_diff` (object or nil): staged changes (index vs base, or HEAD vs index if no `base`), same shape.
 - **Output size warning**: Full hunks on large changes can exceed the 16,384-character stdout cap. For large refactors, use `stat_only=true` first to scope the change, then call `git_diff` on specific files.
+- **Usage note**: `git_changes` is useful for quick small/medium change review; for large diffs, prefer targeted `git_status` plus `git_diff{paths=..., stat_only=true}` before requesting hunks.
 - **Example**:
   ```lua
   local changes, err = git_changes()

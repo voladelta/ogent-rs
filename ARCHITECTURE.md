@@ -26,8 +26,9 @@ User prompt
   └─> Agent (turn loop)
         └─> LLM (exec / eval only)
               └─> Lua VM
-                     ├─> read_file, write_file, apply_anchor_edits
-                     ├─> shell, glob, repo_map
+                     ├─> read_file, read_lines, write_file, apply_anchor_edits
+                     ├─> preview_anchor_edits, shell, glob, repo_map
+                     ├─> search_text, outline
                      ├─> git_status, git_diff, git_changes, git_show, git_log
                      ├─> web_search, web_read
                      ├─> list_skills, load_skill
@@ -161,13 +162,15 @@ that is truncated with a visible marker, preventing runaway tool results from fi
 
 ### [`src/tools/fs.rs`](src/tools/fs.rs)
 
-Filesystem tools: `read_file`, `write_file`, `append_file`, `file_info`, `read_hash_anchors`,
-`apply_anchor_edits`.
+Filesystem tools: `read_file`, `read_lines`, `write_file`, `append_file`, `file_info`,
+`read_hash_anchors`, `apply_anchor_edits`, `preview_anchor_edits`.
 
 All path arguments go through `workspace.workspace_path()` or `workspace.readable_path()`
 before any I/O occurs. No tool in this module ever constructs an absolute path independently.
 
-Files read via `read_file` and `read_hash_anchors` are subject to a 1 MB size limit.
+Files read via `read_file`, `read_lines`, and `read_hash_anchors` are subject to a 1 MB
+size limit. `preview_anchor_edits` validates edits through the same anchored edit engine as
+`apply_anchor_edits`, but returns a bounded unified diff without writing.
 
 ### [`src/tools/shell.rs`](src/tools/shell.rs)
 
@@ -185,6 +188,17 @@ skipping hidden paths.
 
 `glob` — searches for files matching a glob pattern and returns a Lua array of matching
 relative paths. Respects `.gitignore` rules.
+
+### [`src/tools/search.rs`](src/tools/search.rs)
+
+Structured workspace inspection tools.
+
+`search_text` — exact or regex text search over workspace files. It walks with `ignore` so
+`.gitignore` is respected, skips unreadable/non-UTF-8/large files, and returns bounded
+structured match rows for Lua-side filtering instead of raw shell pipeline output.
+
+`outline` — lightweight Rust navigation outline for `.rs` files. It is a source scanner for
+agent navigation, not a compiler symbol table; unsupported file types return an error.
 
 ### [`src/tools/web.rs`](src/tools/web.rs)
 

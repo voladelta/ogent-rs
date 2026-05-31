@@ -4,6 +4,7 @@ pub mod fs;
 pub mod git;
 pub mod lua;
 pub mod repo;
+pub mod search;
 pub mod shell;
 pub mod skills;
 pub mod web;
