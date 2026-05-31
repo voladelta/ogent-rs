@@ -86,18 +86,11 @@ Appends content to a file. Creates the file if it does not exist.
   - `path` (string): Relative path to the file.
   - `content` (string): Content to append.
 - **Returns**: `(success_msg, nil)` or `(nil, error)`
-- **Use this for**: log files, progress tracking, writing output incrementally, or any case where you want to add to a file without reading its current contents first.
-- **Example**:
-  ```lua
-  local res, err = append_file("scratch/log.txt", "step 1 done\n")
-  if not res then error(err) end
-  ```
 
 #### `read_hash_anchors(path, offset, limit)`
 Reads a file with each line prefixed by its 1-indexed line number and 4-character FNV-1a hash (e.g. `15:af63|line content`). Use this to obtain anchors before editing.
 - **Parameters** (positional): Same as `read_file` (under the same 1MB size limit constraint).
 - **Returns**: `(anchors_string, nil)` or `(nil, error)`
-- **Side Effect**: Saves the file path in a global session variable so subsequent `apply_anchor_edits` calls do not require repeating the path.
 - **Example**:
   ```lua
   local anchors, err = read_hash_anchors("src/main.rs", 0, 1000)
@@ -105,10 +98,10 @@ Reads a file with each line prefixed by its 1-indexed line number and 4-characte
   print(anchors)
   ```
 
-#### `apply_anchor_edits(ops)` or `apply_anchor_edits(path, ops)`
+#### `apply_anchor_edits(path, ops)`
 Applies a batch array of range-based edits (replacements, insertions, deletions) to a file.
 - **Parameters**:
-  - `path` (string, optional): Relative path. If omitted, uses the path from the last `read_hash_anchors` call.
+  - `path` (string): Relative path to the file.
   - `ops` (array of tables): Each table in the array represents an edit operation:
     - `start_at` (string): The start line anchor in `"line:hash"` format (e.g. `"12:b5f2"`). Do not include the `|content` part.
     - `end_at` (string, optional): The end line anchor in `"line:hash"` format for multi-line replacements or deletions.
@@ -155,18 +148,12 @@ Returns a Lua array of relative file paths matching a glob pattern. Automaticall
   - Results are sorted alphabetically.
   - Only files are returned — directories are never included.
   - Use `repo_map` to get a quick visual overview, and `glob` when you need a list of file paths to iterate over programmatically.
-- **Examples**:
+- **Example**:
   ```lua
   -- Find all Rust source files
   local files, err = glob("**/*.rs")
   if not files then error(err) end
   for _, path in ipairs(files) do print(path) end
-  ```
-  ```lua
-  -- Find files in a specific directory
-  local files, err = glob("src/tools/*.rs")
-  if not files then error(err) end
-  return files
   ```
 
 #### `shell{command=..., timeout_seconds=...}`
@@ -293,12 +280,6 @@ Reads a file at a specific git ref without checking it out. Supports both table 
 - **Example**:
   ```lua
   local content, err = git_show{path="src/main.rs", ref="HEAD~1"}
-  if not content then error(err) end
-  print(content)
-  ```
-- **Example (staged)**:
-  ```lua
-  local content, err = git_show{path="src/main.rs", ref="staged"}
   if not content then error(err) end
   print(content)
   ```

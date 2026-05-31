@@ -65,27 +65,6 @@ colgrep -n 10 "<query>"                           # Show 10 context lines (defau
 - Multiple `--include` patterns use OR logic (matches if file matches any pattern)
 - Brace expansion is supported: `*.{rs,md,py}` expands to match all three types
 
-### When to Use What
-
-| Task                            | Tool                                         |
-| ------------------------------- | -------------------------------------------- |
-| Find code by intent/description | `colgrep "query" -k 10`                      |
-| Explore/understand a system     | `colgrep "query" -k 25` (increase k)         |
-| Search by pattern only          | `colgrep -e "pattern"` (no semantic query)   |
-| Know text exists, need context  | `colgrep -e "text" "semantic query"`         |
-| Literal text with special chars | `colgrep -e "foo[0]" -F "semantic query"`    |
-| Whole word match                | `colgrep -e "test" -w "testing utilities"`   |
-| Search in a specific file       | `colgrep "query" ./src/main.rs`              |
-| Search in multiple files        | `colgrep "query" ./src/main.rs ./src/lib.rs` |
-| Search specific file type       | `colgrep --include="*.ext" "query"`          |
-| Search multiple file types      | `colgrep --include="*.{rs,md,py}" "query"`   |
-| Exclude test files              | `colgrep --exclude="*_test.go" "query"`      |
-| Exclude vendor directories      | `colgrep --exclude-dir=vendor "query"`       |
-| Search in specific directories  | `colgrep --include="src/**/*.rs" "query"`    |
-| Search multiple directories     | `colgrep "query" ./src ./lib ./api`          |
-| Search CI/CD configs            | `colgrep --include="**/.github/**/*" "q" .`  |
-| View full function content      | `colgrep -c "query"`                         |
-
 ### Key Rules
 
 1. **Increase `--results`** (or `-k`) when exploring (20-30 results)

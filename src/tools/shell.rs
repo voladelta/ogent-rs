@@ -14,6 +14,9 @@ struct ShellArgs {
   timeout_seconds: u64,
 }
 
+/// Pre-flight UX check: simulate `cd` tracking to reject obvious out-of-bound `cd`s early.
+/// This is NOT a security boundary. The actual `Command` always runs with
+/// `.current_dir(workspace.root())`, so the process is sandboxed regardless of this check.
 fn validate_cd_commands(workspace: &crate::workspace::Workspace, command: &str) -> Result<()> {
   let cmd = strip_heredoc_bodies(command);
   let cmd = split_shell_separators(&cmd);

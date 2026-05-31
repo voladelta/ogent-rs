@@ -298,8 +298,6 @@ The model's tool schema is locked to `exec` and `eval`. This means:
 - Any new workspace capability goes into a Lua global, not a new top-level tool.
 - The model cannot do anything the Lua sandbox doesn't allow.
 - Adding a capability requires only changing `register_tools_in_lua`.
-- The model cannot tell the difference between `exec` (stateless) and `eval` (stateful) at the
-  API level — the distinction is entirely in how the Rust side manages the Lua VM instance.
 
 ### Subagent Spawning
 
@@ -309,8 +307,6 @@ are concurrent via Tokio tasks but share the same Tokio runtime. Each subagent g
 - its own `lua_session` (isolated VM state)
 - its own `actor_id` (for output tagging)
 - the same `workspace`, `skill_store`, `client`, and `output_sink` as the parent
-
-The parent's `eval` session is not accessible to the subagent.
 
 `Agent` carries an `agent_depth` counter (0 for the root agent). Each `agent{}` call checks
 this counter against `MAX_AGENT_DEPTH` (3) and rejects the spawn if the limit is reached.
@@ -324,15 +320,7 @@ insert a newline, preventing two actors from interleaving on the same line.
 
 ### Path Security
 
-Two resolution modes exist:
-- **Write mode** (`workspace_path`): only paths under `workspace.root` are accepted.
-- **Read mode** (`readable_path`): paths under `workspace.root` plus `allowed_roots` are accepted.
-
-Paths are canonicalized (symlinks resolved to real paths) before the boundary check, so a
-symlink pointing outside the workspace is rejected even if its lexical path appears inside.
-
-`allowed_roots` is built at startup: `~/.ogent` (global config) and each skill root directory
-are added. No runtime code can add new allowed roots.
+Two resolution modes exist: **Write mode** (`workspace_path`) restricts to `workspace.root`; **Read mode** (`readable_path`) also allows `allowed_roots`. Paths are canonicalized (symlinks resolved to real paths) before the boundary check to prevent escape via symlinks (e.g. `workspace/evil_link -> /etc`). `allowed_roots` is fixed at startup (`~/.ogent` and skill roots); no runtime additions are permitted.
 
 ---
 

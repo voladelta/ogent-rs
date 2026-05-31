@@ -425,22 +425,10 @@ function file_info(path)
   return ok, err
 end
 function read_hash_anchors(path, offset, limit)
-  local ok, err = _t.read_hash_anchors({path=path, offset=offset, limit=limit})
-  if ok then _G._last_hash_anchor_path = path end
-  return ok, err
+  return _t.read_hash_anchors({path=path, offset=offset, limit=limit})
 end
-function apply_anchor_edits(...)
-  local n = select('#', ...)
-  local path, ops
-  if n == 1 then
-    ops = ...
-    path = _G._last_hash_anchor_path
-  else
-    path, ops = ...
-  end
-  local ok, err = _t.apply_anchor_edits({path=path, ops=ops})
-  if ok then _G._last_hash_anchor_path = path end
-  return ok, err
+function apply_anchor_edits(path, ops)
+  return _t.apply_anchor_edits({path=path, ops=ops})
 end
 function load_skill(name)
   return _t.load_skill({name=name})
@@ -725,8 +713,8 @@ mod tests {
         { start_at = "2:" .. hash2, action = "delete" },
         { start_at = "3:" .. hash3, action = "replace", content = "new line 3" }
       }
-      -- Test 1-arg signature (uses path from read_hash_anchors)
-      local res, err = apply_anchor_edits(ops)
+      -- Apply edits using 2-arg signature
+      local res, err = apply_anchor_edits('temp_test_anchors.txt', ops)
       if not res then error(err) end
 
       -- Read again to get new anchors
@@ -736,7 +724,6 @@ mod tests {
       local ops2 = {
         { start_at = "2:" .. hash3_new, action = "replace", content = "new line 3 updated" }
       }
-      -- Test 2-arg signature
       local res2, err = apply_anchor_edits('temp_test_anchors.txt', ops2)
       if not res2 then error(err) end
 
