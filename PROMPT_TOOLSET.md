@@ -58,7 +58,7 @@ Reads a file's contents from the workspace.
   - `offset` (integer, optional): 0-indexed byte offset. Defaults to `0`.
   - `limit` (integer, optional): Max bytes to read. Defaults to the remaining file size.
 - **Returns**: `(content_string, nil)` or `(nil, error)`
-- **Note**: `read_file` refuses files larger than 1MB, even when `offset`/`limit` are provided. For larger files, use `file_info` to confirm size, then inspect with `search_text`, `outline` where supported, or bounded shell commands such as `sed -n`.
+- **Note**: `read_file` refuses files larger than 1MB, even when `offset`/`limit` are provided. For larger files, use `file_info` to confirm size, then inspect with bounded shell commands such as `sed -n`, `head`, or `rg`.
 - **Example**:
   ```lua
   local content, err = read_file("Cargo.toml", 0, 500)
@@ -67,10 +67,10 @@ Reads a file's contents from the workspace.
   ```
 
 #### `read_lines(path, start_line, end_line)`
-Reads a 1-indexed inclusive line range from a workspace file. Refuses files larger than 1 MB; for larger files use `search_text` or bounded shell commands.
+Reads a 1-indexed inclusive line range from a workspace file. Refuses files larger than 1 MB; for larger files use bounded shell commands.
 - **Parameters**: `path` (string), `start_line` (integer, >= 1), `end_line` (integer, >= `start_line`)
 - **Returns**: `(content_string, nil)` or `(nil, error)`
-- **Note**: `read_lines` refuses files larger than 1MB. For larger files, use `search_text`, `outline` where supported, or bounded shell commands.
+- **Note**: `read_lines` refuses files larger than 1MB. For larger files, use bounded shell commands such as `sed -n`, `head`, or `rg`.
 
 #### `write_file{path=..., content=..., overwrite_existing=...}`
 Writes content to a file. **Replaces the entire file.**
@@ -92,6 +92,7 @@ Appends content to a file. Creates the file if it does not exist.
   - `path` (string): Relative path to the file.
   - `content` (string): Content to append.
 - **Returns**: `(success_msg, nil)` or `(nil, error)`
+- **Note**: Use this for logs, scratch notes, and intentional append-only artifacts. For source edits, prefer `apply_anchor_edits`.
 
 #### `read_hash_anchors(path, offset, limit)`
 Reads a file with each line prefixed by its 1-indexed line number and 4-character FNV-1a hash (e.g. `15:af63|line content`). Use this to obtain anchors before editing.
@@ -169,7 +170,7 @@ Returns a Lua array of relative file paths matching a glob pattern. Automaticall
   ```
 
 #### `search_text{pattern=..., paths=..., regex=..., case_sensitive=..., context=..., max_matches=...}`
-Searches workspace text files for matching lines by exact string or regex. Automatically respects `.gitignore`; skips unreadable, binary/non-UTF-8, and very large files. This is not semantic search.
+Searches workspace text files for matching lines by exact string or regex. Automatically respects `.gitignore`; skips unreadable, binary/non-UTF-8, and files larger than 1MB. This is not semantic search.
 - **Parameters**:
   - `pattern` (string, required): Text or regex pattern.
   - `paths` (array of strings, optional): Relative files/directories to search. Defaults to `{ "." }`.
@@ -180,7 +181,7 @@ Searches workspace text files for matching lines by exact string or regex. Autom
 - **Returns**: `(array_of_matches, nil)` or `(nil, error_string)`. Each match is one matching line with `path`, `line`, `column` (1-indexed byte column of the first match on that line), `text`, `before`, and `after`.
 
 #### `outline(path)`
-Returns a lightweight best-effort tree-sitter navigation outline for `.rs`, `.go`, and `.py` files. This is for navigation, not a compiler symbol table; unsupported file types return an error.
+Returns a lightweight best-effort tree-sitter navigation outline for `.rs`, `.go`, and `.py` files. This is for navigation, not a compiler symbol table; unsupported file types and files larger than 1MB return an error.
 - **Parameters**: `path` (string): Relative Rust, Go, or Python file path.
 - **Returns**: `(array_of_entries, nil)` or `(nil, error_string)`. Each entry has `name`, `kind` (such as `function`, `method`, `struct`, `enum`, `trait`, `impl`, `mod`, `type`, `interface`, `class`), `start_line`, optional `end_line`, and compact `signature`.
 
@@ -244,7 +245,7 @@ Returns a JSON-decoded Lua array of file deltas with hunks, line numbers, and ch
   - `staged` (boolean, optional): `true` = diff `--cached` (index vs HEAD). Default `false` (worktree vs index).
   - `base` (string, optional): Diff against a specific ref (e.g. `"HEAD~1"`). Ignored when `staged` is `true`.
   - `paths` (array of strings, optional): Restrict to specific relative paths.
-  - `context` (integer, optional): Context lines per hunk. Defaults to `3`.
+  - `context` (integer, optional): Context lines per hunk. Defaults to `3`, capped at `20`.
   - `stat_only` (boolean, optional): If `true`, omit `hunks` and return only `path`, `change_type`, `insertions`, and `deletions`.
 - **Returns**: `(array_of_deltas, nil)` or `(nil, error)`
 - **Delta fields**:
@@ -280,7 +281,7 @@ Returns a JSON-decoded Lua array of file deltas with hunks, line numbers, and ch
 Convenience function that returns **all** status entries (both staged and worktree) with diff fields attached for files that have content changes. Covers the 90 % use case of "what changed and how".
 - **Parameters** (table, optional):
   - `paths` (array of strings, optional): Restrict to specific relative paths.
-  - `context` (integer, optional): Context lines per hunk. Defaults to `3`.
+  - `context` (integer, optional): Context lines per hunk. Defaults to `3`, capped at `20`.
   - `stat_only` (boolean, optional): If `true`, omit `hunks` and return only stat summary.
   - `base` (string, optional): Compare against a specific ref (e.g. `"HEAD~3"`) instead of the default `HEAD`. Both `diff` (worktree vs base) and `staged_diff` (index vs base) use this ref.
 - **Returns**: `(array_of_entries, nil)` or `(nil, error)`
@@ -320,7 +321,7 @@ Reads a file at a specific git ref without checking it out. Supports both table 
 Returns structured commit history for a set of paths.
 - **Parameters** (table, optional):
   - `paths` (array of strings, optional): Restrict to specific relative paths.
-  - `n` (integer, optional): Max number of commits. Defaults to `10`.
+  - `n` (integer, optional): Max number of commits. Defaults to `10`, capped at `100`.
 - **Returns**: `(array_of_entries, nil)` or `(nil, error)`
 - **Entry fields**:
   - `sha` (string): Commit hash.

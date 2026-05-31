@@ -1,10 +1,14 @@
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::Path;
 use tokio::process::Command;
 use tokio::time::{Duration, timeout};
 
 use crate::tools::{ToolContext, parse_args};
+
+const MAX_GIT_CONTEXT: u32 = 20;
+const MAX_GIT_LOG_ENTRIES: u32 = 100;
 
 #[derive(Deserialize)]
 struct GitStatusArgs {
@@ -64,6 +68,47 @@ fn default_head() -> String {
 }
 fn default_ten() -> u32 {
   10
+}
+
+fn bounded_context(context: u32) -> u32 {
+  context.min(MAX_GIT_CONTEXT)
+}
+
+fn bounded_log_entries(n: u32) -> u32 {
+  n.min(MAX_GIT_LOG_ENTRIES)
+}
+
+fn validate_git_paths(workspace: &crate::workspace::Workspace, paths: &[String]) -> Result<()> {
+  for path in paths {
+    validate_git_path(workspace, path)?;
+  }
+  Ok(())
+}
+
+fn validate_git_path(workspace: &crate::workspace::Workspace, path: &str) -> Result<()> {
+  if path.trim().is_empty() {
+    bail!("git path entries must be non-empty");
+  }
+  if Path::new(path).is_absolute() {
+    bail!("git paths must be relative to the workspace root: {path}");
+  }
+  workspace
+    .workspace_path(path)
+    .with_context(|| format!("git path is outside workspace: {path}"))?;
+  Ok(())
+}
+
+fn validate_git_ref_arg(name: &str, value: &str) -> Result<()> {
+  if value.trim().is_empty() {
+    bail!("git {name} must be non-empty");
+  }
+  if value.starts_with('-') {
+    bail!("git {name} must be a ref or revision, not an option: {value}");
+  }
+  if value.contains('\0') || value.contains('\n') || value.contains('\r') {
+    bail!("git {name} contains an invalid control character");
+  }
+  Ok(())
 }
 
 #[derive(Serialize)]
@@ -149,6 +194,7 @@ async fn run_git(workspace: &std::path::Path, args: &[&str]) -> Result<std::proc
 
 pub async fn git_status(ctx: ToolContext, args: &str) -> Result<String> {
   let args: GitStatusArgs = parse_args(args)?;
+  validate_git_paths(&ctx.workspace, &args.paths)?;
 
   let mut git_args: Vec<String> = vec![
     "status".to_string(),
@@ -356,6 +402,11 @@ fn capitalize(s: &str) -> String {
 
 pub async fn git_diff(ctx: ToolContext, args: &str) -> Result<String> {
   let args: GitDiffArgs = parse_args(args)?;
+  validate_git_paths(&ctx.workspace, &args.paths)?;
+  if let Some(base) = &args.base {
+    validate_git_ref_arg("base", base)?;
+  }
+  let context = bounded_context(args.context);
 
   let mut git_args: Vec<String> = vec!["diff".to_string(), "--no-ext-diff".to_string()];
 
@@ -365,7 +416,7 @@ pub async fn git_diff(ctx: ToolContext, args: &str) -> Result<String> {
     git_args.push(base.clone());
   }
 
-  git_args.push(format!("-U{}", args.context));
+  git_args.push(format!("-U{}", context));
 
   if !args.paths.is_empty() {
     git_args.push("--".to_string());
@@ -618,6 +669,7 @@ async fn run_diff(
   stat_only: bool,
   base: Option<&str>,
 ) -> Result<HashMap<String, GitDiffDelta>> {
+  let context = bounded_context(context);
   let mut git_args: Vec<String> = vec![
     "diff".to_string(),
     "--no-ext-diff".to_string(),
@@ -646,6 +698,11 @@ async fn run_diff(
 
 pub async fn git_changes(ctx: ToolContext, args: &str) -> Result<String> {
   let args: GitChangesArgs = parse_args(args)?;
+  validate_git_paths(&ctx.workspace, &args.paths)?;
+  if let Some(base) = &args.base {
+    validate_git_ref_arg("base", base)?;
+  }
+  let context = bounded_context(args.context);
 
   // 1. Get status
   let mut git_args: Vec<String> = vec![
@@ -689,7 +746,7 @@ pub async fn git_changes(ctx: ToolContext, args: &str) -> Result<String> {
     run_diff(
       ctx.workspace.root(),
       &worktree_paths,
-      args.context,
+      context,
       false,
       args.stat_only,
       base,
@@ -703,7 +760,7 @@ pub async fn git_changes(ctx: ToolContext, args: &str) -> Result<String> {
     run_diff(
       ctx.workspace.root(),
       &staged_paths,
-      args.context,
+      context,
       true,
       args.stat_only,
       base,
@@ -728,6 +785,10 @@ pub async fn git_changes(ctx: ToolContext, args: &str) -> Result<String> {
 
 pub async fn git_show(ctx: ToolContext, args: &str) -> Result<String> {
   let args: GitShowArgs = parse_args(args)?;
+  validate_git_path(&ctx.workspace, &args.path)?;
+  if args.git_ref != "staged" {
+    validate_git_ref_arg("ref", &args.git_ref)?;
+  }
 
   let git_ref = if args.git_ref == "staged" {
     ":0".to_string()
@@ -786,12 +847,14 @@ fn parse_git_log(text: &str) -> Result<Vec<GitLogEntry>> {
 
 pub async fn git_log(ctx: ToolContext, args: &str) -> Result<String> {
   let args: GitLogArgs = parse_args(args)?;
+  validate_git_paths(&ctx.workspace, &args.paths)?;
+  let n = bounded_log_entries(args.n);
 
   let mut git_args: Vec<String> = vec![
     "log".to_string(),
     "--format=%H%x1E%s%x1E%an%x1E%ad".to_string(),
     "--no-decorate".to_string(),
-    format!("-n{}", args.n),
+    format!("-n{}", n),
   ];
   if !args.paths.is_empty() {
     git_args.push("--".to_string());
@@ -813,6 +876,7 @@ pub async fn git_log(ctx: ToolContext, args: &str) -> Result<String> {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::workspace::Workspace;
 
   #[test]
   fn test_parse_hunk_header() {
@@ -833,6 +897,41 @@ mod tests {
     assert_eq!(h.old_lines, 3);
     assert_eq!(h.new_start, 0);
     assert_eq!(h.new_lines, 0);
+  }
+
+  #[test]
+  fn bounds_agent_controlled_git_sizes() {
+    assert_eq!(bounded_context(0), 0);
+    assert_eq!(bounded_context(3), 3);
+    assert_eq!(bounded_context(MAX_GIT_CONTEXT + 1), MAX_GIT_CONTEXT);
+    assert_eq!(bounded_log_entries(10), 10);
+    assert_eq!(
+      bounded_log_entries(MAX_GIT_LOG_ENTRIES + 1),
+      MAX_GIT_LOG_ENTRIES
+    );
+  }
+
+  #[test]
+  fn validate_git_path_requires_workspace_relative_paths() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let ws = Workspace::from_root(temp.path().to_path_buf());
+
+    assert!(validate_git_path(&ws, "src/lib.rs").is_ok());
+    assert!(validate_git_path(&ws, "*.rs").is_ok());
+    assert!(validate_git_path(&ws, "").is_err());
+    assert!(validate_git_path(&ws, "/tmp/outside.rs").is_err());
+    assert!(validate_git_path(&ws, "../outside.rs").is_err());
+
+    Ok(())
+  }
+
+  #[test]
+  fn validate_git_ref_rejects_option_shaped_values() {
+    assert!(validate_git_ref_arg("base", "HEAD~1").is_ok());
+    assert!(validate_git_ref_arg("base", "abc123").is_ok());
+    assert!(validate_git_ref_arg("base", "--help").is_err());
+    assert!(validate_git_ref_arg("base", "").is_err());
+    assert!(validate_git_ref_arg("base", "HEAD\nnext").is_err());
   }
 
   #[test]
