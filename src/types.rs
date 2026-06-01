@@ -33,6 +33,8 @@ pub struct Message {
   pub tool_calls: Vec<ToolCall>,
   #[serde(default, skip_serializing_if = "String::is_empty")]
   pub tool_call_id: String,
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub image_url: Option<String>,
 }
 
 impl Message {

@@ -83,10 +83,62 @@ struct ZThinking {
   clear_thinking: bool,
 }
 
+#[derive(Debug, Clone)]
+struct ProviderMessageContent<'a> {
+  text: &'a str,
+  image_url: Option<&'a str>,
+}
+
+impl<'a> serde::Serialize for ProviderMessageContent<'a> {
+  fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+  where
+    S: serde::Serializer,
+  {
+    if let Some(img_url) = self.image_url {
+      #[derive(Serialize)]
+      struct TextPart<'b> {
+        #[serde(rename = "type")]
+        kind: &'static str,
+        text: &'b str,
+      }
+      #[derive(Serialize)]
+      struct ImageUrlPart<'b> {
+        url: &'b str,
+      }
+      #[derive(Serialize)]
+      struct ImagePart<'b> {
+        #[serde(rename = "type")]
+        kind: &'static str,
+        image_url: ImageUrlPart<'b>,
+      }
+      #[derive(Serialize)]
+      #[serde(untagged)]
+      enum Part<'b> {
+        Text(TextPart<'b>),
+        Image(ImagePart<'b>),
+      }
+
+      let parts = vec![
+        Part::Text(TextPart {
+          kind: "text",
+          text: self.text,
+        }),
+        Part::Image(ImagePart {
+          kind: "image_url",
+          image_url: ImageUrlPart { url: img_url },
+        }),
+      ];
+      parts.serialize(serializer)
+    } else {
+      self.text.serialize(serializer)
+    }
+  }
+}
+
 #[derive(Serialize)]
 struct ProviderMessage<'a> {
   role: &'a Role,
-  content: &'a str,
+  content: ProviderMessageContent<'a>,
   #[serde(skip_serializing_if = "str::is_empty")]
   reasoning_content: &'a str,
   #[serde(skip_serializing_if = "<[ToolCall]>::is_empty")]
@@ -99,7 +151,10 @@ impl<'a> From<&'a Message> for ProviderMessage<'a> {
   fn from(value: &'a Message) -> Self {
     Self {
       role: &value.role,
-      content: &value.content,
+      content: ProviderMessageContent {
+        text: &value.content,
+        image_url: value.image_url.as_deref(),
+      },
       reasoning_content: &value.reasoning_content,
       tool_calls: &value.tool_calls,
       tool_call_id: &value.tool_call_id,
@@ -264,7 +319,7 @@ mod tests {
     let tool_calls = Vec::new();
     let messages = vec![ProviderMessage {
       role: &Role::User,
-      content: "hello",
+      content: ProviderMessageContent { text: "hello", image_url: None },
       reasoning_content: "",
       tool_calls: &tool_calls,
       tool_call_id: "",
@@ -290,7 +345,7 @@ mod tests {
     let tool_calls = Vec::new();
     let messages = vec![ProviderMessage {
       role: &Role::User,
-      content: "hello",
+      content: ProviderMessageContent { text: "hello", image_url: None },
       reasoning_content: "",
       tool_calls: &tool_calls,
       tool_call_id: "",
@@ -317,7 +372,7 @@ mod tests {
     let tool_calls = Vec::new();
     let messages = vec![ProviderMessage {
       role: &Role::User,
-      content: "hello",
+      content: ProviderMessageContent { text: "hello", image_url: None },
       reasoning_content: "",
       tool_calls: &tool_calls,
       tool_call_id: "",
@@ -332,5 +387,24 @@ mod tests {
     })
     .unwrap();
     assert!(value.get("tools").is_none());
+  }
+
+  #[test]
+  fn provider_message_serializes_with_image() {
+    let mut message = Message::user("describe this image", MessageOrigin::Human);
+    message.image_url = Some("https://example.com/image.png".to_string());
+    let value = serde_json::to_value(ProviderMessage::from(&message)).unwrap();
+
+    let content = value.get("content").unwrap();
+    assert!(content.is_array());
+    let arr = content.as_array().unwrap();
+    assert_eq!(arr.len(), 2);
+
+    assert_eq!(arr[0].get("type").and_then(|t| t.as_str()), Some("text"));
+    assert_eq!(arr[0].get("text").and_then(|t| t.as_str()), Some("describe this image"));
+
+    assert_eq!(arr[1].get("type").and_then(|t| t.as_str()), Some("image_url"));
+    let img_url_obj = arr[1].get("image_url").unwrap();
+    assert_eq!(img_url_obj.get("url").and_then(|u| u.as_str()), Some("https://example.com/image.png"));
   }
 }

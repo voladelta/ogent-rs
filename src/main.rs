@@ -11,7 +11,7 @@ mod tools;
 mod types;
 mod workspace;
 
-use anyhow::Result;
+use anyhow::{Context, Result, bail};
 use clap::{CommandFactory, Parser};
 use std::env;
 
@@ -30,6 +30,8 @@ struct Args {
   temp: bool,
   #[arg(short, long)]
   resume: Option<String>,
+  #[arg(short, long)]
+  image: Option<String>,
   prompt: Vec<String>,
 }
 
@@ -45,7 +47,7 @@ async fn main() {
     .profile
     .clone()
     .unwrap_or_else(|| config.default_profile.clone());
-  if args.prompt.is_empty() && args.resume.is_none() {
+  if args.prompt.is_empty() && args.resume.is_none() && args.image.is_none() {
     let mut cmd = Args::command();
     if let Err(err) = cmd.print_help() {
       eprintln!("Error printing help: {err}");
@@ -90,6 +92,17 @@ async fn main() {
       }
     }
   };
+  let image_url = if let Some(img_arg) = &args.image {
+    match process_image_arg(img_arg) {
+      Ok(url) => Some(url),
+      Err(err) => {
+        eprintln!("Error: {err}");
+        std::process::exit(1);
+      }
+    }
+  } else {
+    None
+  };
   match run_agent_cli(
     workspace,
     client,
@@ -97,6 +110,7 @@ async fn main() {
     args.verbose,
     args.temp,
     args.resume.as_deref(),
+    image_url,
   )
   .await
   {
@@ -118,6 +132,7 @@ async fn run_agent_cli(
   verbose: bool,
   temporary: bool,
   resume_session_id: Option<&str>,
+  image_url: Option<String>,
 ) -> Result<()> {
   let skill_store = std::sync::Arc::new(skills::SkillStore::new(workspace.root()));
   for root in skill_store.skill_roots() {
@@ -130,13 +145,33 @@ async fn run_agent_cli(
   let mut messages = if let Some(session_id) = resume_session_id {
     session::load_session_in(&workspace, session_id)?
   } else {
-    prompts::build_initial_messages(task)
+    let mut msgs = prompts::build_initial_messages(task);
+    if let Some(ref img_url) = image_url {
+      if let Some(msg) = msgs.last_mut() {
+        if msg.role == crate::types::Role::User && msg.origin == crate::types::MessageOrigin::Human {
+          msg.image_url = Some(img_url.clone());
+          if msg.content.trim().is_empty() {
+            msg.content = "What does this image show?".to_string();
+          }
+        }
+      }
+    }
+    msgs
   };
-  if resume_session_id.is_some() && !task.trim().is_empty() {
-    messages.push(crate::types::Message::user(
-      task.trim(),
+  if resume_session_id.is_some() && (!task.trim().is_empty() || image_url.is_some()) {
+    let text = if task.trim().is_empty() {
+      "What does this image show?"
+    } else {
+      task.trim()
+    };
+    let mut msg = crate::types::Message::user(
+      text,
       crate::types::MessageOrigin::Human,
-    ));
+    );
+    if let Some(ref img_url) = image_url {
+      msg.image_url = Some(img_url.clone());
+    }
+    messages.push(msg);
   }
   let mut agent = Agent::new(
     workspace,
@@ -201,9 +236,64 @@ fn parse_args() -> Args {
   Args::parse_from(env::args())
 }
 
+fn process_image_arg(image_path: &str) -> Result<String> {
+  if image_path.starts_with("http://") || image_path.starts_with("https://") {
+    return Ok(image_path.to_string());
+  }
+
+  let path = std::path::Path::new(image_path);
+  if !path.exists() {
+    bail!("image file not found: {}", image_path);
+  }
+
+  let bytes = std::fs::read(path)
+    .with_context(|| format!("failed to read image file: {}", image_path))?;
+
+  let extension = path
+    .extension()
+    .and_then(|ext| ext.to_str())
+    .unwrap_or("")
+    .to_lowercase();
+
+  let mime_type = match extension.as_str() {
+    "png" => "image/png",
+    "jpg" | "jpeg" => "image/jpeg",
+    "gif" => "image/gif",
+    "webp" => "image/webp",
+    _ => "image/jpeg",
+  };
+
+  use base64::prelude::*;
+  let base64_data = BASE64_STANDARD.encode(&bytes);
+  Ok(format!("data:{};base64,{}", mime_type, base64_data))
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn test_process_image_arg_remote() {
+    let url = "https://example.com/test.jpg";
+    let res = process_image_arg(url).unwrap();
+    assert_eq!(res, url);
+  }
+
+  #[test]
+  fn test_process_image_arg_local() {
+    use std::io::Write;
+    let mut temp = tempfile::NamedTempFile::new().unwrap();
+    write!(temp, "dummy content").unwrap();
+
+    let temp_path = temp.path().with_extension("png");
+    std::fs::write(&temp_path, b"hello png").unwrap();
+
+    let path_str = temp_path.to_str().unwrap();
+    let res = process_image_arg(path_str).unwrap();
+    assert!(res.starts_with("data:image/png;base64,"));
+
+    let _ = std::fs::remove_file(temp_path);
+  }
 
   fn parse_test_args(raw: &[&str]) -> Args {
     Args::parse_from(raw.iter().copied())
