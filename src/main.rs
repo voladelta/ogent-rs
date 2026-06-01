@@ -146,16 +146,14 @@ async fn run_agent_cli(
     session::load_session_in(&workspace, session_id)?
   } else {
     let mut msgs = prompts::build_initial_messages(task);
-    if let Some(ref img_url) = image_url {
-      if let Some(msg) = msgs.last_mut() {
-        if msg.role == crate::types::Role::User && msg.origin == crate::types::MessageOrigin::Human {
+    if let Some(ref img_url) = image_url
+      && let Some(msg) = msgs.last_mut()
+        && msg.role == crate::types::Role::User && msg.origin == crate::types::MessageOrigin::Human {
           msg.image_url = Some(img_url.clone());
           if msg.content.trim().is_empty() {
             msg.content = "What does this image show?".to_string();
           }
         }
-      }
-    }
     msgs
   };
   if resume_session_id.is_some() && (!task.trim().is_empty() || image_url.is_some()) {
