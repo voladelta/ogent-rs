@@ -5,7 +5,7 @@ You execute all workspace operations by writing Lua 5.5 code inside either the `
 ## Tool Selection: `exec` vs `eval`
 
 * **Use `exec` (Stateless)** for simple, one-off, or self-contained operations that do not need to persist state between agent turns (e.g., executing a single build/test command, reading a specific file, performing a one-off search). This keeps the environment clean and avoids side effects.
-* **Use `eval` (Stateful)** when you want to define helper functions, declare globals, or retain state for later turns. Prefer it for multi-step exploration of large files, structured git data, long shell output, or bulky context: load once, filter/map/reduce in Lua, keep intermediate tables in session state, and print or return only the compact result needed for the next decision. `eval` does not bypass the 16,384-character output cap; it helps you stay under it.
+* **Use `eval` (Stateful)** when you want to define helper functions, declare globals, or retain state for later turns. Prefer it for multi-step exploration of large files, structured git data, long shell output, or bulky context: load once, filter/map/reduce in Lua, keep intermediate tables in session state, and print or return only the compact result needed for the next decision. `eval` does not bypass the 32,768-character output cap; it helps you stay under it.
 
 ## Sandbox Constraints & Rules
 
@@ -14,7 +14,7 @@ You execute all workspace operations by writing Lua 5.5 code inside either the `
 3. **Execution Limits**:
    - Memory is capped at **32MB**.
    - CPU is limited to **32,000 instructions**. Avoid infinite or highly nested loops.
-   - Stdout printing / return value output is capped at **16,384 characters**.
+    - Stdout printing / return value output is capped at **32,768 characters**.
 4. **Data Return Channel**:
    - `print(...)` writes to the captured stdout buffer. Arguments are separated by tabs, and newlines separate print statements.
    - Any value returned by the script is serialized as JSON and output as the final return value.
@@ -198,7 +198,7 @@ Executes a command inside the workspace root.
     - For copying, moving/renaming, or deleting files/directories, run standard shell commands (such as `cp`, `mv`, `rm`) within the workspace.
     - For creating new files or editing existing files, prefer the built-in `write_file` and `apply_anchor_edits` functions over shell command redirects (e.g. `echo ... > file`) or shell-based text editors.
     - Use `shell` for build/test commands, project-specific CLIs, and one-off commands whose raw output is already the desired result.
-    - Avoid `cmd | grep | awk | head` when a structured tool can return a bounded Lua table; structured results are easier to filter in `eval` and less likely to hit the 16,384-character output cap.
+    - Avoid `cmd | grep | awk | head` when a structured tool can return a bounded Lua table; structured results are easier to filter in `eval` and less likely to hit the 32,768-character output cap.
     - **For semantic code search, use `colgrep` via `shell`.** See the colgrep guide (injected separately) for full usage. Quick example: `shell{command = "colgrep 'error handling' src/"}`.
 - **Example**:
   ```lua
@@ -288,7 +288,7 @@ Convenience function that returns **all** status entries (both staged and worktr
 - **Note**: Each entry has the same fields as `git_status`, plus:
   - `diff` (object or nil): worktree changes (worktree vs base, or index vs worktree if no `base`), same shape as `git_diff` deltas.
   - `staged_diff` (object or nil): staged changes (index vs base, or HEAD vs index if no `base`), same shape.
-- **Output size warning**: Full hunks on large changes can exceed the 16,384-character stdout cap. For large refactors, use `stat_only=true` first to scope the change, then call `git_diff` on specific files.
+- **Output size warning**: Full hunks on large changes can exceed the 32,768-character stdout cap. For large refactors, use `stat_only=true` first to scope the change, then call `git_diff` on specific files.
 - **Usage note**: `git_changes` is useful for quick small/medium change review; for large diffs, prefer targeted `git_status` plus `git_diff{paths=..., stat_only=true}` before requesting hunks.
 - **Example**:
   ```lua

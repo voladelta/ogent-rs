@@ -590,8 +590,8 @@ async fn run_lua_vm_async(lua: &Lua, code: &str) -> Result<String> {
     }
   }
 
-  if final_response.len() > 16384 {
-    const MAX_LEN: usize = 16384;
+  if final_response.len() > 32768 {
+    const MAX_LEN: usize = 32768;
     const TRUNCATE_MSG: &str = "\n... [truncated] ...\n";
     let half_budget = (MAX_LEN - TRUNCATE_MSG.len()) / 2;
     let head_end = final_response.floor_char_boundary(half_budget);
@@ -605,7 +605,7 @@ async fn run_lua_vm_async(lua: &Lua, code: &str) -> Result<String> {
     } else {
       let end = final_response.floor_char_boundary(MAX_LEN);
       final_response.truncate(end);
-      final_response.push_str("\n... [Output truncated to 16k limit] ...");
+      final_response.push_str("\n... [Output truncated to 32k limit] ...");
     }
   }
 

@@ -159,7 +159,7 @@ carry over between separate `exec` calls. Only `eval` shares state across calls.
 Scripts cannot open arbitrary files, spawn processes, or load native modules directly.
 All I/O goes through the registered Rust-backed global functions.
 
-**Architecture Invariant:** tool output to the model is capped at 16 KB. Any output beyond
+**Architecture Invariant:** tool output to the model is capped at 32 KB. Any output beyond
 that is truncated with a visible marker, preventing runaway tool results from filling context.
 
 ### [`src/tools/fs.rs`](src/tools/fs.rs)
