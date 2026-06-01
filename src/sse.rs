@@ -192,6 +192,7 @@ async fn send_event(tx: &mut Option<tokio::sync::mpsc::Sender<StreamEvent>>, ev:
 async fn parse_sse_byte_stream<S, B>(
   stream: S,
   mut stream_tx: Option<tokio::sync::mpsc::Sender<StreamEvent>>,
+  require_done: bool,
 ) -> Result<ChatResponse, SseError>
 where
   S: futures_util::Stream<Item = Result<B, SseError>>,
@@ -249,7 +250,7 @@ where
     }
   }
 
-  if !done {
+  if !done && require_done {
     return Err(SseError::TruncatedStream);
   }
 
@@ -259,9 +260,10 @@ where
 pub async fn parse_sse_response(
   resp: reqwest::Response,
   stream_tx: Option<tokio::sync::mpsc::Sender<StreamEvent>>,
+  require_done: bool,
 ) -> Result<ChatResponse, SseError> {
   let stream = resp.bytes_stream().map(|item| item.map_err(SseError::Read));
-  parse_sse_byte_stream(stream, stream_tx).await
+  parse_sse_byte_stream(stream, stream_tx, require_done).await
 }
 
 #[cfg(test)]
@@ -432,7 +434,7 @@ mod tests {
     let body =
       b"data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\ndata: [DONE]\n\n".to_vec();
     let resp = sse_response(body).await;
-    let result = parse_sse_response(resp, None).await;
+    let result = parse_sse_response(resp, None, true).await;
     assert!(result.is_ok(), "unexpected error: {result:?}");
     assert_eq!(result.unwrap().content, "hi");
   }
@@ -441,7 +443,7 @@ mod tests {
   async fn parse_sse_response_truncated_stream_without_done() {
     let body = b"data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n".to_vec();
     let resp = sse_response(body).await;
-    let result = parse_sse_response(resp, None).await;
+    let result = parse_sse_response(resp, None, true).await;
     assert!(
       matches!(result, Err(SseError::TruncatedStream)),
       "expected TruncatedStream, got {result:?}"
@@ -449,10 +451,19 @@ mod tests {
   }
 
   #[tokio::test]
+  async fn parse_sse_response_ok_without_done_when_not_required() {
+    let body = b"data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n".to_vec();
+    let resp = sse_response(body).await;
+    let result = parse_sse_response(resp, None, false).await;
+    assert!(result.is_ok(), "unexpected error: {result:?}");
+    assert_eq!(result.unwrap().content, "hi");
+  }
+
+  #[tokio::test]
   async fn parse_sse_response_json_parse_error_on_invalid_data() {
     let body = b"data: not-valid-json\n\ndata: [DONE]\n\n".to_vec();
     let resp = sse_response(body).await;
-    let result = parse_sse_response(resp, None).await;
+    let result = parse_sse_response(resp, None, true).await;
     assert!(
       matches!(result, Err(SseError::JsonParse { .. })),
       "expected JsonParse, got {result:?}"
@@ -471,7 +482,7 @@ mod tests {
         .into_iter()
         .map(Ok::<Vec<u8>, SseError>),
     );
-    let result = parse_sse_byte_stream(stream, None).await;
+    let result = parse_sse_byte_stream(stream, None, true).await;
     assert!(result.is_ok(), "unexpected error: {result:?}");
     assert_eq!(result.unwrap().content, "café");
   }

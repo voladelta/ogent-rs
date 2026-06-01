@@ -6,41 +6,55 @@ profiles:
     model: deepseek-v4-flash
     effort: high
     context_limit: 1000000
+    max_tokens: 393216
   ds-flash-max:
     backend: deepseek
     model: deepseek-v4-flash
     effort: max
     context_limit: 1000000
+    max_tokens: 393216
   ds-pro:
     backend: deepseek
     model: deepseek-v4-pro
     effort: high
     context_limit: 1000000
+    max_tokens: 393216
   ds-pro-max:
     backend: deepseek
     model: deepseek-v4-pro
     effort: max
     context_limit: 1000000
+    max_tokens: 393216
   kimi:
     backend: kimi
     model: moonshotai/Kimi-K2.6
     effort: ""
     context_limit: 256000
+    max_tokens: 262144
   glm:
     backend: z
     model: glm-5.1
     effort: ""
     context_limit: 200000
+    max_tokens: 131072
   mimo:
     backend: xaomi
     model: mimo-v2.5
     effort: ""
     context_limit: 1000000
+    max_tokens: 131072
   mimo-pro:
     backend: xaomi
     model: mimo-v2.5-pro
     effort: ""
     context_limit: 1000000
+    max_tokens: 131072
+  m3:
+    backend: minimax
+    model: MiniMax-M3
+    effort: ""
+    context_limit: 1000000
+    max_tokens: 131072
 
 providers:
   deepseek:
@@ -55,3 +69,6 @@ providers:
   xaomi:
     base_url: https://token-plan-sgp.xiaomimimo.com/v1/chat/completions
     key_env: XAOMI_API_KEY
+  minimax:
+    base_url: https://api.minimax.io/v1/chat/completions
+    key_env: MINIMAX_API_KEY

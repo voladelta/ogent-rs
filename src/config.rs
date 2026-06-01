@@ -17,6 +17,7 @@ pub struct Profile {
   pub effort: String,
   #[allow(dead_code)]
   pub context_limit: usize,
+  pub max_tokens: i32,
 }
 
 #[derive(Debug, Clone, Deserialize)]

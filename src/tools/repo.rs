@@ -121,10 +121,13 @@ mod tests {
     let workspace = Workspace::from_root(root.to_path_buf());
     let skill_store = Arc::new(SkillStore::new(workspace.root()));
     let client = crate::client::Client::new(
-      "http://localhost",
-      "dummy".into(),
+      crate::client::ClientConfig {
+        url: "http://localhost".to_string(),
+        api_key: "dummy".into(),
+        request_timeout_secs: 30,
+        require_sse_done: true,
+      },
       |_, _| Ok(serde_json::Value::Null),
-      30,
     )
     .unwrap();
     let ctx = ToolContext {
@@ -189,10 +192,13 @@ mod tests {
     let workspace = Workspace::from_root(root.to_path_buf());
     let skill_store = Arc::new(SkillStore::new(workspace.root()));
     let client = crate::client::Client::new(
-      "http://localhost",
-      "dummy".into(),
+      crate::client::ClientConfig {
+        url: "http://localhost".to_string(),
+        api_key: "dummy".into(),
+        request_timeout_secs: 30,
+        require_sse_done: true,
+      },
       |_, _| Ok(serde_json::Value::Null),
-      30,
     )
     .unwrap();
     let ctx = ToolContext {

@@ -2,7 +2,7 @@ use anyhow::{Context, Result, bail};
 use serde::Serialize;
 use std::env;
 
-use crate::client::Client;
+use crate::client::{Client, ClientConfig};
 use crate::config::{Profile, ProviderConfig};
 use crate::types::{Message, Role, Tool, ToolCall};
 
@@ -64,6 +64,19 @@ struct Xaomi<'a> {
 }
 
 #[derive(Serialize)]
+struct MiniMaxRequest<'a> {
+  model: &'a str,
+  messages: Vec<ProviderMessage<'a>>,
+  #[serde(skip_serializing_if = "<[Tool]>::is_empty")]
+  tools: &'a [Tool],
+  stream: bool,
+  max_tokens: i32,
+  /// Splits reasoning tokens into a separate `reasoning_content` field
+  /// instead of embedding them in the response content.
+  reasoning_split: bool,
+}
+
+#[derive(Serialize)]
 struct ZThinking {
   #[serde(rename = "type")]
   kind: &'static str,
@@ -101,9 +114,14 @@ pub fn new_client(profile: &Profile, provider: &ProviderConfig) -> Result<Client
   match profile.backend.as_str() {
     "kimi" => {
       let model = profile.model.clone();
+      let max_tokens = profile.max_tokens;
       Ok(Client::new(
-        url,
-        api_key,
+        ClientConfig {
+          url: url.to_string(),
+          api_key,
+          request_timeout_secs: 600,
+          require_sse_done: true,
+        },
         move |messages, tools| {
           let provider_messages: Vec<_> = messages.iter().map(ProviderMessage::from).collect();
           serde_json::to_value(KimiRequest {
@@ -112,20 +130,24 @@ pub fn new_client(profile: &Profile, provider: &ProviderConfig) -> Result<Client
             tools,
             tool_choice: if tools.is_empty() { None } else { Some("auto") },
             stream: true,
-            max_tokens: 262_144,
+            max_tokens,
             chat_template_args: KimiThinking {
               enable_thinking: true,
             },
           })
         },
-        600,
       )?)
     }
     "z" => {
       let model = profile.model.clone();
+      let max_tokens = profile.max_tokens;
       Ok(Client::new(
-        url,
-        api_key,
+        ClientConfig {
+          url: url.to_string(),
+          api_key,
+          request_timeout_secs: 600,
+          require_sse_done: true,
+        },
         move |messages, tools| {
           let provider_messages: Vec<_> = messages.iter().map(ProviderMessage::from).collect();
           serde_json::to_value(ZRequest {
@@ -133,21 +155,25 @@ pub fn new_client(profile: &Profile, provider: &ProviderConfig) -> Result<Client
             messages: provider_messages,
             tools,
             stream: true,
-            max_tokens: 131_072,
+            max_tokens,
             thinking: ZThinking {
               kind: "enabled",
               clear_thinking: false,
             },
           })
         },
-        600,
       )?)
     }
     "xaomi" => {
       let model = profile.model.clone();
+      let max_tokens = profile.max_tokens;
       Ok(Client::new(
-        url,
-        api_key,
+        ClientConfig {
+          url: url.to_string(),
+          api_key,
+          request_timeout_secs: 600,
+          require_sse_done: true,
+        },
         move |messages, tools| {
           let provider_messages: Vec<_> = messages.iter().map(ProviderMessage::from).collect();
           serde_json::to_value(Xaomi {
@@ -155,18 +181,46 @@ pub fn new_client(profile: &Profile, provider: &ProviderConfig) -> Result<Client
             messages: provider_messages,
             tools,
             stream: true,
-            max_tokens: 131_072,
+            max_tokens,
           })
         },
-        600,
+      )?)
+    }
+    "minimax" => {
+      let model = profile.model.clone();
+      let max_tokens = profile.max_tokens;
+      Ok(Client::new(
+        ClientConfig {
+          url: url.to_string(),
+          api_key,
+          request_timeout_secs: 600,
+          // MiniMax SSE streams end cleanly without a data: [DONE] sentinel.
+          require_sse_done: false,
+        },
+        move |messages, tools| {
+          let provider_messages: Vec<_> = messages.iter().map(ProviderMessage::from).collect();
+          serde_json::to_value(MiniMaxRequest {
+            model: &model,
+            messages: provider_messages,
+            tools,
+            stream: true,
+            max_tokens,
+            reasoning_split: true,
+          })
+        },
       )?)
     }
     "deepseek" => {
       let model = profile.model.clone();
       let effort = profile.effort.clone();
+      let max_tokens = profile.max_tokens;
       Ok(Client::new(
-        url,
-        api_key,
+        ClientConfig {
+          url: url.to_string(),
+          api_key,
+          request_timeout_secs: 600,
+          require_sse_done: true,
+        },
         move |messages, tools| {
           let provider_messages: Vec<_> = messages.iter().map(ProviderMessage::from).collect();
           serde_json::to_value(DeepSeekRequest {
@@ -174,12 +228,11 @@ pub fn new_client(profile: &Profile, provider: &ProviderConfig) -> Result<Client
             messages: provider_messages,
             tools,
             stream: true,
-            max_tokens: 393_216,
+            max_tokens,
             thinking: DeepSeekThinking { kind: "enabled" },
             reasoning_effort: &effort,
           })
         },
-        600,
       )?)
     }
     other => bail!("unknown backend: {other}"),
@@ -229,6 +282,55 @@ mod tests {
     })
     .unwrap();
     assert!(value.get("tool_choice").is_none());
+    assert!(value.get("tools").is_none());
+  }
+
+  #[test]
+  fn minimax_request_includes_reasoning_split() {
+    let tool_calls = Vec::new();
+    let messages = vec![ProviderMessage {
+      role: &Role::User,
+      content: "hello",
+      reasoning_content: "",
+      tool_calls: &tool_calls,
+      tool_call_id: "",
+    }];
+    let value = serde_json::to_value(MiniMaxRequest {
+      model: "MiniMax-M3",
+      messages,
+      tools: &[],
+      stream: false,
+      max_tokens: 1,
+      reasoning_split: true,
+    })
+    .unwrap();
+    assert_eq!(
+      value
+        .get("reasoning_split")
+        .and_then(serde_json::Value::as_bool),
+      Some(true)
+    );
+  }
+
+  #[test]
+  fn minimax_request_omits_tools_when_empty() {
+    let tool_calls = Vec::new();
+    let messages = vec![ProviderMessage {
+      role: &Role::User,
+      content: "hello",
+      reasoning_content: "",
+      tool_calls: &tool_calls,
+      tool_call_id: "",
+    }];
+    let value = serde_json::to_value(MiniMaxRequest {
+      model: "MiniMax-M3",
+      messages,
+      tools: &[],
+      stream: false,
+      max_tokens: 1,
+      reasoning_split: true,
+    })
+    .unwrap();
     assert!(value.get("tools").is_none());
   }
 }

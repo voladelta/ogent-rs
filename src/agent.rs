@@ -366,10 +366,13 @@ mod tests {
     let workspace = Workspace::from_root(root.clone());
     let session_id = "persist-test";
     let client = Client::new(
-      "http://localhost",
-      "dummy".into(),
+      crate::client::ClientConfig {
+        url: "http://localhost".to_string(),
+        api_key: "dummy".into(),
+        request_timeout_secs: 30,
+        require_sse_done: true,
+      },
       |_, _| Ok(serde_json::Value::Null),
-      30,
     )
     .unwrap();
     let skill_store = std::sync::Arc::new(crate::skills::SkillStore::new(workspace.root()));
@@ -419,7 +422,16 @@ mod tests {
     ));
     let workspace = Workspace::from_root(root.clone());
     let session_id = "newline-test";
-    let client = Client::new(&url, "dummy".into(), |_, _| Ok(serde_json::Value::Null), 30).unwrap();
+    let client = Client::new(
+      crate::client::ClientConfig {
+        url,
+        api_key: "dummy".into(),
+        request_timeout_secs: 30,
+        require_sse_done: true,
+      },
+      |_, _| Ok(serde_json::Value::Null),
+    )
+    .unwrap();
     let skill_store = std::sync::Arc::new(crate::skills::SkillStore::new(workspace.root()));
     let mut agent = Agent::new(
       workspace.clone(),

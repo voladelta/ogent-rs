@@ -36,34 +36,39 @@ impl ClientError {
 }
 
 #[derive(Clone)]
+pub struct ClientConfig {
+  pub url: String,
+  pub api_key: String,
+  pub request_timeout_secs: u64,
+  pub require_sse_done: bool,
+}
+
+#[derive(Clone)]
 pub struct Client {
   http: reqwest::Client,
   url: String,
   api_key: String,
   build_request_body: BuildRequestBody,
+  require_sse_done: bool,
 }
 
 impl Client {
-  pub fn new<F>(
-    url: &str,
-    api_key: String,
-    build_req: F,
-    request_timeout_secs: u64,
-  ) -> Result<Self, ClientError>
+  pub fn new<F>(config: ClientConfig, build_req: F) -> Result<Self, ClientError>
   where
     F: Fn(&[Message], &[Tool]) -> Result<Value, serde_json::Error> + Send + Sync + 'static,
   {
     Ok(Self {
       http: reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(10))
-        .timeout(Duration::from_secs(request_timeout_secs))
+        .timeout(Duration::from_secs(config.request_timeout_secs))
         .pool_max_idle_per_host(128)
         .pool_idle_timeout(Duration::from_secs(30))
         .build()
         .map_err(ClientError::Http)?,
-      url: url.to_string(),
-      api_key,
+      url: config.url,
+      api_key: config.api_key,
       build_request_body: Arc::new(build_req),
+      require_sse_done: config.require_sse_done,
     })
   }
 
@@ -119,7 +124,7 @@ impl Client {
         body: body.trim().to_string(),
       });
     }
-    parse_sse_response(resp, stream_tx)
+    parse_sse_response(resp, stream_tx, self.require_sse_done)
       .await
       .map_err(Into::into)
   }
