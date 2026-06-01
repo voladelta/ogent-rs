@@ -49,6 +49,8 @@ unless `--temp` is set.
 
 The `director` actor ID is assigned here — it is the root agent's identifier in all output.
 
+`main.rs` is also responsible for handling all CLI errors gracefully, mapping different failure modes (such as profile configuration errors, provider HTTP/network failures, rate limits, and SSE stream issues) to specific non-zero exit codes, and printing clean, user-friendly error messages to `stderr`.
+
 ### [`src/agent.rs`](src/agent.rs)
 
 The agent turn loop and output pipeline.
@@ -73,9 +75,9 @@ The agent turn loop and output pipeline.
 6. Breaks when no tool calls are present.
 
  **`AgentOutputSink`** is a trait with five hooks: `message`, `stream_event`, `tool_call`,
-`tool_result`, and `task_update`. The CLI implementation (`CliOutputSink`) renders these
-to stdout using `print_actor_text`, which uses a `Mutex<(last_actor, at_line_start)>` to
-avoid interleaved output across concurrently streaming subagents.
+`tool_result`, and `task_update`. The CLI implementation (`CliOutputSink`) splits outputs to optimize for scripting and piping:
+- **`stdout`**: Receives only clean assistant message content (`message` and `StreamEvent::Content`), with no actor prefix, allowing raw output to be piped.
+- **`stderr`**: Receives all reasoning/thinking (`StreamEvent::Reasoning`), tool calls, tool results, and task updates via `print_to_stderr`, which uses a `Mutex<(last_actor, at_line_start)>` to avoid interleaved output across concurrently streaming subagents.
 
 **Architecture Invariant:** `run_loop` does not call `persist`. The caller (`run_agent_cli`)
 is responsible for persistence, whether the loop succeeds or fails.

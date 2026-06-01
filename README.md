@@ -37,6 +37,29 @@ ogent --profile kimi "Review the staged diff"
 | `-t`, `--temp` | Run a temporary session. The transcript is not persisted on exit. |
 | `-r`, `--resume <session_id>` | Resume a previous session from `.ogent/sessions/{session_id}.jsonl`. If the session does not exist, `ogent` prints an error and exits. |
 
+### Standard Streams & Exit Codes
+
+#### Standard Streams
+
+`ogent` routes outputs to standard streams to optimize for scripting and piping:
+- **`stdout`**: Receives only the primary assistant output (final content or streaming tokens). No prefixes (e.g., `[director]`) are prepended. This allows clean redirection/piping (e.g., `ogent "generate json" | jq`).
+- **`stderr`**: Receives all informational and trace messages, including thinking reasoning traces, tool execution logs, task updates, error messages, and the session resume banner.
+
+#### Exit Codes
+
+Exit codes are used to report run status and locate specific failure modes:
+
+| Code | Meaning | Details |
+| :---: | :--- | :--- |
+| **`0`** | Success | The run completed cleanly without issues. |
+| **`1`** | General Error | General runtime errors, invalid arguments, parsing failures, session load errors. |
+| **`2`** | Search Key Missing | Exa Search API key environment variable is not set. |
+| **`3`** | Config / Profile / API Key Error | Config file is invalid/missing, the profile is unknown, or the backend provider API key environment variable is not set. |
+| **`4`** | Rate Limited | HTTP status `429` rate limit hit with the LLM provider. |
+| **`5`** | Provider API Error | LLM provider returned an HTTP `4xx` or `5xx` error (excluding 429). |
+| **`6`** | Provider Network Error | Unable to connect to the provider (timeouts, socket errors, name resolution failures). |
+| **`7`** | SSE / Streaming Error | Server-sent event parse error or truncated stream. |
+
 ---
 
 ## Agent Runtime & Key Behavior
