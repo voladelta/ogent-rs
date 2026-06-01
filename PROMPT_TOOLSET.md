@@ -1,6 +1,6 @@
 # Lua Toolset Guide
 
-You execute all workspace operations by writing Lua 5.5 code inside either the `exec` (stateless, one-off) or `eval` (stateful, persistent session) tools. You do not call tools via JSON schema; instead, you write Lua scripts that call the registered global functions.
+You execute all workspace operations by writing Lua 5.5 code inside either the `exec` (stateless, one-off) or `eval` (stateful, persistent session) tools. You DO NOT call tools via JSON schema; instead, you write Lua scripts that call the registered global functions.
 
 ## Tool Selection: `exec` vs `eval`
 
