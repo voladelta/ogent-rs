@@ -11,7 +11,7 @@ mod tools;
 mod types;
 mod workspace;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use clap::{CommandFactory, Parser};
 use std::env;
 
@@ -34,7 +34,7 @@ struct Args {
 }
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() {
   let args = parse_args();
   let mut workspace = crate::workspace::Workspace::from_current_dir();
   if let Ok(home) = env::var("HOME") {
@@ -47,9 +47,12 @@ async fn main() -> Result<()> {
     .unwrap_or_else(|| config.default_profile.clone());
   if args.prompt.is_empty() && args.resume.is_none() {
     let mut cmd = Args::command();
-    cmd.print_help()?;
+    if let Err(err) = cmd.print_help() {
+      eprintln!("Error printing help: {err}");
+      std::process::exit(1);
+    }
     println!();
-    return Ok(());
+    std::process::exit(0);
   }
   if let Some(session_id) = &args.resume
     && let Err(err) = session::load_session_in(&workspace, session_id)
@@ -61,14 +64,33 @@ async fn main() -> Result<()> {
     eprintln!("{err}");
     std::process::exit(2);
   }
-  let profile = config
-    .get_profile(&profile_name)
-    .with_context(|| format!("unknown profile: {}", profile_name))?;
-  let provider = config
-    .provider_for(profile)
-    .context("missing provider config for profile")?;
-  let client = providers::new_client(profile, provider)?;
-  run_agent_cli(
+  let profile = match config.get_profile(&profile_name) {
+    Some(p) => p,
+    None => {
+      eprintln!("Error: unknown profile: {profile_name}");
+      std::process::exit(3);
+    }
+  };
+  let provider = match config.provider_for(profile) {
+    Some(p) => p,
+    None => {
+      eprintln!("Error: missing provider config for profile");
+      std::process::exit(3);
+    }
+  };
+  let client = match providers::new_client(profile, provider) {
+    Ok(c) => c,
+    Err(err) => {
+      let err_msg = err.to_string();
+      eprintln!("Error: {err_msg}");
+      if err_msg.contains("is not set") {
+        std::process::exit(3);
+      } else {
+        std::process::exit(1);
+      }
+    }
+  };
+  match run_agent_cli(
     workspace,
     client,
     &args.prompt.join(" "),
@@ -77,6 +99,16 @@ async fn main() -> Result<()> {
     args.resume.as_deref(),
   )
   .await
+  {
+    Ok(()) => {
+      std::process::exit(0);
+    }
+    Err(err) => {
+      eprintln!("Error: {err}");
+      let exit_code = determine_exit_code(&err);
+      std::process::exit(exit_code);
+    }
+  }
 }
 
 async fn run_agent_cli(
@@ -123,7 +155,7 @@ async fn run_agent_cli(
     eprintln!("warning: failed to persist session: {pe}");
   }
   if !temporary {
-    println!("\n\nResume this session later with: ogent -r {session_id}");
+    eprintln!("\n\nResume this session later with: ogent -r {session_id}");
   }
   loop_result.map_err(Into::into)
 }
@@ -133,8 +165,35 @@ fn load_config_or_exit(workspace_root: &std::path::Path) -> config::Config {
     Ok(cfg) => cfg,
     Err(err) => {
       eprintln!("Error: {err}");
-      std::process::exit(1);
+      std::process::exit(3);
     }
+  }
+}
+
+fn determine_exit_code(err: &anyhow::Error) -> i32 {
+  if let Some(agent_err) = err.downcast_ref::<crate::agent::AgentError>() {
+    match agent_err {
+      crate::agent::AgentError::Client(client_err) => {
+        return determine_client_exit_code(client_err);
+      }
+      crate::agent::AgentError::Other(inner_err) => {
+        return determine_exit_code(inner_err);
+      }
+    }
+  }
+  if let Some(client_err) = err.downcast_ref::<crate::client::ClientError>() {
+    return determine_client_exit_code(client_err);
+  }
+  1
+}
+
+fn determine_client_exit_code(client_err: &crate::client::ClientError) -> i32 {
+  match client_err {
+    crate::client::ClientError::RateLimited { .. } => 4,
+    crate::client::ClientError::ApiError { .. } => 5,
+    crate::client::ClientError::Http(..) => 6,
+    crate::client::ClientError::Sse(..) => 7,
+    crate::client::ClientError::BuildRequest(..) => 1,
   }
 }
 

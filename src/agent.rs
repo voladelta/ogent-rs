@@ -37,53 +37,58 @@ pub trait AgentOutputSink: Send + Sync {
   fn task_update(&self, _actor_id: &str, _status: &str, _summary: &str) {}
 }
 
-fn print_actor_text(actor_id: &str, text: &str) {
+fn print_to_stdout(text: &str) {
+  print!("{text}");
+  let _ = std::io::stdout().flush();
+}
+
+fn print_to_stderr(actor_id: &str, text: &str) {
   static STATE: OnceLock<std::sync::Mutex<(String, bool)>> = OnceLock::new();
   let lock = STATE.get_or_init(|| std::sync::Mutex::new((String::new(), true)));
   let mut guard = lock.lock().unwrap();
   let (last_actor, at_line_start) = &mut *guard;
 
   if !*at_line_start && last_actor != actor_id {
-    println!();
+    eprintln!();
     *at_line_start = true;
   }
   *last_actor = actor_id.to_string();
 
   for (i, part) in text.split('\n').enumerate() {
     if i > 0 {
-      println!();
+      eprintln!();
       *at_line_start = true;
     }
     if part.is_empty() {
       continue;
     }
     if *at_line_start {
-      print!("[{actor_id}] ");
+      eprint!("[{actor_id}] ");
       *at_line_start = false;
     }
-    print!("{part}");
+    eprint!("{part}");
   }
-  let _ = std::io::stdout().flush();
+  let _ = std::io::stderr().flush();
 }
 
 struct CliOutputSink;
 
 impl AgentOutputSink for CliOutputSink {
-  fn message(&self, actor_id: &str, message: &Message) {
+  fn message(&self, _actor_id: &str, message: &Message) {
     if message.role == Role::Assistant && !message.content.trim().is_empty() {
-      print_actor_text(actor_id, &format!("{}\n", message.content));
+      print_to_stdout(&format!("{}\n", message.content));
     }
   }
 
   fn stream_event(&self, actor_id: &str, verbose: bool, event: &StreamEvent) {
     match event {
       StreamEvent::Content(content) => {
-        print_actor_text(actor_id, content);
+        print_to_stdout(content);
       }
       StreamEvent::Reasoning(content) => {
         if verbose {
           let tagged_actor = format!("{actor_id}][thinking");
-          print_actor_text(&tagged_actor, content);
+          print_to_stderr(&tagged_actor, content);
         }
       }
       StreamEvent::ToolCalling => {}
@@ -98,18 +103,18 @@ impl AgentOutputSink for CliOutputSink {
       let reason = parsed.get("reason").and_then(|r| r.as_str()).unwrap_or("");
       let code = parsed.get("code").and_then(|c| c.as_str()).unwrap_or("");
       if !reason.is_empty() {
-        print_actor_text(actor_id, &format!("[{name}] {reason}\n"));
+        print_to_stderr(actor_id, &format!("[{name}] {reason}\n"));
       } else {
-        print_actor_text(actor_id, &format!("[{name}]\n"));
+        print_to_stderr(actor_id, &format!("[{name}]\n"));
       }
       if verbose && !code.is_empty() {
-        print_actor_text(actor_id, &format!("-- Code:\n{code}\n"));
+        print_to_stderr(actor_id, &format!("-- Code:\n{code}\n"));
       }
       return;
     }
     let args = truncate_for_cli(&tool_call.function.arguments, 180);
     if verbose {
-      print_actor_text(actor_id, &format!("[tool] {name} {args}\n"));
+      print_to_stderr(actor_id, &format!("[tool] {name} {args}\n"));
     }
   }
 
@@ -123,30 +128,30 @@ impl AgentOutputSink for CliOutputSink {
   ) {
     if tool_name == "exec" || tool_name == "eval" {
       if failed {
-        print_actor_text(
+        print_to_stderr(
           actor_id,
           &format!("--- Tool Execution Failed ---\n{}\n", content),
         );
       } else if verbose {
         let lines: Vec<&str> = content.lines().collect();
         let display = lines.iter().take(5).copied().collect::<Vec<_>>().join("\n");
-        print_actor_text(
+        print_to_stderr(
           actor_id,
           &format!("--- Tool Execution Result ---\n{}\n", display),
         );
         if lines.len() > 5 {
-          print_actor_text(actor_id, "... (truncated)\n");
+          print_to_stderr(actor_id, "... (truncated)\n");
         }
       }
       return;
     }
     if failed {
-      print_actor_text(
+      print_to_stderr(
         actor_id,
         &format!("[tool:error] {tool_name}: {}\n", first_line(content)),
       );
     } else if verbose {
-      print_actor_text(
+      print_to_stderr(
         actor_id,
         &format!("[tool:ok] {tool_name} ({} bytes)\n", content.len()),
       );
@@ -154,7 +159,7 @@ impl AgentOutputSink for CliOutputSink {
   }
 
   fn task_update(&self, actor_id: &str, status: &str, summary: &str) {
-    print_actor_text(actor_id, &format!("task_update({status}): {summary}\n"));
+    print_to_stderr(actor_id, &format!("task_update({status}): {summary}\n"));
   }
 }
 
