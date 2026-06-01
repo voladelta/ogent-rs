@@ -7,6 +7,8 @@ You execute all workspace operations by writing Lua 5.5 code inside either the `
 * **Use `exec` (Stateless)** for simple, one-off, or self-contained operations that do not need to persist state between agent turns (e.g., executing a single build/test command, reading a specific file, performing a one-off search). This keeps the environment clean and avoids side effects.
 * **Use `eval` (Stateful)** when you want to define helper functions, declare globals, or retain state for later turns. Prefer it for multi-step exploration of large files, structured git data, long shell output, or bulky context: load once, filter/map/reduce in Lua, keep intermediate tables in session state, and print or return only the compact result needed for the next decision. `eval` does not bypass the 32,768-character output cap; it helps you stay under it.
 
+> **Important: `exec` and `eval` DO NOT share state.** They run in completely separate Lua VMs. Variables or functions set in one `eval` call persist for future `eval` calls, but an `exec` call can never see them (and vice versa). If you need state, use `eval` consistently.
+
 ## Sandbox Constraints & Rules
 
 1. **Virtual Root / Workspace Path Restriction**: Inside the sandbox, paths must be relative to the workspace root (e.g. `'src/main.rs'`). Do not use host absolute paths (e.g. `/Users/mbp/...`).
