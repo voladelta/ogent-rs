@@ -319,7 +319,10 @@ mod tests {
     let tool_calls = Vec::new();
     let messages = vec![ProviderMessage {
       role: &Role::User,
-      content: ProviderMessageContent { text: "hello", image_url: None },
+      content: ProviderMessageContent {
+        text: "hello",
+        image_url: None,
+      },
       reasoning_content: "",
       tool_calls: &tool_calls,
       tool_call_id: "",
@@ -345,7 +348,10 @@ mod tests {
     let tool_calls = Vec::new();
     let messages = vec![ProviderMessage {
       role: &Role::User,
-      content: ProviderMessageContent { text: "hello", image_url: None },
+      content: ProviderMessageContent {
+        text: "hello",
+        image_url: None,
+      },
       reasoning_content: "",
       tool_calls: &tool_calls,
       tool_call_id: "",
@@ -372,7 +378,10 @@ mod tests {
     let tool_calls = Vec::new();
     let messages = vec![ProviderMessage {
       role: &Role::User,
-      content: ProviderMessageContent { text: "hello", image_url: None },
+      content: ProviderMessageContent {
+        text: "hello",
+        image_url: None,
+      },
       reasoning_content: "",
       tool_calls: &tool_calls,
       tool_call_id: "",
@@ -401,10 +410,19 @@ mod tests {
     assert_eq!(arr.len(), 2);
 
     assert_eq!(arr[0].get("type").and_then(|t| t.as_str()), Some("text"));
-    assert_eq!(arr[0].get("text").and_then(|t| t.as_str()), Some("describe this image"));
+    assert_eq!(
+      arr[0].get("text").and_then(|t| t.as_str()),
+      Some("describe this image")
+    );
 
-    assert_eq!(arr[1].get("type").and_then(|t| t.as_str()), Some("image_url"));
+    assert_eq!(
+      arr[1].get("type").and_then(|t| t.as_str()),
+      Some("image_url")
+    );
     let img_url_obj = arr[1].get("image_url").unwrap();
-    assert_eq!(img_url_obj.get("url").and_then(|u| u.as_str()), Some("https://example.com/image.png"));
+    assert_eq!(
+      img_url_obj.get("url").and_then(|u| u.as_str()),
+      Some("https://example.com/image.png")
+    );
   }
 }

@@ -148,12 +148,14 @@ async fn run_agent_cli(
     let mut msgs = prompts::build_initial_messages(task);
     if let Some(ref img_url) = image_url
       && let Some(msg) = msgs.last_mut()
-        && msg.role == crate::types::Role::User && msg.origin == crate::types::MessageOrigin::Human {
-          msg.image_url = Some(img_url.clone());
-          if msg.content.trim().is_empty() {
-            msg.content = "What does this image show?".to_string();
-          }
-        }
+      && msg.role == crate::types::Role::User
+      && msg.origin == crate::types::MessageOrigin::Human
+    {
+      msg.image_url = Some(img_url.clone());
+      if msg.content.trim().is_empty() {
+        msg.content = "What does this image show?".to_string();
+      }
+    }
     msgs
   };
   if resume_session_id.is_some() && (!task.trim().is_empty() || image_url.is_some()) {
@@ -162,10 +164,7 @@ async fn run_agent_cli(
     } else {
       task.trim()
     };
-    let mut msg = crate::types::Message::user(
-      text,
-      crate::types::MessageOrigin::Human,
-    );
+    let mut msg = crate::types::Message::user(text, crate::types::MessageOrigin::Human);
     if let Some(ref img_url) = image_url {
       msg.image_url = Some(img_url.clone());
     }
@@ -244,8 +243,8 @@ fn process_image_arg(image_path: &str) -> Result<String> {
     bail!("image file not found: {}", image_path);
   }
 
-  let bytes = std::fs::read(path)
-    .with_context(|| format!("failed to read image file: {}", image_path))?;
+  let bytes =
+    std::fs::read(path).with_context(|| format!("failed to read image file: {}", image_path))?;
 
   let extension = path
     .extension()
