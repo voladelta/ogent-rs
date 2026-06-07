@@ -462,11 +462,7 @@ fn parse_unified_diff(text: &str, stat_only: bool) -> Result<Vec<GitDiffDelta>> 
       }
       maybe_push_delta(&mut deltas, &mut current);
 
-      let parts: Vec<&str> = after.split_whitespace().collect();
-      let old_raw = strip_quotes(parts.first().unwrap_or(&""));
-      let new_raw = strip_quotes(parts.get(1).unwrap_or(&""));
-      let old_path = old_raw.strip_prefix("a/").unwrap_or(old_raw).to_string();
-      let new_path = new_raw.strip_prefix("b/").unwrap_or(new_raw).to_string();
+      let (old_path, new_path) = parse_diff_git_paths(after);
 
       current = Some(GitDiffDelta {
         path: new_path,
@@ -614,6 +610,27 @@ fn parse_unified_diff(text: &str, stat_only: bool) -> Result<Vec<GitDiffDelta>> 
   maybe_push_delta(&mut deltas, &mut current);
 
   Ok(deltas)
+}
+
+fn parse_diff_git_paths(after: &str) -> (String, String) {
+  let after = after.trim();
+  if let Some(rest) = after.strip_prefix("a/") {
+    for (separator, _) in rest.match_indices(" b/") {
+      let old_path = &rest[..separator];
+      let new_path = &rest[(separator + " b/".len())..];
+      if old_path == new_path {
+        return (old_path.to_string(), new_path.to_string());
+      }
+    }
+  }
+
+  let mut parts = after.split_whitespace();
+  let old_raw = strip_quotes(parts.next().unwrap_or(""));
+  let new_raw = strip_quotes(parts.next().unwrap_or(""));
+  (
+    old_raw.strip_prefix("a/").unwrap_or(old_raw).to_string(),
+    new_raw.strip_prefix("b/").unwrap_or(new_raw).to_string(),
+  )
 }
 
 fn strip_quotes(s: &str) -> &str {
@@ -969,6 +986,25 @@ index abc..def 100644
     assert_eq!(h.lines[3].r#type, "context");
     assert_eq!(h.lines[3].old_line, Some(12));
     assert_eq!(h.lines[3].new_line, Some(12));
+    assert_eq!(d.insertions, Some(1));
+    assert_eq!(d.deletions, Some(1));
+  }
+
+  #[test]
+  fn test_parse_unified_diff_preserves_paths_with_spaces() {
+    let text = r#"diff --git a/x b/y z.txt b/x b/y z.txt
+index 7898192..6178079 100644
+--- a/x b/y z.txt
++++ b/x b/y z.txt
+@@ -1 +1 @@
+-a
++b
+"#;
+    let deltas = parse_unified_diff(text, false).unwrap();
+    assert_eq!(deltas.len(), 1);
+    let d = &deltas[0];
+    assert_eq!(d.path, "x b/y z.txt");
+    assert_eq!(d.old_path, "x b/y z.txt");
     assert_eq!(d.insertions, Some(1));
     assert_eq!(d.deletions, Some(1));
   }

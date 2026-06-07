@@ -145,12 +145,10 @@ async fn exa_post(url: &str, body: Value) -> Result<Value> {
   let status = resp.status();
   let text = resp.text().await?;
   if !status.is_success() {
-    eprintln!("exa request failed: {} {}", status.as_u16(), text.trim());
     bail!("exa {}: {}", status.as_u16(), text.trim());
   }
   let v: Value = serde_json::from_str(&text).context("unmarshal exa response")?;
   if let Some(err) = v["error"].as_str().filter(|s| !s.is_empty()) {
-    eprintln!("exa returned error: {err}");
     bail!("exa error: {err}");
   }
   Ok(v)

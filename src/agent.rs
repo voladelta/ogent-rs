@@ -11,7 +11,7 @@ use crate::workspace::Workspace;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AgentError {
-  #[error("client error")]
+  #[error(transparent)]
   Client(#[from] ClientError),
   #[error(transparent)]
   Other(#[from] anyhow::Error),
@@ -45,7 +45,7 @@ fn print_to_stdout(text: &str) {
 fn print_to_stderr(actor_id: &str, text: &str) {
   static STATE: OnceLock<std::sync::Mutex<(String, bool)>> = OnceLock::new();
   let lock = STATE.get_or_init(|| std::sync::Mutex::new((String::new(), true)));
-  let mut guard = lock.lock().unwrap();
+  let mut guard = lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
   let (last_actor, at_line_start) = &mut *guard;
 
   if !*at_line_start && last_actor != actor_id {
@@ -360,6 +360,15 @@ mod tests {
   #[test]
   fn truncate_for_cli_keeps_short_text() {
     assert_eq!(truncate_for_cli("hello   world", 20), "hello world");
+  }
+
+  #[test]
+  fn agent_error_displays_client_cause() {
+    let err = AgentError::from(ClientError::RateLimited {
+      body: "slow down".to_string(),
+    });
+
+    assert_eq!(err.to_string(), "rate limited (429): slow down");
   }
 
   #[test]

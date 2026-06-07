@@ -16,11 +16,11 @@ pub enum ClientError {
   RateLimited { body: String },
   #[error("api error {status}: {body}")]
   ApiError { status: u16, body: String },
-  #[error("http request failed")]
+  #[error("http request failed: {0}")]
   Http(#[source] reqwest::Error),
-  #[error("failed to build request body")]
+  #[error("failed to build request body: {0}")]
   BuildRequest(#[source] serde_json::Error),
-  #[error("sse error")]
+  #[error(transparent)]
   Sse(#[from] crate::sse::SseError),
 }
 
