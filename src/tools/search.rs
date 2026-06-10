@@ -96,42 +96,48 @@ struct OutlineArgs {
   path: String,
 }
 
-#[derive(Deserialize, Serialize)]
-struct OutlineEntry {
-  name: String,
-  kind: String,
-  start_line: usize,
+#[derive(Clone, Deserialize, Serialize)]
+pub(crate) struct OutlineEntry {
+  pub(crate) name: String,
+  pub(crate) kind: String,
+  pub(crate) start_line: usize,
   #[serde(skip_serializing_if = "Option::is_none")]
-  end_line: Option<usize>,
-  signature: String,
+  pub(crate) end_line: Option<usize>,
+  pub(crate) signature: String,
 }
 
 pub fn outline(ctx: ToolContext, args: &str) -> Result<String> {
   let args: OutlineArgs = parse_args(args)?;
   require_nonempty(&args.path, "path")?;
-  let language = OutlineLanguage::from_path(&args.path)?;
-
   let path = ctx.workspace.workspace_path(&args.path)?;
-  let meta = fs::metadata(&path).with_context(|| format!("stat {}", args.path))?;
+  let entries = outline_entries_for_path(&path, &args.path)?;
+  Ok(serde_json::to_string(&entries)?)
+}
+
+pub(crate) fn outline_entries_for_path(
+  path: &Path,
+  display_path: &str,
+) -> Result<Vec<OutlineEntry>> {
+  let language = OutlineLanguage::from_path(display_path)?;
+  let meta = fs::metadata(path).with_context(|| format!("stat {}", display_path))?;
   if meta.len() > MAX_SEARCH_FILE_BYTES {
     bail!(
       "file {} exceeds size limit ({} > {} bytes)",
-      args.path,
+      display_path,
       meta.len(),
       MAX_SEARCH_FILE_BYTES
     );
   }
-  let source = fs::read_to_string(&path).with_context(|| format!("read {}", args.path))?;
+  let source = fs::read_to_string(path).with_context(|| format!("read {}", display_path))?;
   let mut parser = Parser::new();
   parser
     .set_language(&language.tree_sitter_language())
     .with_context(|| format!("load tree-sitter parser for {}", language.name()))?;
   let tree = parser
     .parse(&source, None)
-    .with_context(|| format!("parse {}", args.path))?;
+    .with_context(|| format!("parse {}", display_path))?;
 
-  let entries = language.outline_entries(&source, tree.root_node());
-  Ok(serde_json::to_string(&entries)?)
+  Ok(language.outline_entries(&source, tree.root_node()))
 }
 
 fn build_matcher(pattern: &str, regex: bool, case_sensitive: bool) -> Result<Regex> {

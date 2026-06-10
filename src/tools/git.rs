@@ -1,6 +1,6 @@
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use tokio::process::Command;
 use tokio::time::{Duration, timeout};
@@ -40,6 +40,8 @@ struct GitChangesArgs {
   context: u32,
   #[serde(default)]
   stat_only: bool,
+  #[serde(default)]
+  symbols: bool,
 }
 
 #[derive(Deserialize)]
@@ -127,6 +129,20 @@ struct GitStatusEntry {
   diff: Option<GitDiffDelta>,
   #[serde(skip_serializing_if = "Option::is_none")]
   staged_diff: Option<GitDiffDelta>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  symbols: Option<Vec<ChangedSymbol>>,
+}
+
+#[derive(Serialize, Clone)]
+struct ChangedSymbol {
+  name: String,
+  kind: String,
+  start_line: usize,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  end_line: Option<usize>,
+  signature: String,
+  changed_ranges: Vec<[usize; 2]>,
+  changed_line_count: usize,
 }
 
 #[derive(Serialize, Clone)]
@@ -265,6 +281,7 @@ fn parse_porcelain_v1_z(stdout: &[u8]) -> Result<Vec<GitStatusEntry>> {
           state_description: "Untracked".to_string(),
           diff: None,
           staged_diff: None,
+          symbols: None,
         });
       }
       b"!!" => {
@@ -281,6 +298,7 @@ fn parse_porcelain_v1_z(stdout: &[u8]) -> Result<Vec<GitStatusEntry>> {
           state_description: "Ignored".to_string(),
           diff: None,
           staged_diff: None,
+          symbols: None,
         });
       }
       _ => {
@@ -318,6 +336,7 @@ fn parse_porcelain_v1_z(stdout: &[u8]) -> Result<Vec<GitStatusEntry>> {
           state_description: state_description(x, y),
           diff: None,
           staged_diff: None,
+          symbols: None,
         });
       }
     }
@@ -759,13 +778,15 @@ pub async fn git_changes(ctx: ToolContext, args: &str) -> Result<String> {
 
   // 3. Run diffs
   let base = args.base.as_deref();
+  let stat_only_for_diff = args.stat_only && !args.symbols;
+
   let worktree_deltas = if !worktree_paths.is_empty() {
     run_diff(
       ctx.workspace.root(),
       &worktree_paths,
       context,
       false,
-      args.stat_only,
+      stat_only_for_diff,
       base,
     )
     .await?
@@ -779,7 +800,7 @@ pub async fn git_changes(ctx: ToolContext, args: &str) -> Result<String> {
       &staged_paths,
       context,
       true,
-      args.stat_only,
+      stat_only_for_diff,
       base,
     )
     .await?
@@ -797,7 +818,178 @@ pub async fn git_changes(ctx: ToolContext, args: &str) -> Result<String> {
     }
   }
 
+  if args.symbols {
+    attach_changed_symbols(&ctx, &mut entries);
+  }
+
+  if args.stat_only && args.symbols {
+    for entry in &mut entries {
+      if let Some(delta) = entry.diff.as_mut() {
+        delta.hunks = None;
+      }
+      if let Some(delta) = entry.staged_diff.as_mut() {
+        delta.hunks = None;
+      }
+    }
+  }
+
   Ok(serde_json::to_string(&entries)?)
+}
+
+fn attach_changed_symbols(ctx: &ToolContext, entries: &mut [GitStatusEntry]) {
+  let mut outlines: HashMap<String, Option<Vec<crate::tools::search::OutlineEntry>>> =
+    HashMap::new();
+
+  for entry in entries {
+    let mut changed_lines = HashSet::new();
+    if let Some(delta) = &entry.diff {
+      collect_changed_new_lines(delta, &mut changed_lines);
+    }
+    if let Some(delta) = &entry.staged_diff {
+      collect_changed_new_lines(delta, &mut changed_lines);
+    }
+    if changed_lines.is_empty() {
+      continue;
+    }
+
+    let outline = outlines
+      .entry(entry.path.clone())
+      .or_insert_with(|| {
+        let path = ctx.workspace.workspace_path(&entry.path).ok()?;
+        crate::tools::search::outline_entries_for_path(&path, &entry.path).ok()
+      })
+      .as_ref();
+
+    let Some(outline) = outline else {
+      continue;
+    };
+    let symbols = changed_symbols_for_lines(outline, &changed_lines);
+    if !symbols.is_empty() {
+      entry.symbols = Some(symbols);
+    }
+  }
+}
+
+fn collect_changed_new_lines(delta: &GitDiffDelta, out: &mut HashSet<usize>) {
+  if delta.is_binary {
+    return;
+  }
+  let Some(hunks) = &delta.hunks else {
+    return;
+  };
+
+  for hunk in hunks {
+    let mut has_current_changed_line = false;
+    let mut has_deletion = false;
+    for line in &hunk.lines {
+      match line.r#type.as_str() {
+        "addition" => {
+          if let Some(new_line) = line.new_line
+            && new_line > 0
+          {
+            out.insert(new_line as usize);
+            has_current_changed_line = true;
+          }
+        }
+        "deletion" => {
+          has_deletion = true;
+        }
+        _ => {}
+      }
+    }
+
+    if !has_current_changed_line && has_deletion {
+      out.insert(hunk.new_start.max(1) as usize);
+    }
+  }
+}
+
+fn changed_symbols_for_lines(
+  outline: &[crate::tools::search::OutlineEntry],
+  changed_lines: &HashSet<usize>,
+) -> Vec<ChangedSymbol> {
+  type SymbolKey = (String, String, usize, Option<usize>);
+  type SymbolLines<'a> = (&'a crate::tools::search::OutlineEntry, Vec<usize>);
+
+  let mut by_symbol: HashMap<SymbolKey, SymbolLines<'_>> = HashMap::new();
+  let mut lines: Vec<_> = changed_lines.iter().copied().collect();
+  lines.sort_unstable();
+
+  for line in lines {
+    let Some(entry) = smallest_containing_entry(outline, line) else {
+      continue;
+    };
+    let key = (
+      entry.kind.clone(),
+      entry.name.clone(),
+      entry.start_line,
+      entry.end_line,
+    );
+    by_symbol
+      .entry(key)
+      .or_insert_with(|| (entry, Vec::new()))
+      .1
+      .push(line);
+  }
+
+  let mut symbols: Vec<_> = by_symbol
+    .into_values()
+    .map(|(entry, mut lines)| {
+      lines.sort_unstable();
+      lines.dedup();
+      ChangedSymbol {
+        name: entry.name.clone(),
+        kind: entry.kind.clone(),
+        start_line: entry.start_line,
+        end_line: entry.end_line,
+        signature: entry.signature.clone(),
+        changed_ranges: compact_line_ranges(&lines),
+        changed_line_count: lines.len(),
+      }
+    })
+    .collect();
+  symbols.sort_by_key(|symbol| symbol.start_line);
+  symbols
+}
+
+fn compact_line_ranges(lines: &[usize]) -> Vec<[usize; 2]> {
+  let mut ranges = Vec::new();
+  let Some((&first, rest)) = lines.split_first() else {
+    return ranges;
+  };
+
+  let mut start = first;
+  let mut end = first;
+  for &line in rest {
+    if line == end + 1 {
+      end = line;
+    } else {
+      ranges.push([start, end]);
+      start = line;
+      end = line;
+    }
+  }
+  ranges.push([start, end]);
+  ranges
+}
+
+fn smallest_containing_entry(
+  outline: &[crate::tools::search::OutlineEntry],
+  line: usize,
+) -> Option<&crate::tools::search::OutlineEntry> {
+  outline
+    .iter()
+    .filter(|entry| {
+      let end = entry.end_line.unwrap_or(entry.start_line);
+      entry.start_line <= line && line <= end
+    })
+    .min_by_key(|entry| {
+      let end = entry.end_line.unwrap_or(entry.start_line);
+      (
+        end.saturating_sub(entry.start_line),
+        std::cmp::Reverse(entry.start_line),
+      )
+    })
 }
 
 pub async fn git_show(ctx: ToolContext, args: &str) -> Result<String> {
@@ -894,6 +1086,47 @@ pub async fn git_log(ctx: ToolContext, args: &str) -> Result<String> {
 mod tests {
   use super::*;
   use crate::workspace::Workspace;
+  use std::sync::Arc;
+
+  fn test_context(root: &std::path::Path) -> ToolContext {
+    let workspace = Workspace::from_root(root.to_path_buf());
+    let skill_store = Arc::new(crate::skills::SkillStore::new(workspace.root()));
+    let client = crate::client::Client::new(
+      crate::client::ClientConfig {
+        url: "http://localhost".to_string(),
+        api_key: "dummy".into(),
+        request_timeout_secs: 30,
+        require_sse_done: true,
+      },
+      |_, _| Ok(serde_json::Value::Null),
+    )
+    .unwrap();
+    ToolContext {
+      workspace,
+      skill_store,
+      lua_session: Arc::new(parking_lot::Mutex::new(None)),
+      client,
+      output_sink: None,
+      verbose: false,
+      actor_id: "director".to_string(),
+      agent_depth: 0,
+    }
+  }
+
+  fn run_git_test_command(root: &std::path::Path, args: &[&str]) {
+    let output = std::process::Command::new("git")
+      .arg("-C")
+      .arg(root)
+      .args(args)
+      .output()
+      .unwrap();
+    assert!(
+      output.status.success(),
+      "git {:?} failed: {}",
+      args,
+      String::from_utf8_lossy(&output.stderr)
+    );
+  }
 
   #[test]
   fn test_parse_hunk_header() {
@@ -926,6 +1159,49 @@ mod tests {
       bounded_log_entries(MAX_GIT_LOG_ENTRIES + 1),
       MAX_GIT_LOG_ENTRIES
     );
+  }
+
+  #[tokio::test]
+  async fn git_changes_attaches_smallest_enclosing_symbols() -> Result<()> {
+    let temp = tempfile::tempdir()?;
+    let root = temp.path();
+    run_git_test_command(root, &["init"]);
+    run_git_test_command(root, &["config", "user.email", "test@test.com"]);
+    run_git_test_command(root, &["config", "user.name", "Test"]);
+
+    std::fs::create_dir(root.join("src"))?;
+    std::fs::write(
+      root.join("src/lib.rs"),
+      "pub struct Thing {\n  value: i32,\n}\n\nimpl Thing {\n  pub fn new() -> Self {\n    Self { value: 1 }\n  }\n\n  pub fn set(&mut self, value: i32) {\n    self.value = value;\n  }\n}\n",
+    )?;
+    run_git_test_command(root, &["add", "src/lib.rs"]);
+    run_git_test_command(root, &["commit", "-m", "init"]);
+
+    std::fs::write(
+      root.join("src/lib.rs"),
+      "pub struct Thing {\n  value: i32,\n}\n\nimpl Thing {\n  pub fn new() -> Self {\n    Self { value: 1 }\n  }\n\n  pub fn set(&mut self, value: i32) {\n    self.value = value + 1;\n  }\n}\n",
+    )?;
+
+    let out = git_changes(
+      test_context(root),
+      r#"{"symbols":true,"context":0,"stat_only":true}"#,
+    )
+    .await?;
+    let entries: serde_json::Value = serde_json::from_str(&out)?;
+    let entry = entries
+      .as_array()
+      .and_then(|entries| entries.first())
+      .expect("one changed file");
+    let symbols = entry["symbols"].as_array().expect("symbols array");
+
+    assert_eq!(symbols.len(), 1);
+    assert_eq!(symbols[0]["kind"], "method");
+    assert_eq!(symbols[0]["name"], "set");
+    assert_eq!(symbols[0]["changed_ranges"], serde_json::json!([[11, 11]]));
+    assert_eq!(symbols[0]["changed_line_count"], 1);
+    assert!(entry["diff"]["hunks"].is_null());
+
+    Ok(())
   }
 
   #[test]

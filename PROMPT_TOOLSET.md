@@ -286,22 +286,26 @@ Convenience function that returns **all** status entries (both staged and worktr
   - `context` (integer, optional): Context lines per hunk. Defaults to `3`, capped at `20`.
   - `stat_only` (boolean, optional): If `true`, omit `hunks` and return only stat summary.
   - `base` (string, optional): Compare against a specific ref (e.g. `"HEAD~3"`) instead of the default `HEAD`. Both `diff` (worktree vs base) and `staged_diff` (index vs base) use this ref.
+  - `symbols` (boolean, optional): If `true`, attach best-effort current-file outline entries enclosing changed hunk lines. Supported for `.rs`, `.go`, and `.py`. Defaults to `false`.
 - **Returns**: `(array_of_entries, nil)` or `(nil, error)`
 - **Note**: Each entry has the same fields as `git_status`, plus:
   - `diff` (object or nil): worktree changes (worktree vs base, or index vs worktree if no `base`), same shape as `git_diff` deltas.
   - `staged_diff` (object or nil): staged changes (index vs base, or HEAD vs index if no `base`), same shape.
+  - `symbols` (array or nil): present only when `symbols=true` and enclosing outline entries are found. Each symbol has `name`, `kind`, `start_line`, optional `end_line`, `signature`, `changed_ranges` (array of inclusive `[start_line, end_line]` ranges), and `changed_line_count`.
+- **Symbols note**: `symbols=true` is a navigation aid, not a semantic diff. It maps changed hunk line numbers to the smallest current-file outline entry, so a method usually wins over an enclosing `impl`. Use `changed_line_count` and `changed_ranges` to distinguish a tiny change inside a large symbol from a broad rewrite. Unsupported files, deleted files, binary files, or changes outside an outline entry simply omit `symbols`.
 - **Output size warning**: Full hunks on large changes can exceed the 32,768-character stdout cap. For large refactors, use `stat_only=true` first to scope the change, then call `git_diff` on specific files.
-- **Usage note**: `git_changes` is useful for quick small/medium change review; for large diffs, prefer targeted `git_status` plus `git_diff{paths=..., stat_only=true}` before requesting hunks.
+- **Usage note**: For changed source files, prefer `git_changes{symbols=true, context=0}` before reading whole files. Then inspect only the relevant region with `read_lines(path, symbol.start_line, symbol.end_line)`.
 - **Example**:
   ```lua
-  local changes, err = git_changes()
+  local changes, err = git_changes{symbols = true, context = 0}
   if not changes then error(err) end
   for _, e in ipairs(changes) do
-    if e.diff then
-      print(e.path, "worktree:", #e.diff.hunks, "hunks")
-    end
-    if e.staged_diff then
-      print(e.path, "staged:", #e.staged_diff.hunks, "hunks")
+    print(e.path, e.status)
+    if e.symbols then
+      for _, s in ipairs(e.symbols) do
+        local span = s.start_line .. "-" .. (s.end_line or s.start_line)
+        print("  ", s.kind, s.name, span, s.changed_line_count .. " changed lines")
+      end
     end
   end
   ```
@@ -435,7 +439,7 @@ Runs multiple Lua functions concurrently inside the async executor, using cooper
 
 For targeted code edits:
 1. Inspect the worktree/index state for files you may touch.
-2. Read the smallest useful region with `read_hash_anchors`.
+2. For changed source files, use `git_changes{symbols=true, context=0}` to locate the changed symbol, then read the smallest useful region with `read_hash_anchors` or `read_lines`.
 3. Build one non-overlapping `ops` batch using exact `"line:hash"` anchors.
 4. Apply once with `apply_anchor_edits`, then verify the resulting file or diff.
 
