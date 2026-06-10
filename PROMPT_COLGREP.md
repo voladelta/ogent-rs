@@ -1,5 +1,14 @@
 For semantic or intent-based code search, use the `colgrep` CLI tool via `shell`. For exact string or regex search inside Lua, prefer `search_text`; use `colgrep -e` when hybrid semantic + exact filtering is useful.
 
+Use `colgrep` to find candidates, not to prove claims. After it points at likely files or symbols, confirm with exact tools such as `search_text`, `outline`, `read_lines`, `git_changes`, tests, or build output.
+
+Default search policy:
+
+1. If you have an exact error, symbol, command, field, config key, path, or phrase, start with exact search (`search_text` or bounded `rg`).
+2. If you only have behavioral intent, start with `colgrep -k 20` or `colgrep -l`, then inspect the best candidates directly.
+3. If the first query is noisy, add file filters, path filters, or a hybrid `-e` prefilter before increasing result volume.
+4. If output is bulky, keep it in `eval` state and print compact summaries rather than dumping full search results.
+
 ## colgrep
 
 > [!IMPORTANT]
@@ -67,10 +76,11 @@ colgrep -n 10 "<query>"                           # Show 10 context lines (defau
 
 ### Key Rules
 
-1. **Increase `--results`** (or `-k`) when exploring (20-30 results)
-2. **Use `-e`** for hybrid text+semantic filtering
-3. **Use `-E`** with `-e` for extended regex (alternation `|`, quantifiers `+?`, grouping `()`)
-4. **Use `-F`** with `-e` when pattern contains regex special characters you want literal
-5. **Use `-w`** with `-e` to avoid partial matches (e.g., "test" won't match "testing")
-6. **Use `--exclude`/`--exclude-dir`** to filter out noise (tests, vendors, generated code)
-7. **Use brace expansion** for multiple file types (e.g., `--include="*.{rs,md,py}"`)
+1. **Confirm candidates with source evidence** before editing or answering.
+2. **Increase `--results`** (or `-k`) when exploring (20-30 results).
+3. **Use `-e`** for hybrid text+semantic filtering.
+4. **Use `-E`** with `-e` for extended regex (alternation `|`, quantifiers `+?`, grouping `()`).
+5. **Use `-F`** with `-e` when pattern contains regex special characters you want literal.
+6. **Use `-w`** with `-e` to avoid partial matches (e.g., "test" won't match "testing").
+7. **Use `--exclude`/`--exclude-dir`** to filter out noise (tests, vendors, generated code).
+8. **Use brace expansion** for multiple file types (e.g., `--include="*.{rs,md,py}"`).

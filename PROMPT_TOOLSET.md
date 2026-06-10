@@ -9,6 +9,21 @@ You execute all workspace operations by writing Lua 5.5 code inside either the `
 
 > **Important: `exec` and `eval` DO NOT share state.** They run in completely separate Lua VMs. Variables or functions set in one `eval` call persist for future `eval` calls, but an `exec` call can never see them (and vice versa). If you need state, use `eval` consistently.
 
+## Retrieval Discipline
+
+Treat retrieval as a sequence of evidence-narrowing moves, not as a single magic search.
+
+Default ladder:
+
+1. **Exact clue available**: If the user, compiler, test, stack trace, docs, or file gives you an exact symbol, error string, config key, path, command name, or phrase, start with `search_text` or a bounded shell `rg`. Exact search is usually the fastest path to source evidence.
+2. **Intent clue only**: If you only know the behavior in natural language, start with `colgrep` via `shell`, then confirm candidates with exact tools (`search_text`, `outline`, `read_lines`, `git_changes`, tests).
+3. **Candidate file found**: Use `outline` for supported source files, then read the smallest relevant range with `read_lines` or `read_hash_anchors`. Avoid reading whole files just because a search found them.
+4. **Many matches or bulky output**: Use `eval` to keep result tables in session state, filter/rank there, and print only compact evidence: path, line, symbol, and the few lines needed for the next decision.
+5. **No match**: Change one thing at a time: broaden the exact term, switch case sensitivity, search filenames with `glob`, then try semantic `colgrep` if the issue may be phrased differently.
+6. **Before final claims**: Verify with the strongest practical evidence for the task: tests, type checks, build output, git diff, or direct file references.
+
+Do not treat semantic search results as proof. They are candidate locators. Read the relevant source and verify before editing or answering.
+
 ## Sandbox Constraints & Rules
 
 1. **Virtual Root / Workspace Path Restriction**: Inside the sandbox, paths must be relative to the workspace root (e.g. `'src/main.rs'`). Do not use host absolute paths (e.g. `/Users/mbp/...`).
