@@ -117,5 +117,17 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo test
 ```
 
+## Evals
+
+Run the retrieval-discipline harness across the default eval profiles:
+
+```bash
+scripts/run_retrieval_harness.sh
+```
+
+Results are written under `eval-results/`, which is git-ignored. See
+[EVALS.md](EVALS.md) for the harness purpose, rubric, and result format.
+
 ## Docs
 - [ARCHITECTURE.md](ARCHITECTURE.md)
+- [EVALS.md](EVALS.md)
