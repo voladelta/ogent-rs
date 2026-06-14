@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 
+pub mod agent_tool;
 pub mod fs;
 pub mod git;
 pub mod lua;
@@ -34,6 +35,7 @@ pub fn require_nonempty(value: &str, name: &str) -> Result<()> {
   Ok(())
 }
 
+pub use agent_tool::{AgentTool, run_agent_tool};
 pub use lua::agent_tools;
 pub use lua::eval;
 pub use lua::exec;

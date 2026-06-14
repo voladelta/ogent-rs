@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq)]
@@ -83,7 +83,7 @@ pub struct ToolCall {
   #[serde(default)]
   pub id: String,
   #[serde(rename = "type", default)]
-  pub kind: String,
+  pub kind: ToolKind,
   pub function: FunctionCall,
 }
 
@@ -95,7 +95,7 @@ impl ToolCall {
   ) -> Self {
     Self {
       id: id.into(),
-      kind: "function".to_string(),
+      kind: ToolKind::Function,
       function: FunctionCall {
         name: name.into(),
         arguments: arguments.into(),
@@ -112,10 +112,30 @@ pub struct FunctionCall {
   pub arguments: String,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolKind {
+  #[default]
+  Function,
+}
+
+impl<'de> Deserialize<'de> for ToolKind {
+  fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+  where
+    D: Deserializer<'de>,
+  {
+    let value = String::deserialize(deserializer)?;
+    match value.as_str() {
+      "" | "function" => Ok(Self::Function),
+      other => Err(serde::de::Error::unknown_variant(other, &["function"])),
+    }
+  }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Tool {
   #[serde(rename = "type")]
-  pub kind: String,
+  pub kind: ToolKind,
   pub function: ToolFunction,
 }
 
@@ -138,4 +158,30 @@ pub struct ChatResponse {
   pub reasoning_content: String,
   pub tool_calls: Vec<ToolCall>,
   pub usage: Usage,
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn tool_kind_serializes_as_provider_function_type() {
+    assert_eq!(
+      serde_json::to_value(ToolKind::Function).unwrap(),
+      serde_json::Value::String("function".to_string())
+    );
+  }
+
+  #[test]
+  fn tool_kind_accepts_legacy_empty_string_as_function() {
+    assert_eq!(
+      serde_json::from_str::<ToolKind>(r#""""#).unwrap(),
+      ToolKind::Function
+    );
+  }
+
+  #[test]
+  fn tool_kind_rejects_unknown_type() {
+    assert!(serde_json::from_str::<ToolKind>(r#""custom""#).is_err());
+  }
 }

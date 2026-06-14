@@ -35,6 +35,35 @@ User prompt
                      └─> agent{...}, parallel{...}   ← spawns subagents
 ```
 
+## At a Glance
+
+The fastest way to understand the repo is to keep three boundaries in mind:
+
+| Boundary | Owner | What crosses it |
+|---|---|---|
+| CLI process -> agent runtime | `src/main.rs` | Args, config, initial/resumed messages, final persistence |
+| Agent runtime -> model | `src/agent.rs`, `src/client.rs`, `src/providers.rs`, `src/sse.rs` | `Vec<Message>`, two `Tool` schemas, streamed `ChatResponse` data |
+| Model -> workspace | `src/tools/agent_tool.rs`, `src/tools/lua.rs`, `src/workspace.rs` | Only `exec`/`eval` tool calls; all real workspace effects go through Lua globals |
+
+Use this read order when you need the shape quickly:
+
+| Need | Read |
+|---|---|
+| How a run starts and exits | `src/main.rs`, then `src/session.rs` |
+| How turns advance | `src/agent.rs`, especially `Agent::run_loop` |
+| Why the model only sees two tools | `src/tools/agent_tool.rs`, `src/tools/lua.rs`, `src/types.rs` |
+| How Lua reaches files, shell, git, web, skills, and subagents | `src/tools/lua.rs`, then the specific `src/tools/*.rs` module |
+| Why path access is bounded | `src/workspace.rs`, then filesystem tools in `src/tools/fs.rs` |
+| How provider streams become tool calls | `src/client.rs`, `src/providers.rs`, `src/sse.rs` |
+
+High-signal invariants:
+
+- The model-visible tool domain is closed: `exec` and `eval`.
+- Lua globals are internal capabilities, not provider-facing tools.
+- Workspace paths are resolved at the boundary by `Workspace`.
+- Root CLI runs may persist sessions; subagents do not.
+- `exec` is stateless; `eval` owns the persistent Lua VM for a session.
+
 ## Code Map
 
 ### [`src/main.rs`](src/main.rs)
@@ -69,8 +98,7 @@ The agent turn loop and output pipeline.
 1. Opens a streaming channel to the sink.
 2. Calls `client.chat(messages, tools, stream_tx)`.
 3. Awaits the stream handle, then handles the response.
-4. If the response has tool calls, dispatches `exec` and `eval` directly to
-   `tools::exec()` and `tools::eval()`.
+4. If the response has tool calls, dispatches them through `tools::run_agent_tool`.
 5. Appends all messages (assistant + tool results) to `self.messages`.
 6. Breaks when no tool calls are present.
 
@@ -92,8 +120,8 @@ Shared data types. No logic. Everything else imports from here.
 - **`Message`** — a conversation turn. Has `role` (`System`, `User`, `Assistant`, `Tool`),
   `content`, `origin` (`Human`, `Internal`, `Model`, `Tool`), optional `reasoning_content`,
   and optional `tool_calls`.
-- **`ToolCall`** / **`FunctionCall`** — a model-requested tool invocation with `id`, `name`,
-  and `arguments` (a JSON string).
+- **`ToolCall`** / **`FunctionCall`** — a model-requested tool invocation with `id`, closed
+  `ToolKind`, `name`, and `arguments` (a JSON string).
 - **`Tool`** / **`ToolFunction`** — the schema sent to the LLM. Only `exec` and `eval` are
   ever sent.
 - **`ChatResponse`** — the raw response from the LLM: `content`, `reasoning_content`,
@@ -118,6 +146,10 @@ Tool context and helpers.
 **`ToolContext`** is passed to every tool handler. It carries everything a tool might need:
 `workspace`, `skill_store`, `lua_session`, `client`, `output_sink`, `verbose`, `actor_id`.
 
+**`agent_tool.rs`** owns the closed agent-tool domain. `AgentTool` is the exhaustive set of
+top-level model tools (`Exec`, `Eval`), `LuaToolRequest` parses the schema arguments, and
+`run_agent_tool` dispatches to the Lua runtime with explicit request/execution error types.
+
 **`agent_tools()`** returns the two `Tool` schemas sent to the LLM: `exec` and `eval`.
 These are defined explicitly in `tools/lua.rs`.
 
@@ -132,8 +164,8 @@ All other tools are internal — accessible only via Lua scripts.
 
 The Lua execution sandbox. This is the most important file in the codebase.
 
-`exec_tool` creates a **fresh** sandboxed Lua VM per call (stateless).
-`eval_tool` reuses the **session-persistent** Lua VM stored in `Agent.lua_session` (stateful).
+`exec` creates a **fresh** sandboxed Lua VM per call (stateless).
+`eval` reuses the **session-persistent** Lua VM stored in `Agent.lua_session` (stateful).
 
 Both go through `run_lua_vm_async`, which:
 1. Overrides `print` to capture stdout into a buffer.
@@ -338,7 +370,9 @@ Holds profiles (model name, temperature, etc.) and providers (base URL, API key 
 The model's tool schema is locked to `exec` and `eval`. This means:
 - Any new workspace capability goes into a Lua global, not a new top-level tool.
 - The model cannot do anything the Lua sandbox doesn't allow.
-- Adding a capability requires only changing `register_tools_in_lua`.
+- Adding a Lua-side capability requires changing `register_tools_in_lua`.
+- Adding a top-level model tool requires extending the closed `AgentTool` and `ToolKind`
+  domains, following compiler errors, and adding the nearest tests.
 
 ### Subagent Spawning
 
@@ -355,7 +389,7 @@ The counter is threaded through `ToolContext` so every tool dispatch knows the c
 
 ### Output Tagging
 
-All terminal output is prefixed with `[actor_id]`. The `print_actor_text` function uses a
+All terminal output is prefixed with `[actor_id]`. The `print_to_stderr` function uses a
 `Mutex<(last_actor, at_line_start)>` singleton to detect when the active actor changes and
 insert a newline, preventing two actors from interleaving on the same line.
 
@@ -371,7 +405,7 @@ Two resolution modes exist: **Write mode** (`workspace_path`) restricts to `work
 |---|---|---|
 | CLI flags and agent startup | [src/main.rs](src/main.rs) | [README.md](README.md) |
 | Agent turn loop | [src/agent.rs](src/agent.rs) | [src/types.rs](src/types.rs) |
-| Tool dispatch and registry | [src/tools/mod.rs](src/tools/mod.rs) | — |
+| Tool dispatch and registry | [src/tools/agent_tool.rs](src/tools/agent_tool.rs) | [src/tools/mod.rs](src/tools/mod.rs), [src/tools/lua.rs](src/tools/lua.rs) |
 | Lua sandbox and subagent DSL | [src/tools/lua.rs](src/tools/lua.rs) | [src/tools/mod.rs](src/tools/mod.rs) |
 | Filesystem and editing tools | [src/tools/fs.rs](src/tools/fs.rs) | [src/hashline.rs](src/hashline.rs) |
 | Anchored edit mechanics | [src/hashline.rs](src/hashline.rs) | [src/tools/fs.rs](src/tools/fs.rs) |

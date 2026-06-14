@@ -97,7 +97,7 @@ impl AgentOutputSink for CliOutputSink {
 
   fn tool_call(&self, actor_id: &str, verbose: bool, tool_call: &ToolCall) {
     let name = &tool_call.function.name;
-    if (name == "exec" || name == "eval")
+    if crate::tools::AgentTool::from_name(name).is_ok()
       && let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&tool_call.function.arguments)
     {
       let reason = parsed.get("reason").and_then(|r| r.as_str()).unwrap_or("");
@@ -126,7 +126,7 @@ impl AgentOutputSink for CliOutputSink {
     content: &str,
     failed: bool,
   ) {
-    if tool_name == "exec" || tool_name == "eval" {
+    if crate::tools::AgentTool::from_name(tool_name).is_ok() {
       if failed {
         print_to_stderr(
           actor_id,
@@ -305,16 +305,7 @@ impl Agent {
           actor_id: self.actor_id.clone(),
           agent_depth: self.agent_depth,
         };
-        let lua_code: String =
-          serde_json::from_str::<serde_json::Value>(&tool_call.function.arguments)
-            .ok()
-            .and_then(|v| v.get("code").and_then(|c| c.as_str()).map(String::from))
-            .unwrap_or_else(|| tool_call.function.arguments.clone());
-        let result = match tool_call.function.name.as_str() {
-          "exec" => crate::tools::exec(ctx, &lua_code).await,
-          "eval" => crate::tools::eval(ctx, &lua_code).await,
-          other => Err(anyhow::anyhow!("unknown tool: {other}")),
-        };
+        let result = crate::tools::run_agent_tool(ctx, &tool_call).await;
         let failed = result.is_err();
         let content = match result {
           Ok(content) => content,

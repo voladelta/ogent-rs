@@ -7,14 +7,14 @@ use std::sync::Arc;
 
 use crate::tools::ToolContext;
 
-use crate::types::{Tool, ToolFunction};
+use crate::types::{Tool, ToolFunction, ToolKind};
 
 const MAX_AGENT_DEPTH: u32 = 3;
 
 pub fn agent_tools() -> Vec<Tool> {
   vec![
     Tool {
-      kind: "function".to_string(),
+      kind: ToolKind::Function,
       function: ToolFunction {
         name: "exec".to_string(),
         description: "Execute a one-off stateless Lua 5.5 script. Captures stdout prints and the final return value.".to_string(),
@@ -36,7 +36,7 @@ pub fn agent_tools() -> Vec<Tool> {
       },
     },
     Tool {
-      kind: "function".to_string(),
+      kind: ToolKind::Function,
       function: ToolFunction {
         name: "eval".to_string(),
         description: "Execute a stateful Lua 5.5 script within the persistent session. Captures stdout prints and the final return value. Retains global variables/functions between calls.".to_string(),

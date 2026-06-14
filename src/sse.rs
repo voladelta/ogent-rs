@@ -1,7 +1,7 @@
 use futures_util::StreamExt;
 use serde::{Deserialize, Deserializer};
 
-use crate::types::{ChatResponse, ToolCall, Usage};
+use crate::types::{ChatResponse, ToolCall, ToolKind, Usage};
 
 #[derive(Debug, Clone)]
 pub enum StreamEvent {
@@ -43,7 +43,7 @@ struct DeltaToolCall {
     default,
     deserialize_with = "deserialize_default_on_null"
   )]
-  kind: String,
+  kind: Option<ToolKind>,
   #[serde(default, deserialize_with = "deserialize_default_on_null")]
   function: DeltaFunctionCall,
 }
@@ -108,7 +108,6 @@ fn decode_sse_line(line: &[u8]) -> Result<SseLine, SseError> {
 #[derive(Default)]
 struct AccumulatedToolCall {
   id: String,
-  kind: String,
   name: String,
   arguments: String,
 }
@@ -155,8 +154,8 @@ impl ChatAccumulator {
         if !tc.id.is_empty() {
           a.id = tc.id;
         }
-        if !tc.kind.is_empty() {
-          a.kind = tc.kind;
+        match tc.kind.unwrap_or_default() {
+          ToolKind::Function => {}
         }
         if let Some(name) = tc.function.name
           && !name.is_empty()
@@ -406,7 +405,7 @@ mod tests {
     let resp = acc.finish();
     let tc = resp.tool_calls.first().unwrap();
     assert_eq!(tc.id, "x");
-    assert_eq!(tc.kind, "function");
+    assert_eq!(tc.kind, ToolKind::Function);
     assert_eq!(tc.function.name, "");
     assert_eq!(tc.function.arguments, "");
   }
