@@ -32,7 +32,7 @@ ogent --profile kimi "Review the staged diff"
 
 | Flag | Meaning |
 | --- | --- |
-| `--profile <name>` | Model/profile selection, overriding the default in `config.yaml`. Available profiles: `ds-flash`, `ds-flash-max`, `ds-pro`, `ds-pro-max`, `kimi`, `glm`, `mimo`, `mimo-pro`. |
+| `--profile <name>` | Model/profile selection, overriding the default in `config.yaml`. Available profiles: `ds-flash`, `ds-flash-max`, `ds-pro`, `ds-pro-max`, `kimi`, `glm`, `glm-max`, `mimo`, `mimo-pro`. |
 | `-v`, `--verbose`  | Show full thinking reasoning trace (`[thinking]`), Lua execution code, and tool returns. Default mode only prints actor explanation reasons, task updates, and final assistant replies. |
 | `-t`, `--temp` | Run a temporary session. The transcript is not persisted on exit. |
 | `-r`, `--resume <session_id>` | Resume a previous session from `.ogent/sessions/{session_id}.jsonl`. If the session does not exist, `ogent` prints an error and exits. |

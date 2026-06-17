@@ -33,8 +33,14 @@ profiles:
     max_tokens: 262144
   glm:
     backend: z
-    model: glm-5.1
-    effort: ""
+    model: glm-5.2
+    effort: high
+    context_limit: 200000
+    max_tokens: 131072
+  glm-max:
+    backend: z
+    model: glm-5.2
+    effort: max
     context_limit: 200000
     max_tokens: 131072
   mimo:

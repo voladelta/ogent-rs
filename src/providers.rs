@@ -50,6 +50,8 @@ struct ZRequest<'a> {
   tools: &'a [Tool],
   stream: bool,
   max_tokens: i32,
+  #[serde(skip_serializing_if = "str::is_empty")]
+  reasoning_effort: &'a str,
   thinking: ZThinking,
 }
 
@@ -195,6 +197,7 @@ pub fn new_client(profile: &Profile, provider: &ProviderConfig) -> Result<Client
     }
     "z" => {
       let model = profile.model.clone();
+      let effort = profile.effort.clone();
       let max_tokens = profile.max_tokens;
       Ok(Client::new(
         ClientConfig {
@@ -211,6 +214,7 @@ pub fn new_client(profile: &Profile, provider: &ProviderConfig) -> Result<Client
             tools,
             stream: true,
             max_tokens,
+            reasoning_effort: &effort,
             thinking: ZThinking {
               kind: "enabled",
               clear_thinking: false,
@@ -370,6 +374,40 @@ mod tests {
         .get("reasoning_split")
         .and_then(serde_json::Value::as_bool),
       Some(true)
+    );
+  }
+
+  #[test]
+  fn z_request_includes_reasoning_effort() {
+    let tool_calls = Vec::new();
+    let messages = vec![ProviderMessage {
+      role: &Role::User,
+      content: ProviderMessageContent {
+        text: "hello",
+        image_url: None,
+      },
+      reasoning_content: "",
+      tool_calls: &tool_calls,
+      tool_call_id: "",
+    }];
+    let value = serde_json::to_value(ZRequest {
+      model: "glm-5.2",
+      messages,
+      tools: &[],
+      stream: false,
+      max_tokens: 1,
+      reasoning_effort: "max",
+      thinking: ZThinking {
+        kind: "enabled",
+        clear_thinking: false,
+      },
+    })
+    .unwrap();
+    assert_eq!(
+      value
+        .get("reasoning_effort")
+        .and_then(serde_json::Value::as_str),
+      Some("max")
     );
   }
 
