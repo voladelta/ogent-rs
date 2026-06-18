@@ -27,7 +27,7 @@ profiles:
     max_tokens: 393216
   kimi:
     backend: kimi
-    model: moonshotai/Kimi-K2.6
+    model: moonshotai/Kimi-K2.7-Code
     effort: ""
     context_limit: 256000
     max_tokens: 262144
