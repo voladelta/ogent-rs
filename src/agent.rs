@@ -37,37 +37,86 @@ pub trait AgentOutputSink: Send + Sync {
   fn task_update(&self, _actor_id: &str, _status: &str, _summary: &str) {}
 }
 
+#[derive(Debug)]
+struct StderrLineState {
+  last_actor: String,
+  at_line_start: bool,
+  needs_stdout_separator: bool,
+}
+
+impl Default for StderrLineState {
+  fn default() -> Self {
+    Self {
+      last_actor: String::new(),
+      at_line_start: true,
+      needs_stdout_separator: false,
+    }
+  }
+}
+
+impl StderrLineState {
+  fn write_text(&mut self, actor_id: &str, text: &str, mut write: impl FnMut(&str)) {
+    if !self.at_line_start && self.last_actor != actor_id {
+      write("\n");
+      self.at_line_start = true;
+    }
+    self.last_actor = actor_id.to_string();
+
+    for (i, part) in text.split('\n').enumerate() {
+      if i > 0 {
+        write("\n");
+        self.at_line_start = true;
+      }
+      if part.is_empty() {
+        continue;
+      }
+      if self.at_line_start {
+        write(&format!("[{actor_id}] "));
+        self.at_line_start = false;
+      }
+      write(part);
+      self.needs_stdout_separator = true;
+    }
+  }
+
+  fn write_stdout_separator(&mut self, mut write: impl FnMut(&str)) {
+    if !self.needs_stdout_separator {
+      return;
+    }
+    if self.at_line_start {
+      write("\n");
+    } else {
+      write("\n\n");
+      self.at_line_start = true;
+    }
+    self.needs_stdout_separator = false;
+  }
+}
+
+fn stderr_line_state() -> &'static std::sync::Mutex<StderrLineState> {
+  static STATE: OnceLock<std::sync::Mutex<StderrLineState>> = OnceLock::new();
+  STATE.get_or_init(|| std::sync::Mutex::new(StderrLineState::default()))
+}
+
 fn print_to_stdout(text: &str) {
+  finish_stderr_block_before_stdout();
   print!("{text}");
   let _ = std::io::stdout().flush();
 }
 
 fn print_to_stderr(actor_id: &str, text: &str) {
-  static STATE: OnceLock<std::sync::Mutex<(String, bool)>> = OnceLock::new();
-  let lock = STATE.get_or_init(|| std::sync::Mutex::new((String::new(), true)));
-  let mut guard = lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-  let (last_actor, at_line_start) = &mut *guard;
+  let mut guard = stderr_line_state()
+    .lock()
+    .unwrap_or_else(|poisoned| poisoned.into_inner());
+  guard.write_text(actor_id, text, |part| eprint!("{part}"));
+  let _ = std::io::stderr().flush();
+}
 
-  if !*at_line_start && last_actor != actor_id {
-    eprintln!();
-    *at_line_start = true;
-  }
-  *last_actor = actor_id.to_string();
-
-  for (i, part) in text.split('\n').enumerate() {
-    if i > 0 {
-      eprintln!();
-      *at_line_start = true;
-    }
-    if part.is_empty() {
-      continue;
-    }
-    if *at_line_start {
-      eprint!("[{actor_id}] ");
-      *at_line_start = false;
-    }
-    eprint!("{part}");
-  }
+fn finish_stderr_block_before_stdout() {
+  let mut guard = stderr_line_state()
+    .lock()
+    .unwrap_or_else(|poisoned| poisoned.into_inner());
+  guard.write_stdout_separator(|part| eprint!("{part}"));
   let _ = std::io::stderr().flush();
 }
 
@@ -351,6 +400,32 @@ mod tests {
   #[test]
   fn truncate_for_cli_keeps_short_text() {
     assert_eq!(truncate_for_cli("hello   world", 20), "hello world");
+  }
+
+  #[test]
+  fn stderr_state_separates_visible_stderr_before_stdout() {
+    let mut state = StderrLineState::default();
+    let mut rendered = String::new();
+
+    state.write_text("director][thinking", "thinking content", |part| {
+      rendered.push_str(part)
+    });
+    state.write_stdout_separator(|part| rendered.push_str(part));
+
+    assert_eq!(rendered, "[director][thinking] thinking content\n\n");
+  }
+
+  #[test]
+  fn stderr_state_keeps_exact_blank_line_when_stderr_already_ended_line() {
+    let mut state = StderrLineState::default();
+    let mut rendered = String::new();
+
+    state.write_text("director][thinking", "thinking content\n", |part| {
+      rendered.push_str(part)
+    });
+    state.write_stdout_separator(|part| rendered.push_str(part));
+
+    assert_eq!(rendered, "[director][thinking] thinking content\n\n");
   }
 
   #[test]
