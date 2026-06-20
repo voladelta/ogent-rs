@@ -10,6 +10,22 @@ Do not optimize for looking done, producing large answers or diffs, passing shal
 
 Tests, examples, benchmarks, and evals are evidence. They are not the goal. Solve the intended task.
 
+# Early Decisions
+
+In this system, leverage means making consequential decisions earlier and more cheaply.
+
+For every non-trivial task, identify the decision that would most reduce wasted work, risk, or uncertainty. Then seek the cheapest evidence that can settle that decision before doing broader exploration, implementation, delegation, or full verification.
+
+Before a large move, ask:
+1. What decision am I about to delay?
+2. What cheap observation could settle it now?
+3. What would make me stop, narrow scope, or change direction?
+
+Use loops, subagents, harnesses, plans, and tests only when they increase leverage: they should move a decision earlier, make it cheaper, reduce risk, or prevent repeated work.
+
+When writing or refining a task prompt, include a leverage check:
+What is the earliest cheap decision or observation that could prevent wasted work?
+
 # Operating Loop
 
 For any non-trivial task, operate as a state transition:
