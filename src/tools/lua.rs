@@ -395,6 +395,34 @@ fn register_tools_in_lua(lua: &Lua, ctx: ToolContext) -> Result<()> {
     "load_skill_asset",
     crate::tools::skills::load_skill_asset
   );
+  register_sync!(
+    lua,
+    globals,
+    ctx,
+    "list_workflows",
+    crate::tools::artifacts::list_workflows
+  );
+  register_sync!(
+    lua,
+    globals,
+    ctx,
+    "load_workflow",
+    crate::tools::artifacts::load_workflow
+  );
+  register_sync!(
+    lua,
+    globals,
+    ctx,
+    "list_context_shards",
+    crate::tools::artifacts::list_context_shards
+  );
+  register_sync!(
+    lua,
+    globals,
+    ctx,
+    "load_context_shard",
+    crate::tools::artifacts::load_context_shard
+  );
 
   // Register web tools
   register_async!(
@@ -430,6 +458,10 @@ _t.preview_anchor_edits = preview_anchor_edits
 _t.load_skill = load_skill
 _t.list_skills = list_skills
 _t.load_skill_asset = load_skill_asset
+_t.list_workflows = list_workflows
+_t.load_workflow = load_workflow
+_t.list_context_shards = list_context_shards
+_t.load_context_shard = load_context_shard
 _t.glob = glob
 _t.search_text = search_text
 _t.outline = outline
@@ -470,6 +502,18 @@ function list_skills()
 end
 function load_skill_asset(root, path)
   return _t.load_skill_asset({root=root, path=path})
+end
+function list_workflows()
+  return _t.list_workflows()
+end
+function load_workflow(name)
+  return _t.load_workflow({name=name})
+end
+function list_context_shards()
+  return _t.list_context_shards()
+end
+function load_context_shard(name)
+  return _t.load_context_shard({name=name})
 end
 function glob(pattern)
   local ok, err = _t.glob({pattern=pattern})
@@ -832,10 +876,37 @@ mod tests {
       "---\nname: my_test_skill\ndescription: A test skill for Lua\n---\nHello from skill body!",
     )
     .unwrap();
+    let oversized_skill_dir = temp.join(".ogent/skills/oversized_skill");
+    std::fs::create_dir_all(&oversized_skill_dir).unwrap();
+    std::fs::write(
+      oversized_skill_dir.join("SKILL.md"),
+      format!(
+        "---\nname: oversized_skill\ndescription: Too large\n---\n{}",
+        "x".repeat(25 * 1024)
+      ),
+    )
+    .unwrap();
 
     let asset_dir = skill_dir.join("references");
     std::fs::create_dir_all(&asset_dir).unwrap();
     std::fs::write(asset_dir.join("MANUAL.md"), "This is MANUAL content.").unwrap();
+
+    let workflows_dir = temp.join(".ogent/workflows");
+    std::fs::create_dir_all(&workflows_dir).unwrap();
+    std::fs::write(
+      workflows_dir.join("implement.md"),
+      "---\nname: implement\ndescription: Implementation workflow\n---\n# Implement\nRun the implementation workflow.",
+    )
+    .unwrap();
+
+    let context_dir = temp.join(".ogent/context");
+    std::fs::create_dir_all(&context_dir).unwrap();
+    std::fs::write(
+      context_dir.join("lua-runtime.md"),
+      "---\nname: lua-runtime\ndescription: Lua runtime facts\n---\n# Lua Runtime\nKeep exec and eval as the only model tools.",
+    )
+    .unwrap();
+    std::fs::write(context_dir.join("too-big.md"), "x".repeat(25 * 1024)).unwrap();
 
     let workspace = Workspace::from_root(temp.clone());
     let skill_store = Arc::new(crate::skills::SkillStore::new(workspace.root()));
@@ -880,6 +951,64 @@ mod tests {
     assert!(load_res.contains("skill name="));
     assert!(load_res.contains("my_test_skill"));
     assert!(load_res.contains("Hello from skill body!"));
+
+    // Oversized loaded prompt artifacts fail loudly instead of being silently
+    // clipped by the generic Lua output cap.
+    let oversized_skill_res = exec(
+      ctx.clone(),
+      "local res, err = load_skill('oversized_skill'); return err",
+    )
+    .await
+    .unwrap();
+    assert!(oversized_skill_res.contains("exceeds max loaded artifact size"));
+
+    // Test workflow discovery/loading.
+    let list_workflows_res = exec(
+      ctx.clone(),
+      "local res, err = list_workflows(); if not res then error(err) end; return res",
+    )
+    .await
+    .unwrap();
+    assert!(list_workflows_res.contains("implement"));
+    assert!(list_workflows_res.contains("Implementation workflow"));
+
+    let load_workflow_res = exec(
+      ctx.clone(),
+      "local res, err = load_workflow('implement'); if not res then error(err) end; return res",
+    )
+    .await
+    .unwrap();
+    assert!(load_workflow_res.contains("<workflow name="));
+    assert!(load_workflow_res.contains("# Implement"));
+
+    // Test context shard discovery/loading.
+    let list_context_res = exec(
+      ctx.clone(),
+      "local res, err = list_context_shards(); if not res then error(err) end; return res",
+    )
+    .await
+    .unwrap();
+    assert!(list_context_res.contains("lua-runtime"));
+    assert!(list_context_res.contains("Lua runtime facts"));
+    assert!(list_context_res.contains("too-big"));
+    assert!(list_context_res.contains("Loadable"));
+
+    let load_context_res = exec(
+      ctx.clone(),
+      "local res, err = load_context_shard('lua-runtime'); if not res then error(err) end; return res",
+    )
+    .await
+    .unwrap();
+    assert!(load_context_res.contains("<context_shard name="));
+    assert!(load_context_res.contains("Keep exec and eval as the only model tools."));
+
+    let oversized_context_res = exec(
+      ctx.clone(),
+      "local res, err = load_context_shard('too-big'); return err",
+    )
+    .await
+    .unwrap();
+    assert!(oversized_context_res.contains("exceeds max loaded artifact size"));
 
     // Test load_skill_asset(root, path)
     let load_asset_code = format!(

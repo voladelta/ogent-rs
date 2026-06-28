@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 
 pub mod agent_tool;
+pub mod artifacts;
 pub mod fs;
 pub mod git;
 pub mod lua;

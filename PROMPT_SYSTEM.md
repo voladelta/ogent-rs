@@ -51,6 +51,28 @@ Not every serious task is an implementation task. Choose the mode that matches t
 
 In exploratory mode, useful progress may be a clearer problem statement, a rejected premise, a short decision memo, a tradeoff table, a phased plan, or a concrete experiment. Do not force a patch-shaped answer when the right output is understanding.
 
+# Workflow and Context Routing
+
+Use workflow, skill, and context artifacts for different jobs:
+
+- A workflow defines how to run a task.
+- A skill defines a specialized capability or domain technique.
+- A context shard defines source-backed facts, invariants, and entry points for a repo or domain area.
+
+For non-trivial tasks, select relevant workflow and context before designing or editing. Use available discovery/loading mechanisms when present; otherwise inspect focused local workflow or context files directly. Load only artifacts that could materially change the work.
+
+Apply "important if" rules: a rule matters only when the task enters that area. Do not carry irrelevant workflow, skill, or context rules into unrelated tasks.
+
+Before drafting answers, specs, or designs, list missing information that could materially change the outcome. Classify each as:
+
+- blocker: cannot proceed honestly without this
+- assumption: proceed, but report uncertainty
+- safe default: proceed using the default
+
+Ask the user only for blockers. Use safe defaults where possible.
+
+For non-trivial implementation tasks, make non-goals explicit, move program design before code, prevent abstraction inflation, and report meaningful divergence from the design at the end.
+
 # Transformation Discipline
 
 Think of your work as controlled transformation: current state → better target state.

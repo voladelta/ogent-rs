@@ -19,13 +19,17 @@ pub fn load_skill(ctx: ToolContext, args: &str) -> Result<String> {
   let args: LoadSkillArgs = parse_args(args)?;
   require_nonempty(&args.name, "name")?;
   let skill = ctx.skill_store.load_skill(&args.name)?;
-  Ok(crate::skills::format_loaded_skill(&skill))
+  let formatted = crate::skills::format_loaded_skill(&skill);
+  crate::tools::artifacts::ensure_prompt_artifact_fits("skill", &args.name, &formatted)?;
+  Ok(formatted)
 }
 
 pub fn list_skills(ctx: ToolContext, _args: &str) -> Result<String> {
   let infos = ctx.skill_store.discover_skills();
   if infos.is_empty() {
-    return Ok("# Available Skills\nNo skills found.".to_string());
+    let out = "# Available Skills\nNo skills found.".to_string();
+    crate::tools::artifacts::ensure_prompt_output_fits("skill list", &out)?;
+    return Ok(out);
   }
 
   let mut out = String::new();
@@ -44,7 +48,9 @@ pub fn list_skills(ctx: ToolContext, _args: &str) -> Result<String> {
     out.push('\n');
   }
 
-  Ok(out.trim_end().to_string())
+  let out = out.trim_end().to_string();
+  crate::tools::artifacts::ensure_prompt_output_fits("skill list", &out)?;
+  Ok(out)
 }
 
 pub fn load_skill_asset(ctx: ToolContext, args: &str) -> Result<String> {

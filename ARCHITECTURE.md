@@ -32,6 +32,7 @@ User prompt
                      ├─> git_status, git_diff, git_changes, git_show, git_log
                      ├─> web_search, web_read
                      ├─> list_skills, load_skill
+                     ├─> list_workflows, load_workflow, list_context_shards, load_context_shard
                      └─> agent{...}, parallel{...}   ← spawns subagents
 ```
 
@@ -153,7 +154,7 @@ top-level model tools (`Exec`, `Eval`), `LuaToolRequest` parses the schema argum
 **`agent_tools()`** returns the two `Tool` schemas sent to the LLM: `exec` and `eval`.
 These are defined explicitly in `tools/lua.rs`.
 
-Each tool module (`fs`, `git`, `repo`, `shell`, `skills`, `web`) exports its functions as
+Each tool module (`artifacts`, `fs`, `git`, `repo`, `shell`, `skills`, `web`) exports its functions as
 `pub fn` or `pub async fn`. They are not registered in a central registry — instead,
 `tools/lua.rs` registers them directly into the Lua sandbox as globals.
 
@@ -255,10 +256,24 @@ error.
 ### [`src/tools/skills.rs`](src/tools/skills.rs)
 
 `list_skills`, `load_skill`, `load_skill_asset` — delegates to `src/skills.rs`.
+`list_skills` and `load_skill` return complete prompt content or error if the output exceeds
+the prompt artifact size limit.
 
 `load_skill_asset` reads only inside discovered skill roots. It canonicalizes the skill root
 and requested asset path before the boundary check, so `..` traversal and symlink escapes are
 rejected before reading.
+
+### [`src/tools/artifacts.rs`](src/tools/artifacts.rs)
+
+Workflow and context shard tools: `list_workflows`, `load_workflow`, `list_context_shards`,
+`load_context_shard`.
+
+Workflows are loaded by name from `.ogent/workflows/` and `~/.ogent/workflows/`. Context
+shards are loaded by name from `.ogent/context/` and `~/.ogent/context/`. Names come from
+frontmatter `name` or the Markdown file stem. Artifact roots are resolved through
+`Workspace::readable_path`, so workspace symlink escapes are rejected. Lists and loads are
+complete-or-error: oversized prompt outputs return an error asking the agent to narrow or split
+the artifacts instead of silently truncating.
 
 ### [`src/workspace.rs`](src/workspace.rs)
 
@@ -337,8 +352,9 @@ of the run.
  ```
 
 Skills are Markdown files. `list_skills()` returns a formatted directory of all discovered
-skills. `load_skill(name)` reads and returns the file content. Skills are lazy — nothing
-is loaded or injected at startup.
+skills. `list_skills()` and `load_skill(name)` return complete prompt content or error if the
+output is too large to fit the prompt artifact limit. Skills are lazy — nothing is loaded or
+injected at startup.
 
 ### [`src/prompts.rs`](src/prompts.rs)
 
@@ -414,6 +430,7 @@ Two resolution modes exist: **Write mode** (`workspace_path`) restricts to `work
 | Workspace path validation | [src/workspace.rs](src/workspace.rs) | [src/tools/fs.rs](src/tools/fs.rs) |
 | System prompt and messages | [src/prompts.rs](src/prompts.rs) | PROMPT_SYSTEM.md |
 | Skills discovery and loading | [src/skills.rs](src/skills.rs) | [src/tools/skills.rs](src/tools/skills.rs) |
+| Workflow and context shard loading | [src/tools/artifacts.rs](src/tools/artifacts.rs) | [src/tools/lua.rs](src/tools/lua.rs) |
 | Session persistence | [src/session.rs](src/session.rs) | [src/workspace.rs](src/workspace.rs) |
 | LLM HTTP client | [src/client.rs](src/client.rs) | [src/providers.rs](src/providers.rs), [src/sse.rs](src/sse.rs) |
 | Config loading | [src/config.rs](src/config.rs) | — |

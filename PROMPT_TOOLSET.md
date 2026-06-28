@@ -365,13 +365,13 @@ Returns structured commit history for a set of paths.
 
 #### `list_skills()`
 Lists all available skill prompt templates from configured repo and home skill roots (`.skills/`, `.agents/skills/`, `.ogent/skills/`, `~/.agents/skills/`, and `~/.ogent/skills/`).
-- **Returns**: `(markdown_string, nil)` or `(nil, error)`
+- **Returns**: `(markdown_string, nil)` or `(nil, error)`. Lists return complete content or error; they are not silently truncated.
 
 #### `load_skill(name)`
 Loads a skill's prompt template.
 - **Parameters** (positional):
   - `name` (string): The name of the skill.
-- **Returns**: `(skill_body_string, nil)` or `(nil, error)`
+- **Returns**: `(skill_body_string, nil)` or `(nil, error)`. Loaded prompt artifacts return complete content or error; they are not silently truncated.
 
 #### `load_skill_asset(root, path)`
 Securely reads an asset file inside a skill's directory (e.g. reference manual).
@@ -382,7 +382,31 @@ Securely reads an asset file inside a skill's directory (e.g. reference manual).
 
 ---
 
-### 5. Web Search & Integration
+### 5. Workflow & Context Loading
+
+#### `list_workflows()`
+Lists workflow documents from repo and home workflow roots (`.ogent/workflows/` and `~/.ogent/workflows/`).
+- **Returns**: `(markdown_string, nil)` or `(nil, error)`. Lists return complete content or error; they are not silently truncated.
+
+#### `load_workflow(name)`
+Loads a workflow document by name.
+- **Parameters** (positional):
+  - `name` (string): The workflow name, from frontmatter `name` or the file stem.
+- **Returns**: `(workflow_string, nil)` or `(nil, error)`. Loaded workflows return complete content or error; oversized workflows must be split.
+
+#### `list_context_shards()`
+Lists context shard documents from repo and home context roots (`.ogent/context/` and `~/.ogent/context/`).
+- **Returns**: `(markdown_string, nil)` or `(nil, error)`. Lists return complete content or error; they are not silently truncated.
+
+#### `load_context_shard(name)`
+Loads a context shard by name.
+- **Parameters** (positional):
+  - `name` (string): The context shard name, from frontmatter `name` or the file stem.
+- **Returns**: `(context_shard_string, nil)` or `(nil, error)`. Loaded context shards return complete content or error; oversized shards must be split.
+
+---
+
+### 6. Web Search & Integration
 
 #### `web_search{query=..., num_results=..., type=...}`
 Queries Exa search for highlights and excerpts.
@@ -407,7 +431,7 @@ Queries Exa specifically for code snippets, library details, or API signatures. 
 
 ---
 
-### 6. Subagent Workflows & DSL
+### 7. Subagent Workflows & DSL
 
 #### `task_update(status, summary)`
 Sends a task status or progress update message. In non-verbose mode, these updates are printed directly to standard output, allowing progress monitoring of complex orchestrations.
