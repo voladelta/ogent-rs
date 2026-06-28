@@ -78,7 +78,9 @@ The outer LLM agent loop is strictly limited to exactly two tools:
 * `exec`: Executes a stateless, one-off Lua 5.5 script.
 * `eval`: Executes a stateful Lua 5.5 script within the persistent session (retains globals/functions).
 
-Within the Lua sandbox, scripts invoke workspace operations via global functions: filesystem editing (`read_file`, `read_lines`, `write_file`, `apply_anchor_edits`, `preview_anchor_edits`), repo exploration (`repo_map`, `glob`, `search_text`, `outline` for Rust/Go/Python files), shell, structured git operations (`git_status`, `git_diff`, `git_changes`, `git_show`, `git_log`), web search, skills loading, and subagent DSL (`agent`, `parallel`, `task_update`). See PROMPT_TOOLSET.md for the full API.
+Within the Lua sandbox, scripts invoke workspace operations via global functions: filesystem editing (`read_file`, `read_lines`, `write_file`, `apply_anchor_edits`, `preview_anchor_edits`), repo exploration (`repo_map`, `glob`, `search_text`, `outline` for Rust/Go/Python files), shell, structured git operations (`git_status`, `git_diff`, `git_changes`, `git_show`, `git_log`), web search, skills loading, workflow/context loading (`list_workflows`, `load_workflow`, `list_context_shards`, `load_context_shard`), and subagent DSL (`agent`, `parallel`, `task_update`). See PROMPT_TOOLSET.md for the full API.
+
+Workflows live in `.ogent/workflows/` or `~/.ogent/workflows/`; context shards live in `.ogent/context/` or `~/.ogent/context/`. These prompt artifacts return complete content or an error rather than silently truncating.
 
 
 ---
