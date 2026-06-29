@@ -33,6 +33,7 @@ User prompt
                      ├─> web_search, web_read
                      ├─> list_skills, load_skill
                      ├─> list_workflows, load_workflow, list_context_shards, load_context_shard
+                     ├─> list_toolsets, load_toolset
                      └─> agent{...}, parallel{...}   ← spawns subagents
 ```
 
@@ -265,8 +266,8 @@ rejected before reading.
 
 ### [`src/tools/artifacts.rs`](src/tools/artifacts.rs)
 
-Workflow and context shard tools: `list_workflows`, `load_workflow`, `list_context_shards`,
-`load_context_shard`.
+Workflow, context shard, and toolset guide tools: `list_workflows`, `load_workflow`,
+`list_context_shards`, `load_context_shard`, `list_toolsets`, `load_toolset`.
 
 Workflows are loaded by name from `.ogent/workflows/` and `~/.ogent/workflows/`. Context
 shards are loaded by name from `.ogent/context/` and `~/.ogent/context/`. Names come from
@@ -274,6 +275,11 @@ frontmatter `name` or the Markdown file stem. Artifact roots are resolved throug
 `Workspace::readable_path`, so workspace symlink escapes are rejected. Lists and loads are
 complete-or-error: oversized prompt outputs return an error asking the agent to narrow or split
 the artifacts instead of silently truncating.
+
+Toolset guides are fixed built-in prompt artifacts (`core`, `git`, `write`, and `subagent`).
+The runtime injects only `core` by default; workflows can ask the agent to load additional
+guides with `load_toolset(name)` when the task enters that capability area. Toolset guide loads
+use the same complete-or-error prompt artifact size checks.
 
 ### [`src/workspace.rs`](src/workspace.rs)
 
@@ -361,16 +367,18 @@ injected at startup.
 Assembles message lists for agents.
 
 `build_initial_messages(task)` returns the root agent's message list:
-`[system: PROMPT_SYSTEM, user: PROMPT_TOOLSET, user: PROMPT_COLGREP, user: task]`.
+`[system: PROMPT_SYSTEM, user: PROMPT_TOOLSET_CORE, user: PROMPT_COLGREP, user: task]`.
 
 `build_subagent_messages(workspace, role, task)` returns a subagent's message list:
-`[system: PROMPT_SYSTEM, user: role_prompt, user: PROMPT_TOOLSET, user: PROMPT_COLGREP, user: task]`.
+`[system: PROMPT_SYSTEM, user: role_prompt, user: PROMPT_TOOLSET_CORE, user: PROMPT_COLGREP, user: task]`.
 
 `load_subagent_role(workspace, role)` resolves the role prompt file from `.ogent/`, workspace
 root, or `~/.ogent/`, in that order. Falls back to the embedded `PROMPT_ROLE_GENERIC.md`.
 
-`PROMPT_SYSTEM`, `PROMPT_TOOLSET`, `PROMPT_COLGREP`, and `PROMPT_ROLE_GENERIC` are embedded
-at compile time via `include_str!`.
+`PROMPT_SYSTEM`, `PROMPT_COLGREP`, `PROMPT_ROLE_GENERIC`, and the prompt toolset shard files
+are embedded at compile time via `include_str!`. Runtime messages inject only
+`PROMPT_TOOLSET_CORE`; `PROMPT_TOOLSET_GIT`, `PROMPT_TOOLSET_WRITE`, and
+`PROMPT_TOOLSET_SUBAGENT` are available through `load_toolset(name)`.
 
 ### [`src/config.rs`](src/config.rs)
 

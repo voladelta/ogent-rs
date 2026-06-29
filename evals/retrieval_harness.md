@@ -31,7 +31,7 @@ Questions:
 
 Required rubric:
 
-1. Q1 must name `src/prompts.rs`, `build_initial_messages`, and all three included prompt constants: `PROMPT_SYSTEM`, `PROMPT_TOOLSET`, `PROMPT_COLGREP`.
+1. Q1 must name `src/prompts.rs`, `build_initial_messages`, and the injected prompt constants: `PROMPT_SYSTEM`, `PROMPT_TOOLSET_CORE`, and `PROMPT_COLGREP`. It must also mention that `PROMPT_TOOLSET_GIT`, `PROMPT_TOOLSET_WRITE`, and `PROMPT_TOOLSET_SUBAGENT` are loadable on demand through `load_toolset(name)`.
 2. Q2 must name the root persistence call site in `src/main.rs`, must state that subagents in `src/tools/lua.rs` call `run_loop` but do not call `persist`, and must not describe `--temp` as the root-only invariant.
 3. Q3 must name `src/tools/lua.rs`, `run_lua_vm_async`, and the exact cap `32768`.
 4. Q4 must name both `workspace_path` and `readable_path`, must say filesystem tools call them before I/O, and must explicitly identify **symlink escape outside the workspace** as the escape case. Answers that mention only absolute paths or `..` traversal fail Q4.

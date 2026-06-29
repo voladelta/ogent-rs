@@ -1,5 +1,10 @@
 # Lua Toolset Guide
 
+This repository-only file is a developer and offline review reference. It is not embedded as a
+runtime prompt artifact. Runtime prompt assembly injects `PROMPT_TOOLSET_CORE.md` by default;
+the agent loads `PROMPT_TOOLSET_GIT.md`, `PROMPT_TOOLSET_WRITE.md`, and
+`PROMPT_TOOLSET_SUBAGENT.md` on demand with `load_toolset(name)`.
+
 You execute all workspace operations by writing Lua 5.5 code inside either the `exec` (stateless, one-off) or `eval` (stateful, persistent session) tools. You DO NOT call tools via JSON schema; instead, you write Lua scripts that call the registered global functions.
 
 ## Tool Selection: `exec` vs `eval`
@@ -382,7 +387,24 @@ Securely reads an asset file inside a skill's directory (e.g. reference manual).
 
 ---
 
-### 5. Workflow & Context Loading
+### 5. Toolset Guide Loading
+
+The default prompt includes only the core toolset guide. Load extra guides on demand before
+using capability areas that are not documented in core.
+
+#### `list_toolsets()`
+Lists built-in toolset guides.
+- **Returns**: `(markdown_string, nil)` or `(nil, error)`. Lists return complete content or error; they are not silently truncated.
+
+#### `load_toolset(name)`
+Loads a built-in toolset guide by name.
+- **Parameters** (positional):
+  - `name` (string): One of `core`, `git`, `write`, or `subagent`. Filename-style names such as `PROMPT_TOOLSET_WRITE.md` also work.
+- **Returns**: `(toolset_string, nil)` or `(nil, error)`. Loaded toolsets return complete content or error; oversized guides must be split.
+
+---
+
+### 6. Workflow & Context Loading
 
 #### `list_workflows()`
 Lists workflow documents from repo and home workflow roots (`.ogent/workflows/` and `~/.ogent/workflows/`).
@@ -406,7 +428,7 @@ Loads a context shard by name.
 
 ---
 
-### 6. Web Search & Integration
+### 7. Web Search & Integration
 
 #### `web_search{query=..., num_results=..., type=...}`
 Queries Exa search for highlights and excerpts.
@@ -431,7 +453,7 @@ Queries Exa specifically for code snippets, library details, or API signatures. 
 
 ---
 
-### 7. Subagent Workflows & DSL
+### 8. Subagent Workflows & DSL
 
 #### `task_update(status, summary)`
 Sends a task status or progress update message. In non-verbose mode, these updates are printed directly to standard output, allowing progress monitoring of complex orchestrations.

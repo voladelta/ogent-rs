@@ -73,7 +73,10 @@ reviewing the stdout when behavior changes.
 Run this harness after changes to:
 
 - `PROMPT_SYSTEM.md`
-- `PROMPT_TOOLSET.md`
+- `PROMPT_TOOLSET_CORE.md`
+- `PROMPT_TOOLSET_GIT.md`
+- `PROMPT_TOOLSET_WRITE.md`
+- `PROMPT_TOOLSET_SUBAGENT.md`
 - `PROMPT_COLGREP.md`
 - tool result formatting
 - search, outline, git, shell, or Lua tool behavior

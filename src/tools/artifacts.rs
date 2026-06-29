@@ -19,6 +19,40 @@ enum ArtifactKind {
   ContextShard,
 }
 
+struct ToolsetGuide {
+  name: &'static str,
+  filename: &'static str,
+  description: &'static str,
+  content: &'static str,
+}
+
+const TOOLSET_GUIDES: &[ToolsetGuide] = &[
+  ToolsetGuide {
+    name: "core",
+    filename: "PROMPT_TOOLSET_CORE.md",
+    description: "Always-loaded core Lua execution, read-only retrieval, prompt artifact, shell, and web guide.",
+    content: crate::prompts::PROMPT_TOOLSET_CORE,
+  },
+  ToolsetGuide {
+    name: "git",
+    filename: "PROMPT_TOOLSET_GIT.md",
+    description: "Structured git status, diff, change, show, and log guide.",
+    content: crate::prompts::PROMPT_TOOLSET_GIT,
+  },
+  ToolsetGuide {
+    name: "write",
+    filename: "PROMPT_TOOLSET_WRITE.md",
+    description: "Filesystem write and anchor-edit guide.",
+    content: crate::prompts::PROMPT_TOOLSET_WRITE,
+  },
+  ToolsetGuide {
+    name: "subagent",
+    filename: "PROMPT_TOOLSET_SUBAGENT.md",
+    description: "Subagent, parallel, and task update guide.",
+    content: crate::prompts::PROMPT_TOOLSET_SUBAGENT,
+  },
+];
+
 impl ArtifactKind {
   fn singular(self) -> &'static str {
     match self {
@@ -127,6 +161,39 @@ pub fn list_context_shards(ctx: ToolContext, _args: &str) -> Result<String> {
 
 pub fn load_context_shard(ctx: ToolContext, args: &str) -> Result<String> {
   load_artifact(ctx, args, ArtifactKind::ContextShard)
+}
+
+pub fn list_toolsets(_ctx: ToolContext, _args: &str) -> Result<String> {
+  let mut out = String::new();
+  writeln!(out, "# Available Toolsets")?;
+  writeln!(out, "Use `load_toolset(name)` to load one.\n")?;
+
+  for guide in TOOLSET_GUIDES {
+    writeln!(out, "## {}", guide.name)?;
+    writeln!(out, "- **Path**: `{}`", guide.filename)?;
+    writeln!(out, "- **Description**: {}", guide.description)?;
+    writeln!(out, "- **Bytes**: {}", guide.content.len())?;
+    out.push('\n');
+  }
+
+  let out = out.trim_end().to_string();
+  ensure_prompt_output_fits("Available Toolsets", &out)?;
+  Ok(out)
+}
+
+pub fn load_toolset(_ctx: ToolContext, args: &str) -> Result<String> {
+  let args: LoadArtifactArgs = parse_args(args)?;
+  require_nonempty(&args.name, "name")?;
+
+  let requested = canonical_toolset_name(&args.name);
+  let guide = TOOLSET_GUIDES
+    .iter()
+    .find(|guide| guide.name == requested)
+    .ok_or_else(|| anyhow::anyhow!("toolset {} not found", args.name))?;
+
+  let formatted = format_loaded_toolset(guide);
+  ensure_prompt_artifact_fits("toolset", guide.name, &formatted)?;
+  Ok(formatted)
 }
 
 fn list_artifacts(ctx: ToolContext, kind: ArtifactKind) -> Result<String> {
@@ -282,6 +349,29 @@ fn xml_escape(s: &str) -> String {
     }
   }
   out
+}
+
+fn canonical_toolset_name(name: &str) -> String {
+  let mut normalized = name.trim().to_ascii_lowercase();
+  if let Some(stripped) = normalized.strip_suffix(".md") {
+    normalized = stripped.to_string();
+  }
+  for prefix in ["prompt_toolset_", "prompt-toolset-", "toolset_", "toolset-"] {
+    if let Some(stripped) = normalized.strip_prefix(prefix) {
+      normalized = stripped.to_string();
+      break;
+    }
+  }
+  normalized.replace(['_', '-'], "")
+}
+
+fn format_loaded_toolset(guide: &ToolsetGuide) -> String {
+  format!(
+    "<toolset name=\"{}\" path=\"{}\">\n{}\n</toolset>",
+    xml_escape(guide.name),
+    xml_escape(guide.filename),
+    guide.content
+  )
 }
 
 fn format_loaded_artifact(kind: ArtifactKind, artifact: &LoadedArtifact) -> String {

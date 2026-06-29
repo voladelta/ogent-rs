@@ -423,6 +423,20 @@ fn register_tools_in_lua(lua: &Lua, ctx: ToolContext) -> Result<()> {
     "load_context_shard",
     crate::tools::artifacts::load_context_shard
   );
+  register_sync!(
+    lua,
+    globals,
+    ctx,
+    "list_toolsets",
+    crate::tools::artifacts::list_toolsets
+  );
+  register_sync!(
+    lua,
+    globals,
+    ctx,
+    "load_toolset",
+    crate::tools::artifacts::load_toolset
+  );
 
   // Register web tools
   register_async!(
@@ -462,6 +476,8 @@ _t.list_workflows = list_workflows
 _t.load_workflow = load_workflow
 _t.list_context_shards = list_context_shards
 _t.load_context_shard = load_context_shard
+_t.list_toolsets = list_toolsets
+_t.load_toolset = load_toolset
 _t.glob = glob
 _t.search_text = search_text
 _t.outline = outline
@@ -514,6 +530,12 @@ function list_context_shards()
 end
 function load_context_shard(name)
   return _t.load_context_shard({name=name})
+end
+function list_toolsets()
+  return _t.list_toolsets()
+end
+function load_toolset(name)
+  return _t.load_toolset({name=name})
 end
 function glob(pattern)
   local ok, err = _t.glob({pattern=pattern})
@@ -780,6 +802,24 @@ mod tests {
     let res = exec(
       ctx,
       "local content, err = read_file('Cargo.toml', 0, 100); return content:find('ogent') ~= nil",
+    )
+    .await
+    .unwrap();
+    assert!(res.contains("true"), "Result was: {}", res);
+  }
+
+  #[tokio::test]
+  async fn test_toolset_guides_load_from_lua() {
+    let ctx = test_context();
+    let res = exec(
+      ctx,
+      r##"
+        local list, err = list_toolsets()
+        if not list then error(err) end
+        local guide, err = load_toolset("PROMPT_TOOLSET_WRITE.md")
+        if not guide then error(err) end
+        return list:find("write") ~= nil and guide:find("# Lua Toolset Write") ~= nil
+      "##,
     )
     .await
     .unwrap();

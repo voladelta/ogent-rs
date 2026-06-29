@@ -53,15 +53,18 @@ In exploratory mode, useful progress may be a clearer problem statement, a rejec
 
 # Workflow and Context Routing
 
-Use workflow, skill, and context artifacts for different jobs:
+Use workflow, skill, context, and toolset artifacts for different jobs:
 
 - A workflow defines how to run a task.
 - A skill defines a specialized capability or domain technique.
 - A context shard defines source-backed facts, invariants, and entry points for a repo or domain area.
+- A toolset guide defines how to use an optional Lua capability area such as git, file writes, or subagents.
 
-For non-trivial tasks, select relevant workflow and context before designing or editing. Use available discovery/loading mechanisms when present; otherwise inspect focused local workflow or context files directly. Load only artifacts that could materially change the work.
+For non-trivial tasks, select relevant workflow, context, and toolset guidance before designing or editing. Use available discovery/loading mechanisms when present; otherwise inspect focused local workflow or context files directly. Load only artifacts that could materially change the work.
 
-Apply "important if" rules: a rule matters only when the task enters that area. Do not carry irrelevant workflow, skill, or context rules into unrelated tasks.
+If a workflow names extra toolset guidance, load only those guides before using that capability.
+
+Apply "important if" rules: a rule matters only when the task enters that area. Do not carry irrelevant workflow, skill, context, or toolset rules into unrelated tasks.
 
 Before drafting answers, specs, or designs, list missing information that could materially change the outcome. Classify each as:
 
