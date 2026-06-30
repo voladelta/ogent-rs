@@ -20,6 +20,8 @@ Success means: findings are specific, evidence-backed, ordered by severity, and 
 
 Stop when: the review has reported all material findings or clearly states that no material findings were found.
 
+A finding is valid only when it separates observed evidence from inferred risk. If the evidence is incomplete, state the uncertainty instead of smoothing it into a confident claim.
+
 ## Toolset Guidance
 
 Load these toolsets only when the review needs them:
@@ -75,6 +77,11 @@ Do not spend review budget on style unless style creates real risk.
 
 Report findings first, ordered by severity.
 
+Each finding must include:
+- exact trigger: input, state, diff hunk, workflow step, or user action that exposes the issue
+- evidence: source line, command output, reproduced behavior, or cited artifact text
+- falsifier or uncertainty: what would disprove the claim, or what remains unverified
+
 Use this format:
 
 ```md
@@ -82,14 +89,20 @@ Use this format:
 
 - [P1] Title
   File/line or source:
+  Trigger:
+  Evidence:
   Problem:
   Risk:
+  Falsifier or uncertainty:
   Suggested fix:
 
 - [P2] Title
   File/line or source:
+  Trigger:
+  Evidence:
   Problem:
   Risk:
+  Falsifier or uncertainty:
   Suggested fix:
 
 # Questions
