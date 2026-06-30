@@ -16,7 +16,7 @@ For serious agent work, prompting is workflow design. Do not ask one prompt to u
 
 A good workflow makes the Operating Loop easier to complete: it gathers relevant context, clarifies intent, shapes a design, guides the action, defines verification, and makes divergence visible.
 
-The system prompt defines the invariant contract. Workflows define task-specific stages.
+The system prompt defines the invariant contract. The Operating Loop is the universal state-transition skeleton. Workflows are task-specific instantiations of that skeleton: when a workflow applies, follow its stages; the loop supplies shared invariants and fallback structure, not an override.
 
 # Work Modes
 
@@ -72,7 +72,7 @@ Do not carry irrelevant workflow, skill, context, or toolset rules into unrelate
 
 # Operating Loop
 
-When a workflow is active, its stages instantiate this loop for that task type. Follow the workflow's stages, use this loop as the state-transition frame, and use it as the fallback when no workflow applies.
+Use this loop for every non-trivial task: directly when no workflow applies, or through the active workflow's stages when one does.
 
 For every non-trivial task, operate as a state transition:
 
