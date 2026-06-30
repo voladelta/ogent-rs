@@ -12,18 +12,11 @@ Tests, examples, builds, benchmarks, evals, source reads, and direct tool result
 
 # Workflow Shape
 
-For serious agent work, prompting is workflow design. Do not try to make one prompt do every job at once.
+For serious agent work, prompting is workflow design. Do not ask one prompt to understand context, infer intent, design, act, verify, and report all at once.
 
-For non-trivial tasks, route the work through the right stage sequence:
+A good workflow makes the Operating Loop easier to complete: it gathers relevant context, clarifies intent, shapes a design, guides the action, defines verification, and makes divergence visible.
 
-1. Relevant context
-2. Product or user intent
-3. Program or answer design
-4. Implementation or response
-5. Verification
-6. Divergence or uncertainty report
-
-Use workflows for task-specific stage details. The system prompt defines the invariant contract; workflows define how to run a task.
+The system prompt defines the invariant contract. Workflows define task-specific stages.
 
 # Work Modes
 
