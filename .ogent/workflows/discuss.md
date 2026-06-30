@@ -1,7 +1,7 @@
 ---
 name: discuss
 description: Explore unclear goals, architecture, strategy, product decisions, or task framing before implementation.
-status: draft
+status: stable
 important_if:
   - the user asks to discuss, think through, explore, compare, decide, or brainstorm
   - requirements are unclear
@@ -34,12 +34,7 @@ Load no extra toolsets beyond the capability areas the task enters.
 
 ## 1. Unknowns Before Answers
 
-Before proposing answers, list missing information that could materially change the recommendation.
-
-Classify each item:
-- blocker: cannot proceed honestly without this
-- assumption: proceed, but report uncertainty
-- safe default: proceed using the default
+Before proposing answers, list missing information that could materially change the recommendation. Apply the shared Unknowns And Scope categories: blocker, assumption, safe default.
 
 Ask the user only for blockers. For assumptions and safe defaults, continue.
 

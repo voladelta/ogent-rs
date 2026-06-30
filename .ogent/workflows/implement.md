@@ -1,7 +1,7 @@
 ---
 name: implement
 description: Make non-trivial code or repo changes with explicit unknowns, non-goals, design, verification, and divergence analysis.
-status: draft
+status: stable
 important_if:
   - the user asks to implement, fix, refactor, wire, add, remove, migrate, or update code
   - the task changes source files, tests, docs, configuration, prompts, workflows, or runtime behavior
@@ -33,12 +33,7 @@ Load no extra toolsets beyond the capability areas the task enters.
 
 ## 1. Unknowns Before Answers
 
-Before drafting a spec, plan, or design, list missing information that could materially change the implementation.
-
-Classify each item:
-- blocker: cannot proceed honestly without this
-- assumption: proceed, but report uncertainty
-- safe default: proceed using the default
+Before drafting a spec, plan, or design, list missing information that could materially change the implementation. Apply the shared Unknowns And Scope categories: blocker, assumption, safe default.
 
 Ask the user only for blockers. For assumptions and safe defaults, continue.
 
@@ -146,13 +141,7 @@ Prefer:
 
 Map success criteria to evidence.
 
-If verification fails, classify the failure before editing again:
-- implementation error
-- contract error
-- context error
-- existing failure
-- verification error
-- scope error
+If verification fails, classify the failure using the shared Evidence And Verification policy before editing again.
 
 Then repair, revise the contract, report PARTIAL, or report BLOCKED.
 

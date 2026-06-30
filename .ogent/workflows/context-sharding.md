@@ -1,7 +1,7 @@
 ---
 name: context-sharding
 description: Extract large files, docs, or codebase areas into compact source-backed context shards.
-status: draft
+status: stable
 important_if:
   - the useful context is too large to load directly
   - future agents will need the same repo knowledge
@@ -49,12 +49,7 @@ Non-goals should prevent broad summaries. Examples:
 
 ## 2. Unknowns Before Extraction
 
-List missing information that could materially change the shard.
-
-Classify each item:
-- blocker: cannot produce a truthful shard without this
-- assumption: proceed, but label the assumption
-- safe default: proceed using the default
+List missing information that could materially change the shard. Apply the shared Unknowns And Scope categories: blocker, assumption, safe default.
 
 Ask the user only for blockers. Use safe defaults where possible.
 

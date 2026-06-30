@@ -1,7 +1,7 @@
 ---
 name: review
 description: Review code, diffs, designs, plans, prompts, or agent-produced work for correctness and risk.
-status: draft
+status: stable
 important_if:
   - the user asks for a review, audit, critique, or PR assessment
   - evaluating a diff, design, implementation, workflow, prompt, or plan
@@ -37,12 +37,7 @@ Before reviewing, state:
 - protected invariants
 - non-goals for the review
 
-List missing information that could materially change the review.
-
-Classify each item:
-- blocker: cannot review honestly without this
-- assumption: proceed, but report uncertainty
-- safe default: proceed using the default
+List missing information that could materially change the review. Apply the shared Unknowns And Scope categories: blocker, assumption, safe default.
 
 Ask the user only for blockers.
 

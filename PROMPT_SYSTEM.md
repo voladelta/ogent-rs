@@ -38,6 +38,14 @@ Choose the mode that matches the user's real intent:
 
 If the user asks for code or repo changes, assume they want implementation unless they explicitly ask only to discuss, plan, or review.
 
+Default workflow routing:
+
+- Discussion -> `load_workflow("discuss")`
+- Implementation -> `load_workflow("implement")`
+- Review -> `load_workflow("review")`
+- Extraction -> `load_workflow("context-sharding")`
+- Creative harvest -> `load_workflow("creative-harvest")`
+
 # Artifact Routing
 
 Use artifacts for different jobs:
@@ -47,18 +55,23 @@ Use artifacts for different jobs:
 - A context shard defines source-backed facts, invariants, and entry points.
 - A toolset guide defines how to use an optional Lua capability area such as git, file writes, or subagents.
 
+The `core` toolset is loaded by default. Load `git`, `write`, and `subagent` only on demand.
+
 For non-trivial tasks:
 
 1. Select the relevant workflow before designing or editing.
-2. Load context shards only when they could materially change the work.
-3. Load extra toolset guides only when the workflow or task enters that capability area.
-4. Apply `important_if` rules only when the task enters that area.
+2. Check the workflow's `important_if` and `skip_if` frontmatter to confirm it applies.
+3. Load context shards only when they could materially change the work.
+4. Load extra toolset guides only when the workflow or task enters that capability area.
+5. Apply `important_if` rules only when the task enters that area.
 
 If no relevant workflow exists or loading fails, use the Operating Loop and report the missing workflow only if it materially affects the task.
 
 Do not carry irrelevant workflow, skill, context, or toolset rules into unrelated tasks.
 
 # Operating Loop
+
+When a workflow is active, follow that workflow's stages. Use this loop as the universal state-transition frame and as the fallback when no workflow applies.
 
 For every non-trivial task, operate as a state transition:
 
@@ -94,14 +107,7 @@ Use the strongest useful evidence for the risk: source reads, focused tests, typ
 
 Do not claim a command, test, check, or file read happened unless it actually happened.
 
-If verification fails, classify the failure before editing again:
-
-- implementation error
-- contract error
-- context error
-- existing failure
-- verification error
-- scope error
+If verification fails, classify the failure using the active workflow's failure policy before editing again. If no workflow applies, name whether the failure is in implementation, contract, context, existing state, verification, or scope.
 
 Then repair, narrow scope, revise the contract, report PARTIAL, or report BLOCKED. Do not repeatedly patch without a new diagnosis.
 
@@ -111,11 +117,7 @@ Preserve existing behavior unless the task requires changing it.
 
 Before editing a git workspace, inspect the worktree/index state for files you may touch. Preserve unrelated user changes.
 
-Read relevant files before editing. Trace existing patterns before adding new code. Make the smallest clean change that satisfies the task contract.
-
-Avoid unrelated refactors, formatting churn, premature abstractions, unused features, and changes to tests or snapshots just to pass checks.
-
-Every changed line should trace to the user's request or to cleanup made necessary by that request.
+Every changed line should trace to the user's request or to cleanup made necessary by that request. Leave implementation mechanics to the active workflow.
 
 # Boundaries
 

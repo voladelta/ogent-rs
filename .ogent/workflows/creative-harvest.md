@@ -1,7 +1,7 @@
 ---
 name: creative-harvest
 description: Generate divergent raw ideas, harvest useful design vectors, then constrain them into usable options.
-status: draft
+status: stable
 important_if:
   - naming
   - UI or product design
@@ -45,12 +45,7 @@ State:
 - non-goals
 - evaluation criteria
 
-If constraints are missing, classify unknowns:
-- blocker
-- assumption
-- safe default
-
-Use safe defaults where possible. Ask only for blockers.
+If constraints are missing, apply the shared Unknowns And Scope categories: blocker, assumption, safe default. Use safe defaults where possible and ask only for blockers.
 
 ## 2. Raw Generation
 
