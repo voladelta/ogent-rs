@@ -21,6 +21,8 @@ Success means: the user has a clearer problem statement, explicit assumptions, t
 
 Stop when: the next decision or action is clear, or a blocker is identified.
 
+Discussion is non-mutating. If the user asks to edit files or proceed with implementation, stop this workflow and switch to implementation.
+
 ## Toolset Guidance
 
 Default to core only.
@@ -37,6 +39,8 @@ Load no extra toolsets beyond the capability areas the task enters.
 Before proposing answers, list missing information that could materially change the recommendation. Apply the shared Unknowns And Scope categories: blocker, assumption, safe default.
 
 Ask the user only for blockers. For assumptions and safe defaults, continue.
+
+If there are no material unknowns, say so briefly and continue. Do not list obvious trivia.
 
 ## 2. Frame The Discussion
 
@@ -105,3 +109,5 @@ Default:
 
 # Smallest Next Step
 ```
+
+Omit sections that would be empty. For short discussions, answer in prose instead of forcing the full template.

@@ -417,7 +417,7 @@ Loads a workflow document by name.
 - **Returns**: `(workflow_string, nil)` or `(nil, error)`. Loaded workflows return complete content or error; oversized workflows must be split.
 
 #### `list_context_shards()`
-Lists context shard documents from repo and home context roots (`.ogent/context/` and `~/.ogent/context/`).
+Lists available context shard documents.
 - **Returns**: `(markdown_string, nil)` or `(nil, error)`. Lists return complete content or error; they are not silently truncated.
 
 #### `load_context_shard(name)`
@@ -425,6 +425,13 @@ Loads a context shard by name.
 - **Parameters** (positional):
   - `name` (string): The context shard name, from frontmatter `name` or the file stem.
 - **Returns**: `(context_shard_string, nil)` or `(nil, error)`. Loaded context shards return complete content or error; oversized shards must be split.
+
+#### `write_context_shard(name, content)`
+Creates or updates one repo-scoped context shard by name.
+- **Parameters** (positional):
+  - `name` (string): The context shard name, using a safe file-stem style identifier.
+  - `content` (string): Complete Markdown shard content.
+- **Returns**: `(message, nil)` or `(nil, error)`. Use this instead of constructing context-shard paths.
 
 ---
 

@@ -6,7 +6,7 @@ You do not call workspace tools through JSON directly; Lua scripts call register
 This core shard covers execution, retrieval, read-only workspace inspection, prompt artifact
 loading, shell, and web tools. Extra guide shards are first-class prompt artifacts:
 
-- Load `write` before mutating files or planning anchored edits.
+- Load `write` before mutating ordinary workspace files or planning anchored edits.
 - Load `git` before inspecting git status, diffs, history, or changed files.
 - Load `subagent` before spawning agents, running parallel Lua tasks, or sending task updates.
 - Runtime toolset artifacts are limited to `core`, `git`, `write`, and `subagent`.
@@ -161,11 +161,16 @@ Loads a workflow by frontmatter `name` or Markdown file stem.
 
 ### `list_context_shards()`
 
-Lists context shards from `.ogent/context/` and `~/.ogent/context/`.
+Lists available context shards.
 
 ### `load_context_shard(name)`
 
 Loads a context shard by frontmatter `name` or Markdown file stem.
+
+### `write_context_shard(name, content)`
+
+Creates or updates one repo-scoped context shard by name. Use this instead of constructing
+context-shard file paths.
 
 ### `list_toolsets()`
 

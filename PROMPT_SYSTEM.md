@@ -42,7 +42,7 @@ Artifact roles:
 
 - A workflow defines how to run a task.
 - A skill defines a specialized capability or domain technique.
-- A context shard defines source-backed facts, invariants, and entry points.
+- A context shard defines repo-local source-backed facts, invariants, and entry points.
 - A toolset guide defines how to use an optional Lua capability area such as git, file writes, or subagents.
 
 The `core` toolset is loaded by default. Load `git`, `write`, and `subagent` only when about to use that capability area.

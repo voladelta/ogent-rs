@@ -11,7 +11,6 @@ skip_if:
   - the task can be answered from one small file
   - the context is only useful once and can be summarized in the final answer
   - the user asked for implementation rather than context extraction
-default_output_dir: .ogent/context
 ---
 
 # Context Sharding Workflow
@@ -25,11 +24,11 @@ Stop when: the shard is written or the missing information is classified as a bl
 ## Toolset Guidance
 
 Load these toolsets only when the shard task needs them:
-- `write`: before writing or updating shard files
+- `write`: only if editing ordinary files outside context-shard creation
 - `git`: when git history, diffs, or changed files are source evidence
 - `subagent`: only when delegating bounded extraction or review work
 
-Use core read tools for source selection and extraction. Load no extra toolsets beyond the capability areas the task enters.
+Use core read tools for source selection and extraction. Use `write_context_shard(name, content)` to create or update the shard. Load no extra toolsets beyond the capability areas the task enters.
 
 ## 1. Define The Consumer
 
@@ -83,9 +82,11 @@ Separate:
 - inferences from multiple sources
 - assumptions that need future verification
 
+Do not present an unsupported claim as a fact. Either tie it to a source path or label it as an inference or assumption.
+
 ## 5. Write The Shard
 
-Write a shard under `.ogent/context/<name>.md`.
+Create or update one shard with `write_context_shard(name, content)`.
 
 Use this template:
 
@@ -112,8 +113,8 @@ What decision this shard helps with.
 
 # Facts
 
-- Source-backed fact.
-- Source-backed fact.
+- Source-backed fact. (`path/to/source`)
+- Source-backed fact. (`path/to/source`)
 
 # Invariants
 
@@ -139,14 +140,14 @@ What decision this shard helps with.
 ## 6. Verify The Shard
 
 Before finishing:
-- re-open the shard
+- re-load the shard with `load_context_shard(name)`
 - check every strong claim against a listed source
 - remove trivia that does not change future work
 - label assumptions plainly
-- confirm the shard is smaller than the source context it replaces
+- confirm the shard is smaller than the source context it replaces and does not copy whole files
 
 Return:
-- shard path
+- shard name
 - sources used
 - blockers, assumptions, and safe defaults
 - remaining uncertainty

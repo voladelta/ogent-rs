@@ -13,6 +13,12 @@ struct LoadArtifactArgs {
   name: String,
 }
 
+#[derive(Deserialize)]
+struct WriteContextShardArgs {
+  name: String,
+  content: String,
+}
+
 #[derive(Clone, Copy)]
 enum ArtifactKind {
   Workflow,
@@ -89,10 +95,10 @@ impl ArtifactKind {
     }
   }
 
-  fn home_dir(self) -> &'static str {
+  fn home_dir(self) -> Option<&'static str> {
     match self {
-      Self::Workflow => ".ogent/workflows",
-      Self::ContextShard => ".ogent/context",
+      Self::Workflow => Some(".ogent/workflows"),
+      Self::ContextShard => None,
     }
   }
 
@@ -101,8 +107,10 @@ impl ArtifactKind {
     if let Ok(repo_root) = ctx.workspace.readable_path(self.repo_dir()) {
       roots.push(repo_root);
     }
-    if std::env::var_os("HOME").is_some() {
-      let home_root = format!("~/{}", self.home_dir());
+    if let Some(home_dir) = self.home_dir()
+      && std::env::var_os("HOME").is_some()
+    {
+      let home_root = format!("~/{}", home_dir);
       if let Ok(home_root) = ctx.workspace.readable_path(&home_root) {
         roots.push(home_root);
       }
@@ -161,6 +169,27 @@ pub fn list_context_shards(ctx: ToolContext, _args: &str) -> Result<String> {
 
 pub fn load_context_shard(ctx: ToolContext, args: &str) -> Result<String> {
   load_artifact(ctx, args, ArtifactKind::ContextShard)
+}
+
+pub fn write_context_shard(ctx: ToolContext, args: &str) -> Result<String> {
+  let args: WriteContextShardArgs = parse_args(args)?;
+  require_nonempty(&args.name, "name")?;
+  require_nonempty(&args.content, "content")?;
+  ensure_prompt_artifact_fits("context shard", &args.name, &args.content)?;
+
+  let filename = context_shard_filename(&args.name)?;
+  let dir = ctx
+    .workspace
+    .workspace_path(ArtifactKind::ContextShard.repo_dir())?;
+  std::fs::create_dir_all(&dir).with_context(|| format!("create {}", dir.display()))?;
+  let path = dir.join(filename);
+  std::fs::write(&path, args.content).with_context(|| format!("write {}", path.display()))?;
+
+  let name = path
+    .file_stem()
+    .and_then(|stem| stem.to_str())
+    .unwrap_or(args.name.trim());
+  Ok(format!("Wrote context shard `{name}`."))
 }
 
 pub fn list_toolsets(_ctx: ToolContext, _args: &str) -> Result<String> {
@@ -337,6 +366,18 @@ fn read_loadable_file(path: &Path) -> Result<String> {
   std::fs::read_to_string(path).with_context(|| format!("read {}", path.display()))
 }
 
+fn context_shard_filename(name: &str) -> Result<String> {
+  let stem = name.trim().strip_suffix(".md").unwrap_or(name.trim());
+  require_nonempty(stem, "name")?;
+  if !stem
+    .chars()
+    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+  {
+    bail!("context shard name must contain only ASCII letters, numbers, '-' or '_'");
+  }
+  Ok(format!("{stem}.md"))
+}
+
 fn xml_escape(s: &str) -> String {
   let mut out = String::with_capacity(s.len());
   for c in s.chars() {
@@ -404,4 +445,30 @@ fn parse_artifact_frontmatter(content: &str) -> (String, String) {
   let fm = parse_frontmatter(content).unwrap_or("");
   let parsed = serde_yaml::from_str::<ArtifactFrontmatter>(fm).unwrap_or_default();
   (parsed.name, parsed.description)
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn context_shards_do_not_have_home_root() {
+    assert_eq!(ArtifactKind::Workflow.home_dir(), Some(".ogent/workflows"));
+    assert_eq!(ArtifactKind::ContextShard.home_dir(), None);
+  }
+
+  #[test]
+  fn context_shard_filename_rejects_path_like_names() {
+    assert_eq!(
+      context_shard_filename("timeout-parser").unwrap(),
+      "timeout-parser.md"
+    );
+    assert_eq!(
+      context_shard_filename("timeout-parser.md").unwrap(),
+      "timeout-parser.md"
+    );
+    assert!(context_shard_filename("../timeout-parser").is_err());
+    assert!(context_shard_filename("timeout/parser").is_err());
+    assert!(context_shard_filename("timeout.parser").is_err());
+  }
 }

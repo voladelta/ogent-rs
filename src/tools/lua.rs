@@ -427,6 +427,13 @@ fn register_tools_in_lua(lua: &Lua, ctx: ToolContext) -> Result<()> {
     lua,
     globals,
     ctx,
+    "write_context_shard",
+    crate::tools::artifacts::write_context_shard
+  );
+  register_sync!(
+    lua,
+    globals,
+    ctx,
     "list_toolsets",
     crate::tools::artifacts::list_toolsets
   );
@@ -476,6 +483,7 @@ _t.list_workflows = list_workflows
 _t.load_workflow = load_workflow
 _t.list_context_shards = list_context_shards
 _t.load_context_shard = load_context_shard
+_t.write_context_shard = write_context_shard
 _t.list_toolsets = list_toolsets
 _t.load_toolset = load_toolset
 _t.glob = glob
@@ -530,6 +538,9 @@ function list_context_shards()
 end
 function load_context_shard(name)
   return _t.load_context_shard({name=name})
+end
+function write_context_shard(name, content)
+  return _t.write_context_shard({name=name, content=content})
 end
 function list_toolsets()
   return _t.list_toolsets()
@@ -1049,6 +1060,36 @@ mod tests {
     .await
     .unwrap();
     assert!(oversized_context_res.contains("exceeds max loaded artifact size"));
+
+    let write_context_res = exec(
+      ctx.clone(),
+      r##"
+        local content = "---\nname: written-shard\ndescription: Written from Lua\n---\n# Written\nThis shard was written by name."
+        local res, err = write_context_shard("written-shard", content)
+        if not res then error(err) end
+        return res
+      "##,
+    )
+    .await
+    .unwrap();
+    assert!(write_context_res.contains("Wrote context shard"));
+    assert!(context_dir.join("written-shard.md").exists());
+
+    let load_written_context_res = exec(
+      ctx.clone(),
+      "local res, err = load_context_shard('written-shard'); if not res then error(err) end; return res",
+    )
+    .await
+    .unwrap();
+    assert!(load_written_context_res.contains("This shard was written by name."));
+
+    let bad_context_name_res = exec(
+      ctx.clone(),
+      "local res, err = write_context_shard('../bad', 'bad'); return err",
+    )
+    .await
+    .unwrap();
+    assert!(bad_context_name_res.contains("must contain only ASCII"));
 
     // Test load_skill_asset(root, path)
     let load_asset_code = format!(

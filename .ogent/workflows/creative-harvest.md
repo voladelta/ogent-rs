@@ -25,6 +25,8 @@ Success means: raw ideas are generated, useful vectors are extracted, weak parts
 
 Stop when: the user has a compact set of usable options or a clear next experiment.
 
+This workflow is for ideation and selection, not implementation. If the task turns into file edits, stop and switch to implementation.
+
 ## Toolset Guidance
 
 Default to core only.
@@ -58,7 +60,7 @@ Rules:
 - do not choose yet
 - do not polish yet
 
-For most tasks, produce 8 to 12 raw options.
+Scale the raw count to the task: 4 to 6 options for narrow decisions, 8 to 12 for broad exploration, and more only when the user asks for breadth.
 
 ## 3. Harvest Vectors
 
@@ -106,6 +108,8 @@ Output format:
 
 # Recommendation Or Next Experiment
 ```
+
+Use all sections only when they help. For small requests, compress the shape instead of forcing empty headings.
 
 ## 6. Non-Goals
 

@@ -25,7 +25,7 @@ Stop when: the target state is reached and verified, or the work is honestly PAR
 ## Toolset Guidance
 
 Load these toolsets before using the corresponding capability:
-- `write`: before mutating files or planning anchored edits
+- `write`: after deciding an edit is needed and before mutating files or preparing anchored edits
 - `git`: before inspecting worktree state, diffs, changed files, history, or commits
 - `subagent`: only before delegating to subagents, running parallel Lua tasks, or sending task updates
 
@@ -74,6 +74,8 @@ Examples:
 
 Use concrete boundaries, not vague warnings.
 
+For small, obvious changes, keep the contract compact. Do not turn the contract into ceremony when the target state and protected invariants are already clear.
+
 ## 3. Program Design Before Code
 
 Before editing files, produce a short design for non-trivial changes.
@@ -87,7 +89,7 @@ Include:
 - expected failure modes
 - what evidence would invalidate the design
 
-Do not implement during this phase unless the task is trivial.
+For narrow changes, the design may be one or two bullets. Do not implement during this phase; once the design is sufficient, proceed.
 
 If invalidating evidence appears while coding, stop and revise the design before continuing.
 
@@ -121,6 +123,8 @@ Implement one coherent unit at a time.
 Rules:
 - read the relevant files before editing
 - trace the existing pattern before adding new code
+- in a git workspace, inspect worktree/index state for files you may touch before editing
+- preserve unrelated user changes
 - preserve existing behavior unless the contract explicitly changes it
 - keep edits scoped to the task
 - avoid unrelated formatting churn
@@ -132,6 +136,8 @@ If the clean fix is larger than expected, say so before expanding scope.
 ## 6. Verification
 
 Run the strongest practical verification available for the change.
+
+Calibrate verification depth to blast radius.
 
 Prefer:
 - focused tests for the changed behavior

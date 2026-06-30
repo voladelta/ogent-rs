@@ -267,10 +267,11 @@ rejected before reading.
 ### [`src/tools/artifacts.rs`](src/tools/artifacts.rs)
 
 Workflow, context shard, and toolset guide tools: `list_workflows`, `load_workflow`,
-`list_context_shards`, `load_context_shard`, `list_toolsets`, `load_toolset`.
+`list_context_shards`, `load_context_shard`, `write_context_shard`, `list_toolsets`,
+`load_toolset`.
 
 Workflows are loaded by name from `.ogent/workflows/` and `~/.ogent/workflows/`. Context
-shards are loaded by name from `.ogent/context/` and `~/.ogent/context/`. Names come from
+shards are repo-local and loaded or written by name only from the repository context store. Names come from
 frontmatter `name` or the Markdown file stem. Artifact roots are resolved through
 `Workspace::readable_path`, so workspace symlink escapes are rejected. Lists and loads are
 complete-or-error: oversized prompt outputs return an error asking the agent to narrow or split
