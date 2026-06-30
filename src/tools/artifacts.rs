@@ -117,6 +117,10 @@ impl ArtifactKind {
     }
     roots
   }
+
+  fn expose_path(self) -> bool {
+    matches!(self, Self::Workflow)
+  }
 }
 
 #[derive(Clone)]
@@ -175,9 +179,23 @@ pub fn write_context_shard(ctx: ToolContext, args: &str) -> Result<String> {
   let args: WriteContextShardArgs = parse_args(args)?;
   require_nonempty(&args.name, "name")?;
   require_nonempty(&args.content, "content")?;
-  ensure_prompt_artifact_fits("context shard", &args.name, &args.content)?;
 
   let filename = context_shard_filename(&args.name)?;
+  let shard_name = filename
+    .strip_suffix(".md")
+    .unwrap_or(&filename)
+    .to_string();
+  let (frontmatter_name, _) = parse_artifact_frontmatter(&args.content);
+  if !frontmatter_name.is_empty() && frontmatter_name != shard_name {
+    bail!("context shard frontmatter name must match requested name");
+  }
+  let formatted = format!(
+    "<context_shard name=\"{}\">\n{}\n</context_shard>",
+    xml_escape(&shard_name),
+    args.content
+  );
+  ensure_prompt_artifact_fits("context shard", &shard_name, &formatted)?;
+
   let dir = ctx
     .workspace
     .workspace_path(ArtifactKind::ContextShard.repo_dir())?;
@@ -185,11 +203,7 @@ pub fn write_context_shard(ctx: ToolContext, args: &str) -> Result<String> {
   let path = dir.join(filename);
   std::fs::write(&path, args.content).with_context(|| format!("write {}", path.display()))?;
 
-  let name = path
-    .file_stem()
-    .and_then(|stem| stem.to_str())
-    .unwrap_or(args.name.trim());
-  Ok(format!("Wrote context shard `{name}`."))
+  Ok(format!("Wrote context shard `{shard_name}`."))
 }
 
 pub fn list_toolsets(_ctx: ToolContext, _args: &str) -> Result<String> {
@@ -238,7 +252,9 @@ fn list_artifacts(ctx: ToolContext, kind: ArtifactKind) -> Result<String> {
   writeln!(out, "Use `{}` to load one.\n", kind.load_function())?;
   for artifact in artifacts {
     writeln!(out, "## {}", artifact.name)?;
-    writeln!(out, "- **Path**: `{}`", artifact.path.to_string_lossy())?;
+    if kind.expose_path() {
+      writeln!(out, "- **Path**: `{}`", artifact.path.to_string_lossy())?;
+    }
     if artifact.description.is_empty() {
       writeln!(out, "- **Description**: ")?;
     } else {
@@ -417,14 +433,24 @@ fn format_loaded_toolset(guide: &ToolsetGuide) -> String {
 
 fn format_loaded_artifact(kind: ArtifactKind, artifact: &LoadedArtifact) -> String {
   let tag = kind.xml_tag();
-  format!(
-    "<{} name=\"{}\" path=\"{}\">\n{}\n</{}>",
-    tag,
-    xml_escape(&artifact.info.name),
-    xml_escape(&artifact.info.path.to_string_lossy()),
-    artifact.content,
-    tag
-  )
+  if kind.expose_path() {
+    format!(
+      "<{} name=\"{}\" path=\"{}\">\n{}\n</{}>",
+      tag,
+      xml_escape(&artifact.info.name),
+      xml_escape(&artifact.info.path.to_string_lossy()),
+      artifact.content,
+      tag
+    )
+  } else {
+    format!(
+      "<{} name=\"{}\">\n{}\n</{}>",
+      tag,
+      xml_escape(&artifact.info.name),
+      artifact.content,
+      tag
+    )
+  }
 }
 
 #[derive(Deserialize, Default)]

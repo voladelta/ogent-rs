@@ -170,7 +170,8 @@ Loads a context shard by frontmatter `name` or Markdown file stem.
 ### `write_context_shard(name, content)`
 
 Creates or updates one repo-scoped context shard by name. Use this instead of constructing
-context-shard file paths.
+context-shard file paths. If the Markdown frontmatter includes `name`, it must match this
+argument.
 
 ### `list_toolsets()`
 

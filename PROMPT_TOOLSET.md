@@ -430,7 +430,7 @@ Loads a context shard by name.
 Creates or updates one repo-scoped context shard by name.
 - **Parameters** (positional):
   - `name` (string): The context shard name, using a safe file-stem style identifier.
-  - `content` (string): Complete Markdown shard content.
+  - `content` (string): Complete Markdown shard content. If frontmatter includes `name`, it must match the `name` argument.
 - **Returns**: `(message, nil)` or `(nil, error)`. Use this instead of constructing context-shard paths.
 
 ---

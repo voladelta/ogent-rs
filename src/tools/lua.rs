@@ -1043,6 +1043,16 @@ mod tests {
     assert!(list_context_res.contains("Lua runtime facts"));
     assert!(list_context_res.contains("too-big"));
     assert!(list_context_res.contains("Loadable"));
+    assert!(
+      !list_context_res.contains("Path"),
+      "Result was: {}",
+      list_context_res
+    );
+    assert!(
+      !list_context_res.contains(".ogent/context"),
+      "Result was: {}",
+      list_context_res
+    );
 
     let load_context_res = exec(
       ctx.clone(),
@@ -1052,6 +1062,16 @@ mod tests {
     .unwrap();
     assert!(load_context_res.contains("<context_shard name="));
     assert!(load_context_res.contains("Keep exec and eval as the only model tools."));
+    assert!(
+      !load_context_res.contains("path="),
+      "Result was: {}",
+      load_context_res
+    );
+    assert!(
+      !load_context_res.contains(".ogent/context"),
+      "Result was: {}",
+      load_context_res
+    );
 
     let oversized_context_res = exec(
       ctx.clone(),
@@ -1090,6 +1110,18 @@ mod tests {
     .await
     .unwrap();
     assert!(bad_context_name_res.contains("must contain only ASCII"));
+
+    let mismatched_context_name_res = exec(
+      ctx.clone(),
+      r##"
+        local content = "---\nname: other-name\ndescription: Mismatch\n---\n# Mismatch\n"
+        local res, err = write_context_shard("requested-name", content)
+        return err
+      "##,
+    )
+    .await
+    .unwrap();
+    assert!(mismatched_context_name_res.contains("frontmatter name must match"));
 
     // Test load_skill_asset(root, path)
     let load_asset_code = format!(

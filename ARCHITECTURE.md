@@ -26,13 +26,14 @@ User prompt
   └─> Agent (turn loop)
         └─> LLM (exec / eval only)
               └─> Lua VM
-                     ├─> read_file, read_lines, write_file, apply_anchor_edits
-                     ├─> preview_anchor_edits, shell, glob, repo_map
+                     ├─> read_file, read_lines, write_file, append_file, file_info
+                     ├─> apply_anchor_edits, preview_anchor_edits, shell, glob, repo_map
                      ├─> search_text, outline
                      ├─> git_status, git_diff, git_changes, git_show, git_log
                      ├─> web_search, web_read
                      ├─> list_skills, load_skill
                      ├─> list_workflows, load_workflow, list_context_shards, load_context_shard
+                     ├─> write_context_shard
                      ├─> list_toolsets, load_toolset
                      └─> agent{...}, parallel{...}   ← spawns subagents
 ```
